@@ -108,55 +108,9 @@ if st.sidebar.button("🚪 Cerrar Sesión"):
 # =====================================================================
 
 
-# === BLOQUE 2. GRÁFICO: ESTADO GENERAL DE PARTIDAS EN PROCESO ===
-st.markdown("### 2. Estado General de Partidas en Proceso")
-
-# Excluimos de la base principal (df) todo lo que ya no está activo
-# (Ajusta estas palabras si en tu Excel están escritas diferente)
-estatus_excluidos = ['RECIBIDA', 'FACTURADA', 'FINALIZADA', 'ENTREGADA', 'CANCELADA']
-df_grafico = df[~df['Estatus'].isin(estatus_excluidos)]
-
-if not df_grafico.empty:
-    col_graf, col_det = st.columns([2, 1])
-    
-    with col_graf:
-        # Agrupamos los datos para el gráfico
-        df_agrupado = df_grafico.groupby(['Fecha de Vencimiento', 'Estatus']).size().reset_index(name='Cantidad de Partidas')
-        
-        # Generamos el gráfico de barras apiladas
-        fig = px.bar(
-            df_agrupado, 
-            x='Fecha de Vencimiento', 
-            y='Cantidad de Partidas', 
-            color='Estatus',
-            barmode='stack',
-            color_discrete_sequence=["#1E88E5", "#64B5F6", "#0D47A1", "#1976D2", "#90CAF9"]
-        )
-        
-        # Hacemos que el gráfico responda a clics
-        grafico_seleccion = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
-        
-    with col_det:
-        st.markdown("📄 **Detalle de Partidas**")
-        
-        # Si el usuario hace clic en una barra, mostramos los detalles
-        if grafico_seleccion and len(grafico_seleccion.selection.points) > 0:
-            # Obtenemos la fecha a la que le hicieron clic
-            fecha_sel = grafico_seleccion.selection.points[0]["x"]
-            
-            # Filtramos la tabla de detalles
-            df_detalle = df_grafico[df_grafico['Fecha de Vencimiento'] == fecha_sel]
-            
-            st.dataframe(
-                df_detalle[['Siniestro', 'Taller', 'Estatus']], 
-                use_container_width=True, 
-                hide_index=True
-            )
-        else:
-            st.info("👆 Haz clic en una barra del gráfico para filtrar la tabla.")
-else:
-    st.success("No hay partidas en proceso en este momento.")
-
+# =====================================================================
+# === [NUEVO ORDEN: CARGA DE DATOS ANTES DEL GRÁFICO] ===
+# =====================================================================
 def obtener_dataframe(nombre_hoja):
     try:
         doc = init_connection()
@@ -198,6 +152,61 @@ df_catalogo = cargar_catalogo()
 df_compras = cargar_compras()
 df_inventario = cargar_inventario()
 df_placas = cargar_placas() 
+
+
+# === BLOQUE 2. GRÁFICO: ESTADO GENERAL DE PARTIDAS EN PROCESO ===
+st.markdown("### 2. Estado General de Partidas en Proceso")
+
+# Excluimos de la base principal (df_completo) todo lo que ya no está activo
+estatus_excluidos = ['RECIBIDA', 'FACTURADA', 'FINALIZADA', 'ENTREGADA', 'CANCELADA']
+
+# SECCIÓN CORREGIDA Y PROTEGIDA: Usa df_completo y verifica que existan las columnas para evitar errores extra
+if not df_completo.empty and 'Estatus' in df_completo.columns and 'Fecha de Vencimiento' in df_completo.columns:
+    df_grafico = df_completo[~df_completo['Estatus'].isin(estatus_excluidos)]
+    
+    if not df_grafico.empty:
+        col_graf, col_det = st.columns([2, 1])
+        
+        with col_graf:
+            # Agrupamos los datos para el gráfico
+            df_agrupado = df_grafico.groupby(['Fecha de Vencimiento', 'Estatus']).size().reset_index(name='Cantidad de Partidas')
+            
+            # Generamos el gráfico de barras apiladas
+            fig = px.bar(
+                df_agrupado, 
+                x='Fecha de Vencimiento', 
+                y='Cantidad de Partidas', 
+                color='Estatus',
+                barmode='stack',
+                color_discrete_sequence=["#1E88E5", "#64B5F6", "#0D47A1", "#1976D2", "#90CAF9"]
+            )
+            
+            # Hacemos que el gráfico responda a clics
+            grafico_seleccion = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+            
+        with col_det:
+            st.markdown("📄 **Detalle de Partidas**")
+            
+            # Si el usuario hace clic en una barra, mostramos los detalles
+            if grafico_seleccion and len(grafico_seleccion.selection.points) > 0:
+                # Obtenemos la fecha a la que le hicieron clic
+                fecha_sel = grafico_seleccion.selection.points[0]["x"]
+                
+                # Filtramos la tabla de detalles
+                df_detalle = df_grafico[df_grafico['Fecha de Vencimiento'] == fecha_sel]
+                
+                st.dataframe(
+                    df_detalle[['Siniestro', 'Taller', 'Estatus']], 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+            else:
+                st.info("👆 Haz clic en una barra del gráfico para filtrar la tabla.")
+    else:
+        st.success("No hay partidas en proceso en este momento.")
+elif not df_completo.empty:
+    st.warning("⚠️ No se pudieron graficar los datos. Verifica que las columnas 'Estatus' y 'Fecha de Vencimiento' existan en el archivo de base de datos.")
+
 
 # INICIALIZACIÓN SEGURA DE VARIABLES
 df_proceso = pd.DataFrame()

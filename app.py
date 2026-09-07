@@ -10,6 +10,7 @@ import datetime
 from fpdf import FPDF
 import plotly.express as px
 import gspread
+import json
 from google.oauth2.service_account import Credentials
 
 warnings.filterwarnings("ignore")
@@ -18,7 +19,7 @@ st.set_page_config(
     page_title="Dashboard PMR - Operación",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded" # Cambiado a expanded para ver el menú
 )
 
 st.markdown("""
@@ -54,12 +55,13 @@ st.markdown("""
 # =====================================================================
 # === [BLOQUE 0: CONEXIÓN TEMPRANA Y SISTEMA DE LOGIN] ===
 # =====================================================================
-SHEET_ID = "10jrOsS054nOatMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
+SHEET_ID = "10jrOsS054n0atMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
 
 @st.cache_resource
 def init_connection():
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-    credenciales = Credentials.from_service_account_file('credentials.json', scopes=scopes)
+    cred_dict = json.loads(st.secrets["google_credentials"])
+    credenciales = Credentials.from_service_account_info(cred_dict, scopes=scopes)
     cliente = gspread.authorize(credenciales)
     return cliente.open_by_key(SHEET_ID)
 
@@ -99,58 +101,32 @@ if not st.session_state['autenticado']:
     
     st.stop() 
 
-st.sidebar.success(f"👤 Operador activo:\n**{st.session_state['usuario_actual']}**")
-if st.sidebar.button("🚪 Cerrar Sesión"):
-    st.session_state['autenticado'] = False
-    st.rerun()
 # =====================================================================
-
-
-# === [BLOQUE 2: ENCABEZADO Y PANEL SUPERIOR FIJO] ===
-ruta_logo = r"C:\Users\dell\OneDrive\PMR\Automatizacion PMR\logo.png"
-
-col1, col2 = st.columns([1.2, 4])
-with col1:
-    if os.path.exists(ruta_logo):
-        st.image(ruta_logo, width=180)
-with col2:
-    st.markdown("<h1 style='text-align: left; margin-top: 30px;'>PMR SERVICIOS AUTOMOTRICES</h1>", unsafe_allow_html=True)
-
-if 'alertas_impresion' in st.session_state and st.session_state['alertas_impresion']:
-    st.markdown("<br>", unsafe_allow_html=True)
-    for alerta in st.session_state['alertas_impresion']:
-        st.warning(alerta)
-    if st.button("✅ Entendido, cerrar avisos"):
-        st.session_state['alertas_impresion'] = []
+# === [BLOQUE RECONSTRUIDO: MENÚ LATERAL Y CONTROLES] ===
+# (Aquí es donde definimos las variables que marcaban el NameError)
+# =====================================================================
+with st.sidebar:
+    st.success(f"👤 Operador activo:\n**{st.session_state['usuario_actual']}**")
+    st.markdown("### 🧭 Navegación")
+    vista_actual = st.radio("Selecciona una vista:", 
+                            ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", 
+                             "🏢 Talleres", "📦 Inventario", "🧾 Facturación"])
+    
+    st.markdown("---")
+    aseguradora_sel = st.selectbox("Aseguradora:", ["GNP", "Multiasistencias"])
+    modo_consulta = st.checkbox("Modo Consulta (Solo lectura)", value=False)
+    
+    st.markdown("---")
+    btn_guardar = st.button("💾 Guardar Cambios", type="primary", use_container_width=True)
+    
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
+        st.session_state['autenticado'] = False
         st.rerun()
 
-st.markdown("<br>", unsafe_allow_html=True)
-st.markdown('<span id="panel-fijo"></span>', unsafe_allow_html=True)
-panel_superior = st.container()
 
-with panel_superior:
-    col_title, col_radio, col_toggle = st.columns([1.5, 1.5, 3])
-    with col_title:
-        st.markdown("<h4 style='margin-bottom: 0px; margin-top: 5px;'>🛡️ Aseguradora:</h4>", unsafe_allow_html=True)
-    with col_radio:
-        aseguradora_sel = st.radio("Elige la base de datos a consultar:", ["GNP", "Multiasistencias"], horizontal=True, label_visibility="collapsed")
-    with col_toggle:
-        modo_consulta = st.toggle("🔍 **MODO CONSULTA**")
-    
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    
-    vista_actual = st.radio("Navegación:", ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", "🧾 Facturación", "🏢 Talleres", "📦 Inventario"], horizontal=True, label_visibility="collapsed")
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    
-    col_btn1, col_btn2 = st.columns([4, 6]) 
-    with col_btn1:
-        btn_guardar = st.button("💾 Guardar Cambios y Generar Remisiones", use_container_width=True, type="primary")
-
-    btn_imprimir = False 
-
-
-# === [BLOQUE 3: MOTORES DE CARGA DINÁMICA, FILTROS Y LIMPIEZA DE DATOS] ===
-
+# =====================================================================
+# === [BLOQUE 1.5: CARGA DE DATOS] ===
+# =====================================================================
 def obtener_dataframe(nombre_hoja):
     try:
         doc = init_connection()
@@ -193,7 +169,65 @@ df_compras = cargar_compras()
 df_inventario = cargar_inventario()
 df_placas = cargar_placas() 
 
-# INICIALIZACIÓN SEGURA DE VARIABLES
+
+# =====================================================================
+# === BLOQUE 2. GRÁFICO: ESTADO GENERAL DE PARTIDAS EN PROCESO ===
+# =====================================================================
+st.markdown("### 2. Estado General de Partidas en Proceso")
+
+# Corrección Arquitectónica: Búsqueda dinámica de las columnas para el gráfico.
+# Esto evita que truene si en el Excel está escrito en mayúsculas o minúsculas.
+col_estatus_graf = next((c for c in df_completo.columns if "ESTATUS" in str(c).upper()), None)
+col_venc_graf = next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper()), None)
+
+estatus_excluidos = ['RECIBIDO', 'RECIBIDA', 'FACTURADA', 'FACTURADO', 'FINALIZADA', 'ENTREGADA', 'ENTREGADO', 'CANCELADA', 'CANCELADO']
+
+if not df_completo.empty and col_estatus_graf and col_venc_graf:
+    # Filtramos manejando todo en mayúsculas para evitar desajustes
+    df_grafico = df_completo[~df_completo[col_estatus_graf].astype(str).str.upper().str.strip().isin(estatus_excluidos)]
+    
+    if not df_grafico.empty:
+        col_graf, col_det = st.columns([2, 1])
+        
+        with col_graf:
+            df_agrupado = df_grafico.groupby([col_venc_graf, col_estatus_graf]).size().reset_index(name='Cantidad de Partidas')
+            
+            fig = px.bar(
+                df_agrupado, 
+                x=col_venc_graf, 
+                y='Cantidad de Partidas', 
+                color=col_estatus_graf,
+                barmode='stack',
+                color_discrete_sequence=["#1E88E5", "#64B5F6", "#0D47A1", "#1976D2", "#90CAF9"]
+            )
+            
+            grafico_seleccion = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+            
+        with col_det:
+            st.markdown("📄 **Detalle de Partidas**")
+            if grafico_seleccion and len(grafico_seleccion.selection.points) > 0:
+                fecha_sel = grafico_seleccion.selection.points[0]["x"]
+                df_detalle = df_grafico[df_grafico[col_venc_graf] == fecha_sel]
+                
+                # Buscamos columnas complementarias de forma segura
+                col_sin_graf = next((c for c in df_detalle.columns if "SINIESTRO" in str(c).upper() or "PEDIDO" in str(c).upper()), df_detalle.columns[0])
+                col_tal_graf = next((c for c in df_detalle.columns if "TALLER" in str(c).upper()), df_detalle.columns[1] if len(df_detalle.columns)>1 else df_detalle.columns[0])
+                
+                st.dataframe(
+                    df_detalle[[col_sin_graf, col_tal_graf, col_estatus_graf]], 
+                    use_container_width=True, 
+                    hide_index=True
+                )
+            else:
+                st.info("👆 Haz clic en una barra del gráfico para filtrar la tabla.")
+    else:
+        st.success("No hay partidas en proceso en este momento.")
+elif not df_completo.empty:
+    st.warning("⚠️ No se pudieron graficar los datos. Verifica que las columnas Estatus y Fecha de Vencimiento existan en tu Base de Datos unificada.")
+
+# =====================================================================
+# === [INICIALIZACIÓN DE VARIABLES] ===
+# =====================================================================
 df_proceso = pd.DataFrame()
 df_trabajo = pd.DataFrame()
 df_trabajo_completo = pd.DataFrame()

@@ -98,10 +98,23 @@ if not st.session_state['autenticado']:
     st.stop() 
 
 # =====================================================================
+# === MOTOR DE PERMISOS (ROLES) ===
+# =====================================================================
+usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
+rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
+
+permiso_edicion = True
+# Regla: Si es Almacén, o se llama Juan Garza o Dionicio Cantú, bloqueamos la edición
+if rol_activo in ['ALMACÉN', 'ALMACEN', 'SOLO LECTURA', 'VISITANTE']:
+    permiso_edicion = False
+if usuario_activo in ['JUAN GARZA', 'JUAN GRAZA', 'DIONICIO CANTÚ', 'DIONICIO CANTU']:
+    permiso_edicion = False
+
+# =====================================================================
 # === [BLOQUE 2: MENÚ LATERAL Y ENCABEZADO FIJO] ===
 # =====================================================================
 with st.sidebar:
-    st.success(f"👤 Operador activo:\n**{st.session_state['usuario_actual']}**")
+    st.success(f"👤 Operador activo:\n**{st.session_state['usuario_actual']}**\n\n🛡️ Rol: **{st.session_state['rol_actual']}**")
     st.markdown("---")
     aseguradora_sel = st.selectbox("Aseguradora:", ["GNP", "Multiasistencias"])
     modo_consulta = st.checkbox("Modo Consulta (Solo lectura)", value=False)
@@ -127,7 +140,11 @@ with cabecera:
         st.markdown(f"<h2 style='margin-top: 10px; margin-bottom: 0px;'>PMR - {vista_actual}</h2>", unsafe_allow_html=True)
     with col_btn:
         st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-        btn_guardar = st.button("💾 Guardar Cambios", type="primary", use_container_width=True)
+        if permiso_edicion:
+            btn_guardar = st.button("💾 Guardar Cambios", type="primary", use_container_width=True)
+        else:
+            btn_guardar = False
+            st.button("🔒 Solo Lectura", disabled=True, use_container_width=True)
 
 # =====================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -408,11 +425,14 @@ if vista_actual == "⚙️ Panel Operativo":
     df_por_confirmar = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")].copy() if col_estatus else pd.DataFrame()
     with st.expander(f"⏳ Piezas por Confirmar | {df_por_confirmar['Siniestro'].nunique() if not df_por_confirmar.empty else 0} Siniestros", expanded=False):
         if not df_por_confirmar.empty:
-            if not modo_consulta: df_por_confirmar['Confirmar Surtido'] = False; df_por_confirmar['Cancelar'] = False
+            if not modo_consulta and permiso_edicion: df_por_confirmar['Confirmar Surtido'] = False; df_por_confirmar['Cancelar'] = False
             cols_conf = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_asignacion, col_vencimiento, col_estatus, col_comentarios, 'Confirmar Surtido', 'Cancelar'] if c in df_por_confirmar.columns]
             config_conf = base_config.copy()
-            if not modo_consulta: config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False)})
-            df_editado_conf = st.data_editor(df_por_confirmar[cols_conf], column_config=config_conf, disabled=[c for c in cols_conf if c not in ['Confirmar Surtido', 'Cancelar', col_comentarios]], hide_index=True, use_container_width=True, key="ed_conf")
+            if not modo_consulta and permiso_edicion: config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False)})
+            
+            # Bloqueo de permisos
+            bloqueadas_conf = True if not permiso_edicion else [c for c in cols_conf if c not in ['Confirmar Surtido', 'Cancelar', col_comentarios]]
+            df_editado_conf = st.data_editor(df_por_confirmar[cols_conf], column_config=config_conf, disabled=bloqueadas_conf, hide_index=True, use_container_width=True, key="ed_conf")
             for col in [col_id, col_marca, col_modelo, col_desc]:
                 if col in df_por_confirmar.columns: df_editado_conf[col] = df_por_confirmar[col].values
 
@@ -423,7 +443,9 @@ if vista_actual == "⚙️ Panel Operativo":
             cols_venc = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_comentarios, 'Cancelar', 'Reasignar', 'Nueva Fecha'] if c in df_vencimientos.columns]
             config_venc = base_config.copy()
             config_venc.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MM/YYYY")})
-            df_editado_venc = st.data_editor(df_vencimientos[cols_venc], column_config=config_venc, disabled=[c for c in cols_venc if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios, col_guia]], hide_index=True, use_container_width=True, key="ed_venc")
+            
+            bloqueadas_venc = True if not permiso_edicion else [c for c in cols_venc if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios, col_guia]]
+            df_editado_venc = st.data_editor(df_vencimientos[cols_venc], column_config=config_venc, disabled=bloqueadas_venc, hide_index=True, use_container_width=True, key="ed_venc")
             for col in [col_id, col_marca, col_modelo]:
                 if col in df_vencimientos.columns: df_editado_venc[col] = df_vencimientos[col].values
                 
@@ -438,7 +460,9 @@ if vista_actual == "⚙️ Panel Operativo":
             cols_atr = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_comentarios, 'Cancelar', 'Reasignar', 'Nueva Fecha'] if c in df_atrasadas.columns]
             config_atr = base_config.copy()
             config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MM/YYYY")})
-            df_editado_atrasadas = st.data_editor(df_atrasadas[cols_atr], column_config=config_atr, disabled=[c for c in cols_atr if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios]], hide_index=True, use_container_width=True, key="ed_atr")
+            
+            bloqueadas_atr = True if not permiso_edicion else [c for c in cols_atr if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios]]
+            df_editado_atrasadas = st.data_editor(df_atrasadas[cols_atr], column_config=config_atr, disabled=bloqueadas_atr, hide_index=True, use_container_width=True, key="ed_atr")
             for col in [col_id, col_marca, col_modelo]:
                 if col in df_atrasadas.columns: df_editado_atrasadas[col] = df_atrasadas[col].values
 
@@ -449,7 +473,9 @@ if vista_actual == "⚙️ Panel Operativo":
             cols_cobro = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_comentarios, 'Marcar Recibido'] if c in df_por_cobrar.columns]
             config_cobro = base_config.copy()
             config_cobro.update({"Marcar Recibido": st.column_config.CheckboxColumn("🏁 Marcar Recibido", default=False)})
-            df_editado_cobro = st.data_editor(df_por_cobrar[cols_cobro], column_config=config_cobro, disabled=[c for c in cols_cobro if c not in ['Marcar Recibido', col_comentarios]], hide_index=True, use_container_width=True, key="ed_cobro")
+            
+            bloqueadas_cobro = True if not permiso_edicion else [c for c in cols_cobro if c not in ['Marcar Recibido', col_comentarios]]
+            df_editado_cobro = st.data_editor(df_por_cobrar[cols_cobro], column_config=config_cobro, disabled=bloqueadas_cobro, hide_index=True, use_container_width=True, key="ed_cobro")
             for col in [col_id, col_desc]: 
                 if col in df_por_cobrar.columns: df_editado_cobro[col] = df_por_cobrar[col].values
 
@@ -474,7 +500,9 @@ if vista_actual == "⚙️ Panel Operativo":
                         orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_checkbox
                         config_pedidos = base_config.copy()
                         config_pedidos.update({ "Pedido": st.column_config.CheckboxColumn("🛒 Ped"), "Proveedor": st.column_config.TextColumn("🏢 Proveedor"), "Remision": st.column_config.CheckboxColumn("📝 Rem"), "Entregado": st.column_config.CheckboxColumn("🚚 Ent"), "Recibido": st.column_config.CheckboxColumn("🏁 Rec"), "Reasignacion": st.column_config.CheckboxColumn("🔄 Reasig"), "Cancelar": st.column_config.CheckboxColumn("🚫 Can") })
-                        df_editado_parcial = st.data_editor(df_grupo[orden_deseado], column_config=config_pedidos, disabled=[c for c in orden_deseado if c not in columnas_checkbox and c not in [col_comentarios, col_guia]], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
+                        
+                        bloqueadas_pedidos = True if not permiso_edicion else [c for c in orden_deseado if c not in columnas_checkbox and c not in [col_comentarios, col_guia]]
+                        df_editado_parcial = st.data_editor(df_grupo[orden_deseado], column_config=config_pedidos, disabled=bloqueadas_pedidos, hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                         for col in [col_id, col_taller, col_marca, col_modelo, col_desc, 'Siniestro', 'Vehiculo_Info']:
                             if col in df_grupo.columns: df_editado_parcial[col] = df_grupo[col].values
                         dfs_editados.append(df_editado_parcial)
@@ -527,7 +555,8 @@ if vista_actual == "🛒 Pedidos y Proveedores":
             cols_ordenadas = ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Fecha Llegada', 'Recibido', 'Imprimir Remisión', 'Filtro_Busqueda', 'Fecha_Compra_Dt', 'ETA_Dias', 'Llegada_Calculada']
             df_compras_disp = df_compras_disp[[c for c in cols_ordenadas if c in df_compras_disp.columns]]
 
-            df_editado_compras = st.data_editor(df_compras_disp, column_config=config_compras, disabled=[c for c in df_compras_disp.columns if c not in ['Costo Compra', 'Tiempo Entrega (Días)', 'Proveedor', 'Recibido', 'Imprimir Remisión']], hide_index=True, use_container_width=True, key="ed_compras")
+            bloqueadas_compras = True if not permiso_edicion else [c for c in df_compras_disp.columns if c not in ['Costo Compra', 'Tiempo Entrega (Días)', 'Proveedor', 'Recibido', 'Imprimir Remisión']]
+            df_editado_compras = st.data_editor(df_compras_disp, column_config=config_compras, disabled=bloqueadas_compras, hide_index=True, use_container_width=True, key="ed_compras")
             df_editado_compras.index = df_compras_disp.index 
             for col in ['Siniestro', 'Descripción Pieza']:
                 if col in df_compras.columns: df_editado_compras[col] = df_compras_disp[col].values
@@ -538,74 +567,78 @@ if vista_actual == "🛒 Pedidos y Proveedores":
     st.markdown("### 🏢 Directorio de Proveedores")
     try: df_proveedores = cargar_datos.__wrapped__() if False else obtener_dataframe("BD_PROVEEDORES")
     except Exception: df_proveedores = pd.DataFrame()
-    with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
-        with st.form("form_proveedores", clear_on_submit=True):
-            c1, c2, c3 = st.columns(3)
-            p_prov = c1.text_input("Proveedor * (Obligatorio)")
-            p_suc = c2.text_input("Sucursal")
-            p_tiempo = c3.text_input("Tiempo de Entrega (Ej. 5 a 7 días)")
-            c4, c5, c6 = st.columns(3)
-            p_contacto = c4.text_input("Nombre de Contacto")
-            p_tel = c5.text_input("Teléfono")
-            p_correo = c6.text_input("Correo")
-            p_dir = st.text_input("Dirección Completa")
-            if st.form_submit_button("💾 Guardar Proveedor"):
-                if p_prov.strip() == "": st.error("❌ El nombre del Proveedor es obligatorio.")
-                else:
-                    try:
-                        doc = init_connection()
-                        ws_p = doc.worksheet("BD_PROVEEDORES")
-                        ws_p.append_row([p_prov.upper(), p_suc.upper(), p_dir.upper(), p_tiempo.upper(), p_contacto.upper(), p_tel, p_correo])
-                        st.success(f"✅ Proveedor '{p_prov}' guardado exitosamente en la nube.")
-                        st.cache_data.clear()
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+    
+    if permiso_edicion:
+        with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
+            with st.form("form_proveedores", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                p_prov = c1.text_input("Proveedor * (Obligatorio)")
+                p_suc = c2.text_input("Sucursal")
+                p_tiempo = c3.text_input("Tiempo de Entrega (Ej. 5 a 7 días)")
+                c4, c5, c6 = st.columns(3)
+                p_contacto = c4.text_input("Nombre de Contacto")
+                p_tel = c5.text_input("Teléfono")
+                p_correo = c6.text_input("Correo")
+                p_dir = st.text_input("Dirección Completa")
+                if st.form_submit_button("💾 Guardar Proveedor"):
+                    if p_prov.strip() == "": st.error("❌ El nombre del Proveedor es obligatorio.")
+                    else:
+                        try:
+                            doc = init_connection()
+                            ws_p = doc.worksheet("BD_PROVEEDORES")
+                            ws_p.append_row([p_prov.upper(), p_suc.upper(), p_dir.upper(), p_tiempo.upper(), p_contacto.upper(), p_tel, p_correo])
+                            st.success(f"✅ Proveedor '{p_prov}' guardado exitosamente en la nube.")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+                        
     if not df_proveedores.empty: st.dataframe(df_proveedores.fillna(""), use_container_width=True, hide_index=True)
 
 # === [BLOQUE 7: VISTAS 4 Y 5 - TALLERES E INVENTARIO] ===
 if vista_actual == "🏢 Talleres":
     st.markdown("### 🏢 Base de Datos de Talleres")
     
-    with st.expander("➕ Registrar Nuevo Taller", expanded=False):
-        st.info("Registra un nuevo taller. El Asesor se asignará automáticamente si la ciudad está en el directorio GNP.")
-        mapa_asesores = {"Monterrey": "Oscar Landeros Martinez", "CDMX": "Yessica Vianney Martinez Olivar", "Guadalajara": "Estefany Dayanna Ochoa Aranda"}
-        lista_estados = ["Aguascalientes", "Baja California", "CDMX", "Jalisco", "Nuevo León", "Yucatán"]
-        c1, c2, c3 = st.columns([2, 2, 1])
-        nuevo_taller = c1.text_input("Taller * (Obligatorio)")
-        ciudad_sel = c2.selectbox("Ciudad", [""] + sorted(list(mapa_asesores.keys())) + ["Otra (Escribir manualmente)..."])
-        if ciudad_sel == "Otra (Escribir manualmente)...":
-            nueva_ciudad = c2.text_input("Ingresa la Ciudad")
-            asesor_asignado = c3.text_input("Asesor Asignado (Manual)")
-        elif ciudad_sel != "":
-            nueva_ciudad = ciudad_sel
-            asesor_asignado = mapa_asesores.get(ciudad_sel, "")
-            c3.text_input("Asesor Asignado", value=asesor_asignado, disabled=True)
-        else:
-            nueva_ciudad = ""
-            asesor_asignado = ""
-            c3.text_input("Asesor Asignado", disabled=True)
-        c4, c5, c6, c7 = st.columns(4)
-        nuevo_estado = c4.selectbox("Estado", [""] + lista_estados)
-        nuevo_seguro = c5.selectbox("Seguro", ["MULTI", "GNP", "AMBOS", "OTRO"])
-        nuevo_contacto = c6.text_input("Contacto Taller")
-        nuevo_tel = c7.text_input("Teléfono Contacto")
-        c8, c9, c10 = st.columns([1, 1, 2])
-        nuevo_wa = c8.text_input("Whatsapp")
-        nuevo_correo = c9.text_input("Correo")
-        nueva_dir = c10.text_input("Dirección Completa (Calle, Col.)")
-        if st.button("💾 Guardar en Catálogo", type="primary"):
-            if nuevo_taller.strip() == "": st.error("❌ El 'Nombre del Taller' es obligatorio.")
+    if permiso_edicion:
+        with st.expander("➕ Registrar Nuevo Taller", expanded=False):
+            st.info("Registra un nuevo taller. El Asesor se asignará automáticamente si la ciudad está en el directorio GNP.")
+            mapa_asesores = {"Monterrey": "Oscar Landeros Martinez", "CDMX": "Yessica Vianney Martinez Olivar", "Guadalajara": "Estefany Dayanna Ochoa Aranda"}
+            lista_estados = ["Aguascalientes", "Baja California", "CDMX", "Jalisco", "Nuevo León", "Yucatán"]
+            c1, c2, c3 = st.columns([2, 2, 1])
+            nuevo_taller = c1.text_input("Taller * (Obligatorio)")
+            ciudad_sel = c2.selectbox("Ciudad", [""] + sorted(list(mapa_asesores.keys())) + ["Otra (Escribir manualmente)..."])
+            if ciudad_sel == "Otra (Escribir manualmente)...":
+                nueva_ciudad = c2.text_input("Ingresa la Ciudad")
+                asesor_asignado = c3.text_input("Asesor Asignado (Manual)")
+            elif ciudad_sel != "":
+                nueva_ciudad = ciudad_sel
+                asesor_asignado = mapa_asesores.get(ciudad_sel, "")
+                c3.text_input("Asesor Asignado", value=asesor_asignado, disabled=True)
             else:
-                try:
-                    doc = init_connection()
-                    ws_c = doc.worksheet("Catálogo")
-                    ws_c.append_row([nuevo_taller.upper(), nueva_dir.upper(), ciudad_sel.upper(), nuevo_estado.upper(), nuevo_contacto.upper(), nuevo_tel, nuevo_wa, nuevo_correo, asesor_asignado.upper(), nuevo_seguro.upper()], value_input_option='USER_ENTERED')
-                    st.success(f"✅ Taller '{nuevo_taller}' agregado exitosamente en la nube.")
-                    st.cache_data.clear()
-                    time.sleep(1)
-                    st.rerun()
-                except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+                nueva_ciudad = ""
+                asesor_asignado = ""
+                c3.text_input("Asesor Asignado", disabled=True)
+            c4, c5, c6, c7 = st.columns(4)
+            nuevo_estado = c4.selectbox("Estado", [""] + lista_estados)
+            nuevo_seguro = c5.selectbox("Seguro", ["MULTI", "GNP", "AMBOS", "OTRO"])
+            nuevo_contacto = c6.text_input("Contacto Taller")
+            nuevo_tel = c7.text_input("Teléfono Contacto")
+            c8, c9, c10 = st.columns([1, 1, 2])
+            nuevo_wa = c8.text_input("Whatsapp")
+            nuevo_correo = c9.text_input("Correo")
+            nueva_dir = c10.text_input("Dirección Completa (Calle, Col.)")
+            if st.button("💾 Guardar en Catálogo", type="primary"):
+                if nuevo_taller.strip() == "": st.error("❌ El 'Nombre del Taller' es obligatorio.")
+                else:
+                    try:
+                        doc = init_connection()
+                        ws_c = doc.worksheet("Catálogo")
+                        ws_c.append_row([nuevo_taller.upper(), nueva_dir.upper(), ciudad_sel.upper(), nuevo_estado.upper(), nuevo_contacto.upper(), nuevo_tel, nuevo_wa, nuevo_correo, asesor_asignado.upper(), nuevo_seguro.upper()], value_input_option='USER_ENTERED')
+                        st.success(f"✅ Taller '{nuevo_taller}' agregado exitosamente en la nube.")
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
 
     st.markdown("---")
     if not df_catalogo.empty:
@@ -617,44 +650,46 @@ if vista_actual == "🏢 Talleres":
         
         df_cat_disp = df_cat_disp[[c for c in df_cat_disp.columns if "Unnamed" not in str(c)]]
         for c in df_cat_disp.columns: df_cat_disp[c] = df_cat_disp[c].fillna("").astype(str).replace(['nan', 'None', '0', '0.0'], '')
-        st.data_editor(df_cat_disp, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_cat")
+        st.data_editor(df_cat_disp, num_rows="dynamic" if permiso_edicion else "fixed", disabled=True if not permiso_edicion else False, use_container_width=True, hide_index=True, key="ed_cat")
 
 if vista_actual == "📦 Inventario":
     st.markdown("### 📦 Control de Inventario Físico")
-    with st.expander("➕ Registrar Nueva Pieza", expanded=False):
-        with st.form("form_alta_inv", clear_on_submit=True):
-            c1, c2, c3 = st.columns(3)
-            ubicacion_n = c1.text_input("Ubicación Física")
-            oem_n = c2.text_input("No. Parte (OEM)")
-            alt_n = c3.text_input("No. Parte Alterno")
-            desc_n = st.text_input("Descripción de la Pieza * (Obligatorio)")
-            c4, c5, c6 = st.columns(3)
-            marca_n = c4.text_input("Marca")
-            mod_n = c5.text_input("Modelo")
-            ver_n = c6.text_input("Versión")
-            c7, c8, c9 = st.columns(3)
-            ano_n = c7.text_input("Años Compatibilidad")
-            pos_n = c8.text_input("Posición / Lado")
-            cant_n = c9.number_input("Cantidad", min_value=1, step=1)
-            c10, c11, c12 = st.columns(3)
-            est_n = c10.selectbox("Estado de la Pieza", ["NUEVA", "REPARADA", "USADA", "GENÉRICA"])
-            costo_n = c11.number_input("Costo Adquisición", min_value=0.0, step=10.0)
-            precio_n = c12.number_input("Precio Venta", min_value=0.0, step=10.0)
-            c13, c14 = st.columns(2)
-            sin_n = c13.text_input("No. Siniestro / Lote")
-            ml_n = c14.text_input("SKU Mercado Libre")
-            if st.form_submit_button("💾 Guardar en Inventario"):
-                if desc_n.strip() == "": st.error("❌ La 'Descripción de la Pieza' es obligatoria.")
-                else:
-                    try:
-                        doc = init_connection()
-                        ws_i = doc.worksheet("BD_INVENTARIO")
-                        ws_i.append_row([str(v).upper() if isinstance(v, str) else v for v in [ubicacion_n, oem_n, alt_n, desc_n, marca_n, mod_n, ver_n, ano_n, pos_n, cant_n, est_n, costo_n, precio_n, sin_n, ml_n, "NO"]], value_input_option='USER_ENTERED')
-                        st.success("✅ Pieza agregada exitosamente en la nube.")
-                        st.cache_data.clear()
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+    
+    if permiso_edicion:
+        with st.expander("➕ Registrar Nueva Pieza", expanded=False):
+            with st.form("form_alta_inv", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                ubicacion_n = c1.text_input("Ubicación Física")
+                oem_n = c2.text_input("No. Parte (OEM)")
+                alt_n = c3.text_input("No. Parte Alterno")
+                desc_n = st.text_input("Descripción de la Pieza * (Obligatorio)")
+                c4, c5, c6 = st.columns(3)
+                marca_n = c4.text_input("Marca")
+                mod_n = c5.text_input("Modelo")
+                ver_n = c6.text_input("Versión")
+                c7, c8, c9 = st.columns(3)
+                ano_n = c7.text_input("Años Compatibilidad")
+                pos_n = c8.text_input("Posición / Lado")
+                cant_n = c9.number_input("Cantidad", min_value=1, step=1)
+                c10, c11, c12 = st.columns(3)
+                est_n = c10.selectbox("Estado de la Pieza", ["NUEVA", "REPARADA", "USADA", "GENÉRICA"])
+                costo_n = c11.number_input("Costo Adquisición", min_value=0.0, step=10.0)
+                precio_n = c12.number_input("Precio Venta", min_value=0.0, step=10.0)
+                c13, c14 = st.columns(2)
+                sin_n = c13.text_input("No. Siniestro / Lote")
+                ml_n = c14.text_input("SKU Mercado Libre")
+                if st.form_submit_button("💾 Guardar en Inventario"):
+                    if desc_n.strip() == "": st.error("❌ La 'Descripción de la Pieza' es obligatoria.")
+                    else:
+                        try:
+                            doc = init_connection()
+                            ws_i = doc.worksheet("BD_INVENTARIO")
+                            ws_i.append_row([str(v).upper() if isinstance(v, str) else v for v in [ubicacion_n, oem_n, alt_n, desc_n, marca_n, mod_n, ver_n, ano_n, pos_n, cant_n, est_n, costo_n, precio_n, sin_n, ml_n, "NO"]], value_input_option='USER_ENTERED')
+                            st.success("✅ Pieza agregada exitosamente en la nube.")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
 
     st.markdown("---")
     if not df_inventario.empty:
@@ -669,7 +704,7 @@ if vista_actual == "📦 Inventario":
         for c in df_inv_disp.columns:
             if c != 'Sin Existencia': df_inv_disp[c] = df_inv_disp[c].fillna("").astype(str).replace(['nan', 'None', '0.0'], '').str.upper()
         
-        st.data_editor(df_inv_disp, num_rows="dynamic", column_config={'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)}, use_container_width=True, hide_index=True, key="ed_inv")
+        st.data_editor(df_inv_disp, num_rows="dynamic" if permiso_edicion else "fixed", disabled=True if not permiso_edicion else False, column_config={'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)}, use_container_width=True, hide_index=True, key="ed_inv")
 
 # === [BLOQUE 8: FACTURACIÓN] ===
 if vista_actual == "🧾 Facturación":
@@ -696,7 +731,8 @@ if vista_actual == "🧾 Facturación":
                     cols_mostrar = [c for c in ['Facturado', col_cant, 'Concepto Factura', col_precio, col_origen] if c in df_mostrar_f.columns or c == 'Facturado']
                     config_fact = {'Facturado': st.column_config.CheckboxColumn("✅ Facturado", default=False), 'Concepto Factura': st.column_config.TextColumn("Descripción para Factura", width="large"), col_precio: st.column_config.NumberColumn("Precio", format="$ %.2f")}
                     
-                    df_editado_parcial_f = st.data_editor(df_mostrar_f[cols_mostrar], column_config=config_fact, disabled=[c for c in cols_mostrar if c != 'Facturado'], hide_index=True, use_container_width=True, key=f"fact_{taller}_{siniestro_f}")
+                    bloqueadas_fact = True if not permiso_edicion else [c for c in cols_mostrar if c != 'Facturado']
+                    df_editado_parcial_f = st.data_editor(df_mostrar_f[cols_mostrar], column_config=config_fact, disabled=bloqueadas_fact, hide_index=True, use_container_width=True, key=f"fact_{taller}_{siniestro_f}")
                     for col_llave in [col_id, col_desc]:
                         if col_llave in df_g.columns: df_editado_parcial_f[col_llave] = df_g[col_llave].values
                     dfs_editados_fact.append(df_editado_parcial_f)
@@ -705,7 +741,7 @@ if vista_actual == "🧾 Facturación":
     else: st.success("✅ No hay pedidos pendientes de facturación.")
 
 # === [BLOQUE 9: MOTOR DE GUARDADO Y PDF] ===
-if btn_guardar:
+if btn_guardar and permiso_edicion:
     def generar_llave(id_val, desc_val):
         id_str = str(id_val).strip().upper()
         if id_str.endswith('.0'): id_str = id_str[:-2]
@@ -856,7 +892,7 @@ if btn_guardar:
                         pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
                         pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"), ln=True)
                         pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5)
-                        pdf.cell(70, 4, limpiar_texto("PMR SERVIC AUTOMOTRIZ"), ln=True)
+                        pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"), ln=True)
                         pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_x(x_offset + 32)
                         pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"), ln=True); pdf.set_x(x_offset + 32)
                         pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"), ln=True)

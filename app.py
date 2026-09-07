@@ -108,47 +108,53 @@ if st.sidebar.button("🚪 Cerrar Sesión"):
 # =====================================================================
 
 
-# === [BLOQUE 2: ENCABEZADO Y PANEL SUPERIOR FIJO] ===
-ruta_logo = "logo.png"
+# === 2. GRÁFICO: ESTADO GENERAL DE PARTIDAS EN PROCESO ===
+st.markdown("### 2. Estado General de Partidas en Proceso")
 
-col1, col2 = st.columns([1.2, 4])
-with col1:
-    if os.path.exists(ruta_logo):
-        st.image(ruta_logo, width=180)
-with col2:
-    st.markdown("<h1 style='text-align: left; margin-top: 30px;'>PMR SERVICIOS AUTOMOTRICES</h1>", unsafe_allow_html=True)
+# 1. Filtramos para excluir lo que ya se terminó (ajusta los nombres si usas otros en tu Excel)
+estatus_excluidos = ['ENTREGADA', 'CANCELADA', 'FINALIZADO']
+df_grafico = df_filtrado[~df_filtrado['Estatus'].isin(estatus_excluidos)]
 
-if 'alertas_impresion' in st.session_state and st.session_state['alertas_impresion']:
-    st.markdown("<br>", unsafe_allow_html=True)
-    for alerta in st.session_state['alertas_impresion']:
-        st.warning(alerta)
-    if st.button("✅ Entendido, cerrar avisos"):
-        st.session_state['alertas_impresion'] = []
-        st.rerun()
-
-st.markdown("<br>", unsafe_allow_html=True)
-st.markdown('<span id="panel-fijo"></span>', unsafe_allow_html=True)
-panel_superior = st.container()
-
-with panel_superior:
-    col_title, col_radio, col_toggle = st.columns([1.5, 1.5, 3])
-    with col_title:
-        st.markdown("<h4 style='margin-bottom: 0px; margin-top: 5px;'>🛡️ Aseguradora:</h4>", unsafe_allow_html=True)
-    with col_radio:
-        aseguradora_sel = st.radio("Elige la base de datos a consultar:", ["GNP", "Multiasistencias"], horizontal=True, label_visibility="collapsed")
-    with col_toggle:
-        modo_consulta = st.toggle("🔍 **MODO CONSULTA**")
+if not df_grafico.empty:
+    col_graf, col_det = st.columns([2, 1])
     
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    
-    vista_actual = st.radio("Navegación:", ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", "🧾 Facturación", "🏢 Talleres", "📦 Inventario"], horizontal=True, label_visibility="collapsed")
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    
-    col_btn1, col_btn2 = st.columns([4, 6]) 
-    with col_btn1:
-        btn_guardar = st.button("💾 Guardar Cambios y Generar Remisiones", use_container_width=True, type="primary")
-
-    btn_imprimir = False 
+    with col_graf:
+        # Agrupamos los datos para el gráfico
+        df_agrupado = df_grafico.groupby(['Fecha de Vencimiento', 'Estatus']).size().reset_index(name='Cantidad de Partidas')
+        
+        # Generamos el gráfico de barras apiladas
+        fig = px.bar(
+            df_agrupado, 
+            x='Fecha de Vencimiento', 
+            y='Cantidad de Partidas', 
+            color='Estatus',
+            barmode='stack',
+            color_discrete_sequence=["#1E88E5", "#64B5F6", "#0D47A1"] # Gama de azules
+        )
+        
+        # Hacemos que el gráfico responda a clics
+        grafico_seleccion = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
+        
+    with col_det:
+        st.markdown("📄 **Detalle de Partidas**")
+        
+        # Si el usuario hace clic en una barra, mostramos los detalles
+        if grafico_seleccion and len(grafico_seleccion.selection.points) > 0:
+            # Obtenemos la fecha a la que le hicieron clic
+            fecha_sel = grafico_seleccion.selection.points[0]["x"]
+            
+            # Filtramos la tabla de detalles
+            df_detalle = df_grafico[df_grafico['Fecha de Vencimiento'] == fecha_sel]
+            
+            st.dataframe(
+                df_detalle[['Siniestro', 'Taller', 'Estatus']], 
+                use_container_width=True, 
+                hide_index=True
+            )
+        else:
+            st.info("👆 Haz clic en una barra del gráfico para filtrar la tabla.")
+else:
+    st.success("No hay partidas pendientes por procesar.") 
 
 
 # === [BLOQUE 3: MOTORES DE CARGA DINÁMICA, FILTROS Y LIMPIEZA DE DATOS] ===

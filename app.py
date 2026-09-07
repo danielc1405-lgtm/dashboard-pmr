@@ -108,12 +108,13 @@ if st.sidebar.button("🚪 Cerrar Sesión"):
 # =====================================================================
 
 
-# === 2. GRÁFICO: ESTADO GENERAL DE PARTIDAS EN PROCESO ===
+# === BLOQUE 2. GRÁFICO: ESTADO GENERAL DE PARTIDAS EN PROCESO ===
 st.markdown("### 2. Estado General de Partidas en Proceso")
 
-# 1. Filtramos para excluir lo que ya se terminó (ajusta los nombres si usas otros en tu Excel)
-estatus_excluidos = ['ENTREGADA', 'CANCELADA', 'FINALIZADO']
-df_grafico = df_filtrado[~df_filtrado['Estatus'].isin(estatus_excluidos)]
+# Excluimos de la base principal (df) todo lo que ya no está activo
+# (Ajusta estas palabras si en tu Excel están escritas diferente)
+estatus_excluidos = ['RECIBIDA', 'FACTURADA', 'FINALIZADA', 'ENTREGADA', 'CANCELADA']
+df_grafico = df[~df['Estatus'].isin(estatus_excluidos)]
 
 if not df_grafico.empty:
     col_graf, col_det = st.columns([2, 1])
@@ -129,7 +130,7 @@ if not df_grafico.empty:
             y='Cantidad de Partidas', 
             color='Estatus',
             barmode='stack',
-            color_discrete_sequence=["#1E88E5", "#64B5F6", "#0D47A1"] # Gama de azules
+            color_discrete_sequence=["#1E88E5", "#64B5F6", "#0D47A1", "#1976D2", "#90CAF9"]
         )
         
         # Hacemos que el gráfico responda a clics
@@ -154,10 +155,7 @@ if not df_grafico.empty:
         else:
             st.info("👆 Haz clic en una barra del gráfico para filtrar la tabla.")
 else:
-    st.success("No hay partidas pendientes por procesar.") 
-
-
-# === [BLOQUE 3: MOTORES DE CARGA DINÁMICA, FILTROS Y LIMPIEZA DE DATOS] ===
+    st.success("No hay partidas en proceso en este momento.")
 
 def obtener_dataframe(nombre_hoja):
     try:

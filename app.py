@@ -55,7 +55,7 @@ st.markdown("""
 # =====================================================================
 # === [BLOQUE 0: CONEXIÓN TEMPRANA Y SISTEMA DE LOGIN] ===
 # =====================================================================
-SHEET_ID = "10jrOsS054nOatMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
+SHEET_ID = "10jrOsS054n0atMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
 
 @st.cache_resource
 def init_connection():

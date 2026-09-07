@@ -31,7 +31,7 @@ st.markdown("""
         @media (min-width: 768px) {
             div.element-container:has(#panel-fijo) + div {
                 position: sticky; top: 2.875rem; z-index: 999;
-                background-color: #0e1117; padding-top: 10px; padding-bottom: 15px;
+                background-color: #0e1117; padding-top: 15px; padding-bottom: 10px;
                 border-bottom: 1px solid #333; margin-bottom: 15px;
             }
         }
@@ -98,7 +98,7 @@ if not st.session_state['autenticado']:
     st.stop() 
 
 # =====================================================================
-# === [BLOQUE 2: MENÚ LATERAL Y ENCABEZADO] ===
+# === [BLOQUE 2: MENÚ LATERAL Y ENCABEZADO FIJO] ===
 # =====================================================================
 with st.sidebar:
     st.success(f"👤 Operador activo:\n**{st.session_state['usuario_actual']}**")
@@ -111,18 +111,23 @@ with st.sidebar:
                             ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", 
                              "🏢 Talleres", "📦 Inventario", "🧾 Facturación"], label_visibility="collapsed")
     st.markdown("---")
-    btn_guardar = st.button("💾 Guardar Cambios", type="primary", use_container_width=True)
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state['autenticado'] = False
         st.rerun()
 
+# PANEL SUPERIOR FIJO (BOTÓN DE GUARDAR VISIBLE SIEMPRE)
 st.markdown('<span id="panel-fijo"></span>', unsafe_allow_html=True)
-col_l1, col_l2 = st.columns([1.2, 4])
-with col_l1:
-    if os.path.exists("logo.png"):
-        st.image("logo.png", width=180)
-with col_l2:
-    st.markdown(f"<h1 style='text-align: left; margin-top: 30px;'>PMR - {vista_actual}</h1>", unsafe_allow_html=True)
+cabecera = st.container()
+with cabecera:
+    col_logo, col_tit, col_btn = st.columns([1.2, 4, 2])
+    with col_logo:
+        if os.path.exists("logo.png"):
+            st.image("logo.png", width=150)
+    with col_tit:
+        st.markdown(f"<h2 style='margin-top: 10px; margin-bottom: 0px;'>PMR - {vista_actual}</h2>", unsafe_allow_html=True)
+    with col_btn:
+        st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+        btn_guardar = st.button("💾 Guardar Cambios", type="primary", use_container_width=True)
 
 # =====================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -558,7 +563,6 @@ if vista_actual == "🛒 Pedidos y Proveedores":
                     except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
     if not df_proveedores.empty: st.dataframe(df_proveedores.fillna(""), use_container_width=True, hide_index=True)
 
-
 # === [BLOQUE 7: VISTAS 4 Y 5 - TALLERES E INVENTARIO] ===
 if vista_actual == "🏢 Talleres":
     st.markdown("### 🏢 Base de Datos de Talleres")
@@ -716,26 +720,37 @@ if btn_guardar:
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Confirmar Surtido') else None)
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+            if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
     if not df_editado_venc.empty:
         for _, row in df_editado_venc.iterrows():
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-            orig = originales.get(k, {'estatus_db': ''})
+            orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': ''})
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Reasignar') else None)
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
+            guia_actual = str(row.get(col_guia, '')).strip()
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+            if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+            if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
 
     if not df_editado_atrasadas.empty:
         for _, row in df_editado_atrasadas.iterrows():
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-            orig = originales.get(k, {'estatus_db': ''})
+            orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Reasignar') else None)
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+            if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
     if not df_editado_cobro.empty:
         for _, row in df_editado_cobro.iterrows():
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
             if row.get('Marcar Recibido'): cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
+            if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
     if not df_editado_fact.empty:
         for _, row in df_editado_fact.iterrows():
@@ -748,8 +763,12 @@ if btn_guardar:
             orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': '', 'remision_bool': False})
             actual_rem_bool = row.get('Remision', False)
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN TRANSITO" if row.get('Remision') else "EN PROCESAMIENTO" if row.get('Pedido') else None
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
+            guia_actual = str(row.get(col_guia, '')).strip()
             
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+            if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+            if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
             if actual_rem_bool and not orig['remision_bool']: 
                 cambios_a_guardar.setdefault(k, {}).update({'imprimir_remision': True, 'generar_nuevo_folio': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema')})
 
@@ -760,7 +779,10 @@ if btn_guardar:
                 ws_uni = doc.worksheet("BD_UNIFICADA")
                 datos_uni = ws_uni.get_all_values()
                 headers = [str(h).strip() for h in datos_uni[0]]
-                idx_id, idx_desc, idx_estatus, idx_rem, idx_usr_rem = headers.index(col_id), headers.index(col_desc), headers.index(col_estatus), headers.index(col_remision), headers.index("Usuario Remisión") if "Usuario Remisión" in headers else -1
+                idx_id, idx_desc, idx_estatus, idx_rem = headers.index(col_id), headers.index(col_desc), headers.index(col_estatus), headers.index(col_remision)
+                idx_usr_rem = headers.index("Usuario Remisión") if "Usuario Remisión" in headers else -1
+                idx_coment = headers.index(col_comentarios) if col_comentarios in headers else -1
+                idx_guia = headers.index(col_guia) if col_guia in headers else -1
                 
                 max_folios = {"MULTI": 0, "GNP": 0}
                 for pref in ["MULTI", "GNP"]:
@@ -780,6 +802,8 @@ if btn_guardar:
                         if 'estatus' in c: datos_uni[i][idx_estatus] = c['estatus']
                         if 'remision_num' in c: datos_uni[i][idx_rem] = c['remision_num']
                         if 'usuario_rem' in c and idx_usr_rem >= 0: datos_uni[i][idx_usr_rem] = c['usuario_rem']
+                        if 'comentario' in c and idx_coment >= 0: datos_uni[i][idx_coment] = c['comentario']
+                        if 'guia' in c and idx_guia >= 0: datos_uni[i][idx_guia] = c['guia']
                 
                 ws_uni.update(range_name='A1', values=datos_uni)
 
@@ -832,7 +856,7 @@ if btn_guardar:
                         pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
                         pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"), ln=True)
                         pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5)
-                        pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"), ln=True)
+                        pdf.cell(70, 4, limpiar_texto("PMR SERVIC AUTOMOTRIZ"), ln=True)
                         pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_x(x_offset + 32)
                         pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"), ln=True); pdf.set_x(x_offset + 32)
                         pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"), ln=True)
@@ -883,6 +907,7 @@ if btn_guardar:
                 st.markdown(html_botones_flotantes, unsafe_allow_html=True)
             
             st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅")
+            st.rerun()
             
         except Exception as e:
             st.error(f"❌ Error guardando: {e}")

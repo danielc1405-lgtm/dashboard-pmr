@@ -1,0 +1,8 @@
+Plaintext
+streamlit
+pandas
+gspread
+google-auth
+fpdf
+plotly
+openpyxl

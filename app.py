@@ -124,7 +124,6 @@ with col_l1:
 with col_l2:
     st.markdown(f"<h1 style='text-align: left; margin-top: 30px;'>PMR - {vista_actual}</h1>", unsafe_allow_html=True)
 
-
 # =====================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
 # =====================================================================
@@ -167,6 +166,17 @@ df_trabajo = pd.DataFrame()
 df_trabajo_completo = pd.DataFrame()
 df_recoleccion_total = pd.DataFrame()
 df_vista = pd.DataFrame()
+
+# VARIABLES GLOBALES PARA EVITAR NAMEERROR
+df_editado_conf = pd.DataFrame()
+df_editado_venc = pd.DataFrame()
+df_editado_atrasadas = pd.DataFrame()
+df_editado_cobro = pd.DataFrame()
+df_editado = pd.DataFrame()
+df_editado_compras = pd.DataFrame()
+df_editado_catalogo = pd.DataFrame()
+df_editado_inventario = pd.DataFrame()
+df_editado_fact = pd.DataFrame() 
 
 col_id = col_taller = col_marca = col_modelo = col_anio = col_serie = col_desc = col_estatus = col_precio = col_cant = col_asignacion = col_vencimiento = col_fecha_confi = col_remision = col_comentarios = col_guia = col_origen = col_aseg = None
 
@@ -285,14 +295,8 @@ if not df_inventario.empty:
     if 'Sin Existencia' not in df_inventario.columns: df_inventario['Sin Existencia'] = False
     else: df_inventario['Sin Existencia'] = df_inventario['Sin Existencia'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
 
-df_editado_conf = pd.DataFrame()
-df_editado_venc = pd.DataFrame()
-df_editado_atrasadas = pd.DataFrame()
-df_editado_cobro = pd.DataFrame()
-df_editado = pd.DataFrame()
 
-
-# === [BLOQUE 4: VISTA 1 - ANALÍTICO] ===
+# === [BLOQUE 4: VISTAS] ===
 if vista_actual == "📊 Analítico":
     st.markdown("## 📊 Rendimiento de Operación")
     
@@ -341,7 +345,6 @@ if vista_actual == "📊 Analítico":
         fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig_bar, use_container_width=True)
 
-# === [BLOQUE 5: VISTA 2 - PANEL OPERATIVO] ===
 if vista_actual == "⚙️ Panel Operativo":
     st.markdown("### 📈 Indicadores Diarios")
     hoy_str = datetime.datetime.now().strftime('%d-%b-%y')
@@ -525,10 +528,82 @@ if vista_actual == "🛒 Pedidos y Proveedores":
                 if col in df_compras.columns: df_editado_compras[col] = df_compras_disp[col].values
         else: st.success("✅ Todos los pedidos de compras han sido recibidos.")
     else: st.warning("No hay órdenes de compra registradas actualmente.")
+    
+    st.markdown("---")
+    st.markdown("### 🏢 Directorio de Proveedores")
+    try: df_proveedores = cargar_datos.__wrapped__() if False else obtener_dataframe("BD_PROVEEDORES")
+    except Exception: df_proveedores = pd.DataFrame()
+    with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
+        with st.form("form_proveedores", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            p_prov = c1.text_input("Proveedor * (Obligatorio)")
+            p_suc = c2.text_input("Sucursal")
+            p_tiempo = c3.text_input("Tiempo de Entrega (Ej. 5 a 7 días)")
+            c4, c5, c6 = st.columns(3)
+            p_contacto = c4.text_input("Nombre de Contacto")
+            p_tel = c5.text_input("Teléfono")
+            p_correo = c6.text_input("Correo")
+            p_dir = st.text_input("Dirección Completa")
+            if st.form_submit_button("💾 Guardar Proveedor"):
+                if p_prov.strip() == "": st.error("❌ El nombre del Proveedor es obligatorio.")
+                else:
+                    try:
+                        doc = init_connection()
+                        ws_p = doc.worksheet("BD_PROVEEDORES")
+                        ws_p.append_row([p_prov.upper(), p_suc.upper(), p_dir.upper(), p_tiempo.upper(), p_contacto.upper(), p_tel, p_correo])
+                        st.success(f"✅ Proveedor '{p_prov}' guardado exitosamente en la nube.")
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+    if not df_proveedores.empty: st.dataframe(df_proveedores.fillna(""), use_container_width=True, hide_index=True)
+
 
 # === [BLOQUE 7: VISTAS 4 Y 5 - TALLERES E INVENTARIO] ===
 if vista_actual == "🏢 Talleres":
     st.markdown("### 🏢 Base de Datos de Talleres")
+    
+    with st.expander("➕ Registrar Nuevo Taller", expanded=False):
+        st.info("Registra un nuevo taller. El Asesor se asignará automáticamente si la ciudad está en el directorio GNP.")
+        mapa_asesores = {"Monterrey": "Oscar Landeros Martinez", "CDMX": "Yessica Vianney Martinez Olivar", "Guadalajara": "Estefany Dayanna Ochoa Aranda"}
+        lista_estados = ["Aguascalientes", "Baja California", "CDMX", "Jalisco", "Nuevo León", "Yucatán"]
+        c1, c2, c3 = st.columns([2, 2, 1])
+        nuevo_taller = c1.text_input("Taller * (Obligatorio)")
+        ciudad_sel = c2.selectbox("Ciudad", [""] + sorted(list(mapa_asesores.keys())) + ["Otra (Escribir manualmente)..."])
+        if ciudad_sel == "Otra (Escribir manualmente)...":
+            nueva_ciudad = c2.text_input("Ingresa la Ciudad")
+            asesor_asignado = c3.text_input("Asesor Asignado (Manual)")
+        elif ciudad_sel != "":
+            nueva_ciudad = ciudad_sel
+            asesor_asignado = mapa_asesores.get(ciudad_sel, "")
+            c3.text_input("Asesor Asignado", value=asesor_asignado, disabled=True)
+        else:
+            nueva_ciudad = ""
+            asesor_asignado = ""
+            c3.text_input("Asesor Asignado", disabled=True)
+        c4, c5, c6, c7 = st.columns(4)
+        nuevo_estado = c4.selectbox("Estado", [""] + lista_estados)
+        nuevo_seguro = c5.selectbox("Seguro", ["MULTI", "GNP", "AMBOS", "OTRO"])
+        nuevo_contacto = c6.text_input("Contacto Taller")
+        nuevo_tel = c7.text_input("Teléfono Contacto")
+        c8, c9, c10 = st.columns([1, 1, 2])
+        nuevo_wa = c8.text_input("Whatsapp")
+        nuevo_correo = c9.text_input("Correo")
+        nueva_dir = c10.text_input("Dirección Completa (Calle, Col.)")
+        if st.button("💾 Guardar en Catálogo", type="primary"):
+            if nuevo_taller.strip() == "": st.error("❌ El 'Nombre del Taller' es obligatorio.")
+            else:
+                try:
+                    doc = init_connection()
+                    ws_c = doc.worksheet("Catálogo")
+                    ws_c.append_row([nuevo_taller.upper(), nueva_dir.upper(), ciudad_sel.upper(), nuevo_estado.upper(), nuevo_contacto.upper(), nuevo_tel, nuevo_wa, nuevo_correo, asesor_asignado.upper(), nuevo_seguro.upper()], value_input_option='USER_ENTERED')
+                    st.success(f"✅ Taller '{nuevo_taller}' agregado exitosamente en la nube.")
+                    st.cache_data.clear()
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+
+    st.markdown("---")
     if not df_catalogo.empty:
         col_taller_cat = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
         if col_taller_cat:
@@ -542,6 +617,42 @@ if vista_actual == "🏢 Talleres":
 
 if vista_actual == "📦 Inventario":
     st.markdown("### 📦 Control de Inventario Físico")
+    with st.expander("➕ Registrar Nueva Pieza", expanded=False):
+        with st.form("form_alta_inv", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            ubicacion_n = c1.text_input("Ubicación Física")
+            oem_n = c2.text_input("No. Parte (OEM)")
+            alt_n = c3.text_input("No. Parte Alterno")
+            desc_n = st.text_input("Descripción de la Pieza * (Obligatorio)")
+            c4, c5, c6 = st.columns(3)
+            marca_n = c4.text_input("Marca")
+            mod_n = c5.text_input("Modelo")
+            ver_n = c6.text_input("Versión")
+            c7, c8, c9 = st.columns(3)
+            ano_n = c7.text_input("Años Compatibilidad")
+            pos_n = c8.text_input("Posición / Lado")
+            cant_n = c9.number_input("Cantidad", min_value=1, step=1)
+            c10, c11, c12 = st.columns(3)
+            est_n = c10.selectbox("Estado de la Pieza", ["NUEVA", "REPARADA", "USADA", "GENÉRICA"])
+            costo_n = c11.number_input("Costo Adquisición", min_value=0.0, step=10.0)
+            precio_n = c12.number_input("Precio Venta", min_value=0.0, step=10.0)
+            c13, c14 = st.columns(2)
+            sin_n = c13.text_input("No. Siniestro / Lote")
+            ml_n = c14.text_input("SKU Mercado Libre")
+            if st.form_submit_button("💾 Guardar en Inventario"):
+                if desc_n.strip() == "": st.error("❌ La 'Descripción de la Pieza' es obligatoria.")
+                else:
+                    try:
+                        doc = init_connection()
+                        ws_i = doc.worksheet("BD_INVENTARIO")
+                        ws_i.append_row([str(v).upper() if isinstance(v, str) else v for v in [ubicacion_n, oem_n, alt_n, desc_n, marca_n, mod_n, ver_n, ano_n, pos_n, cant_n, est_n, costo_n, precio_n, sin_n, ml_n, "NO"]], value_input_option='USER_ENTERED')
+                        st.success("✅ Pieza agregada exitosamente en la nube.")
+                        st.cache_data.clear()
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+
+    st.markdown("---")
     if not df_inventario.empty:
         col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
         df_inv_filtrado = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()

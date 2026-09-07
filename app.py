@@ -10,6 +10,7 @@ import datetime
 from fpdf import FPDF
 import plotly.express as px
 import gspread
+import json
 from google.oauth2.service_account import Credentials
 
 warnings.filterwarnings("ignore")
@@ -59,7 +60,8 @@ SHEET_ID = "10jrOsS054nOatMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
 @st.cache_resource
 def init_connection():
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-    credenciales = Credentials.from_service_account_file('credentials.json', scopes=scopes)
+    cred_dict = json.loads(st.secrets["google_credentials"])
+    credenciales = Credentials.from_service_account_info(cred_dict, scopes=scopes)
     cliente = gspread.authorize(credenciales)
     return cliente.open_by_key(SHEET_ID)
 

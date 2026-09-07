@@ -109,7 +109,7 @@ if st.sidebar.button("🚪 Cerrar Sesión"):
 
 
 # === [BLOQUE 2: ENCABEZADO Y PANEL SUPERIOR FIJO] ===
-ruta_logo = r"C:\Users\dell\OneDrive\PMR\Automatizacion PMR\logo.png"
+ruta_logo = "logo.png"
 
 col1, col2 = st.columns([1.2, 4])
 with col1:

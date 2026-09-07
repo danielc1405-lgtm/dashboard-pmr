@@ -98,20 +98,7 @@ if not st.session_state['autenticado']:
     st.stop() 
 
 # =====================================================================
-# === MOTOR DE PERMISOS (ROLES) ===
-# =====================================================================
-usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
-rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
-
-permiso_edicion = True
-# Regla: Si es Almacén, o se llama Juan Garza o Dionicio Cantú, bloqueamos la edición
-if rol_activo in ['ALMACÉN', 'ALMACEN', 'SOLO LECTURA', 'VISITANTE']:
-    permiso_edicion = False
-if usuario_activo in ['JUAN GARZA', 'JUAN GRAZA', 'DIONICIO CANTÚ', 'DIONICIO CANTU']:
-    permiso_edicion = False
-
-# =====================================================================
-# === [BLOQUE 2: MENÚ LATERAL Y ENCABEZADO FIJO] ===
+# === [BLOQUE 2: MENÚ LATERAL Y NAVEGACIÓN] ===
 # =====================================================================
 with st.sidebar:
     st.success(f"👤 Operador activo:\n**{st.session_state['usuario_actual']}**\n\n🛡️ Rol: **{st.session_state['rol_actual']}**")
@@ -127,6 +114,23 @@ with st.sidebar:
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state['autenticado'] = False
         st.rerun()
+
+# =====================================================================
+# === MOTOR DE PERMISOS DINÁMICO (ROLES + VISTA ACTUAL) ===
+# =====================================================================
+usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
+rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
+
+permiso_edicion = True
+# 1. Regla: Dionicio o rol de Solo Lectura = Bloqueo total en todas las vistas
+if rol_activo in ['SOLO LECTURA', 'VISITANTE'] or usuario_activo in ['DIONICIO CANTÚ', 'DIONICIO CANTU']:
+    permiso_edicion = False
+# 2. Regla: Almacén (Juan Garza) = Solo edita en la pestaña "Inventario"
+elif rol_activo in ['ALMACÉN', 'ALMACEN'] or usuario_activo in ['JUAN GARZA', 'JUAN GRAZA']:
+    if vista_actual == "📦 Inventario":
+        permiso_edicion = True
+    else:
+        permiso_edicion = False
 
 # PANEL SUPERIOR FIJO (BOTÓN DE GUARDAR VISIBLE SIEMPRE)
 st.markdown('<span id="panel-fijo"></span>', unsafe_allow_html=True)
@@ -430,7 +434,6 @@ if vista_actual == "⚙️ Panel Operativo":
             config_conf = base_config.copy()
             if not modo_consulta and permiso_edicion: config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False)})
             
-            # Bloqueo de permisos
             bloqueadas_conf = True if not permiso_edicion else [c for c in cols_conf if c not in ['Confirmar Surtido', 'Cancelar', col_comentarios]]
             df_editado_conf = st.data_editor(df_por_confirmar[cols_conf], column_config=config_conf, disabled=bloqueadas_conf, hide_index=True, use_container_width=True, key="ed_conf")
             for col in [col_id, col_marca, col_modelo, col_desc]:
@@ -653,8 +656,6 @@ if vista_actual == "🏢 Talleres":
         st.data_editor(df_cat_disp, num_rows="dynamic" if permiso_edicion else "fixed", disabled=True if not permiso_edicion else False, use_container_width=True, hide_index=True, key="ed_cat")
 
 if vista_actual == "📦 Inventario":
-    st.markdown("### 📦 Control de Inventario Físico")
-    
     if permiso_edicion:
         with st.expander("➕ Registrar Nueva Pieza", expanded=False):
             with st.form("form_alta_inv", clear_on_submit=True):
@@ -691,20 +692,31 @@ if vista_actual == "📦 Inventario":
                             st.rerun()
                         except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
 
-    st.markdown("---")
     if not df_inventario.empty:
         col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
         df_inv_filtrado = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
         
         df_inv_filtrado['Filtro_Busqueda'] = df_inv_filtrado.apply(lambda r: " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+        
         busqueda_inv = st.multiselect("🔍 Buscar Pieza:", options=sorted(list(df_inv_filtrado['Filtro_Busqueda'].dropna().unique())))
+        
         df_inv_disp = df_inv_filtrado[(df_inv_filtrado['Filtro_Busqueda'].isin(busqueda_inv)) & (~df_inv_filtrado['Sin Existencia'])].copy() if busqueda_inv else df_inv_filtrado[~df_inv_filtrado['Sin Existencia']].copy()
         
         if 'Filtro_Busqueda' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Filtro_Busqueda'])
         for c in df_inv_disp.columns:
             if c != 'Sin Existencia': df_inv_disp[c] = df_inv_disp[c].fillna("").astype(str).replace(['nan', 'None', '0.0'], '').str.upper()
         
-        st.data_editor(df_inv_disp, num_rows="dynamic" if permiso_edicion else "fixed", disabled=True if not permiso_edicion else False, column_config={'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)}, use_container_width=True, hide_index=True, key="ed_inv")
+        # Agregamos la columna contadora estilo Excel
+        df_inv_disp.insert(0, 'Nº', range(1, len(df_inv_disp) + 1))
+        
+        st.markdown(f"**🔢 Total de piezas listadas:** {len(df_inv_disp)}")
+        
+        config_inv = {
+            'Nº': st.column_config.NumberColumn("Nº", disabled=True),
+            'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)
+        }
+        
+        st.data_editor(df_inv_disp, num_rows="dynamic" if permiso_edicion else "fixed", disabled=True if not permiso_edicion else False, column_config=config_inv, use_container_width=True, hide_index=True, key="ed_inv")
 
 # === [BLOQUE 8: FACTURACIÓN] ===
 if vista_actual == "🧾 Facturación":
@@ -892,7 +904,7 @@ if btn_guardar and permiso_edicion:
                         pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
                         pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"), ln=True)
                         pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5)
-                        pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"), ln=True)
+                        pdf.cell(70, 4, limpiar_texto("PMR SERVIC AUTOMOTRIZ"), ln=True)
                         pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_x(x_offset + 32)
                         pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"), ln=True); pdf.set_x(x_offset + 32)
                         pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"), ln=True)

@@ -121,7 +121,6 @@ with st.sidebar:
         st.session_state['autenticado'] = False
         st.rerun()
 
-# Definir permisos exactos según la vista seleccionada
 permiso_edicion = True
 if rol_activo in ['SOLO LECTURA', 'VISITANTE'] or usuario_activo in ['DIONICIO CANTÚ', 'DIONICIO CANTU']:
     permiso_edicion = False
@@ -131,7 +130,7 @@ elif rol_activo in ['ALMACÉN', 'ALMACEN'] or usuario_activo in ['JUAN GARZA', '
     else:
         permiso_edicion = False
 
-# PANEL SUPERIOR FIJO (BOTÓN DE GUARDAR Y PDFs FLOTANTES)
+# PANEL SUPERIOR FIJO
 st.markdown('<span id="panel-fijo"></span>', unsafe_allow_html=True)
 cabecera = st.container()
 with cabecera:
@@ -257,14 +256,13 @@ if not df_vista.empty:
             df_trabajo[col_precio] = pd.to_numeric(df_trabajo[col_precio].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
             df_trabajo_completo[col_precio] = pd.to_numeric(df_trabajo_completo[col_precio].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
 
-        # PARSEADOR SEGURO DE FECHAS
         def parse_fecha_segura(val):
             if pd.isna(val) or str(val).strip() == '': return ''
             v_str = str(val).strip()
             try: return pd.to_datetime(v_str, dayfirst=True).strftime('%d-%b-%y')
             except:
                 try: return pd.to_datetime(v_str).strftime('%d-%b-%y')
-                except: return v_str # Si no entiende, deja el texto original intacto
+                except: return v_str 
 
         for c_fecha in [col_asignacion, col_vencimiento, col_fecha_confi]:
             if c_fecha and c_fecha in df_trabajo.columns:
@@ -730,6 +728,83 @@ if vista_actual == "📦 Inventario":
                             st.rerun()
                         except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
 
+        # --- MÓDULO NUEVO DE SALIDAS Y VENTAS ---
+        st.markdown("---")
+        with st.expander("📉 Registrar Salida / Venta", expanded=False):
+            if not df_inventario.empty:
+                col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
+                df_inv_act = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
+                df_stock = df_inv_act[~df_inv_act['Sin Existencia']].copy()
+                
+                if not df_stock.empty:
+                    df_stock['Filtro_Venta'] = df_stock.apply(lambda r: " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+                    
+                    with st.form("form_salida_inv", clear_on_submit=True):
+                        st.info("Selecciona una pieza para descontar del inventario. Si la cantidad llega a 0, se ocultará automáticamente.")
+                        pieza_sel = st.selectbox("Pieza a descontar:", options=[""] + sorted(list(df_stock['Filtro_Venta'].unique())))
+                        
+                        c_cant, c_dest = st.columns([1, 3])
+                        cant_descontar = c_cant.number_input("Cantidad a sacar", min_value=1, step=1)
+                        destino_salida = c_dest.text_input("Destino / Comentario (Ej. Venta Mostrador, Siniestro MULTI-123)")
+                        
+                        if st.form_submit_button("📉 Confirmar Salida"):
+                            if not pieza_sel:
+                                st.error("❌ Por favor selecciona una pieza.")
+                            else:
+                                try:
+                                    doc = init_connection()
+                                    ws_i = doc.worksheet("BD_INVENTARIO")
+                                    datos_i = ws_i.get_all_values()
+                                    
+                                    headers = [str(h).strip().upper() for h in datos_i[0]]
+                                    idx_oem = headers.index('NÚMERO DE PARTE (OEM)') if 'NÚMERO DE PARTE (OEM)' in headers else 1
+                                    idx_marca = headers.index('MARCA') if 'MARCA' in headers else 4
+                                    idx_modelo = headers.index('MODELO') if 'MODELO' in headers else 5
+                                    idx_desc = headers.index('DESCRIPCIÓN DE LA PIEZA') if 'DESCRIPCIÓN DE LA PIEZA' in headers else 3
+                                    idx_cant = headers.index('CANTIDAD') if 'CANTIDAD' in headers else 9
+                                    idx_sin = headers.index('NO. SINIESTRO / LOTE') if 'NO. SINIESTRO / LOTE' in headers else 13
+                                    idx_sinexist = headers.index('SIN EXISTENCIA') if 'SIN EXISTENCIA' in headers else 15
+                                    
+                                    fila_encontrada = None
+                                    nueva_cant = 0
+                                    
+                                    for idx, r in enumerate(datos_i):
+                                        if idx == 0: continue
+                                        def get_v(col_index): return str(r[col_index]).strip() if col_index < len(r) else ""
+                                        
+                                        filtro_row = " | ".join([e.upper() for e in [get_v(idx_oem), get_v(idx_marca), get_v(idx_modelo), get_v(idx_desc)] if e not in ['NAN', 'NONE', '']])
+                                        
+                                        if filtro_row == pieza_sel and get_v(idx_sinexist).upper() != 'SI':
+                                            fila_encontrada = idx + 1 
+                                            cant_actual = int(float(r[idx_cant])) if get_v(idx_cant) and get_v(idx_cant).replace('.','',1).isdigit() else 0
+                                            nueva_cant = cant_actual - cant_descontar
+                                            break
+                                            
+                                    if fila_encontrada:
+                                        if nueva_cant <= 0:
+                                            nueva_cant = 0
+                                            ws_i.update_cell(fila_encontrada, idx_sinexist + 1, "SI")
+                                        
+                                        ws_i.update_cell(fila_encontrada, idx_cant + 1, nueva_cant)
+                                        
+                                        if destino_salida.strip():
+                                            val_previo = str(datos_i[fila_encontrada-1][idx_sin]) if len(datos_i[fila_encontrada-1]) > idx_sin else ""
+                                            nuevo_dest = f"{val_previo} [Salida: {destino_salida.upper()}]".strip()
+                                            ws_i.update_cell(fila_encontrada, idx_sin + 1, nuevo_dest)
+                                            
+                                        st.success(f"✅ Salida registrada. Nuevo stock: {nueva_cant}")
+                                        st.cache_data.clear()
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.error("❌ No se encontró la pieza o ya no tiene existencia.")
+                                        
+                                except Exception as e:
+                                    st.error(f"❌ Error al conectar con la nube: {e}")
+                else:
+                    st.warning("No hay piezas disponibles en stock.")
+
+    st.markdown("---")
     if not df_inventario.empty:
         col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
         df_inv_filtrado = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
@@ -997,7 +1072,7 @@ if btn_guardar and permiso_edicion:
                         nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
-                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="pointer-events: auto; display: inline-block; padding: 12px 24px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-family: sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid white;">📄 Descargar {nombre_archivo}</a>'
+                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 12px 24px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-family: sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid white;">📄 Descargar {nombre_archivo}</a>'
                 
                 html_botones_flotantes += '</div>'
                 st.session_state['pdfs_generados'] = html_botones_flotantes

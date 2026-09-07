@@ -141,7 +141,6 @@ with cabecera:
             st.image("logo.png", width=150)
     with col_tit:
         st.markdown(f"<h2 style='margin-top: 10px; margin-bottom: 0px;'>PMR - {vista_actual}</h2>", unsafe_allow_html=True)
-        # Mostrar botones PDF si existen en memoria
         if st.session_state.get('pdfs_generados'):
             st.markdown(st.session_state['pdfs_generados'], unsafe_allow_html=True)
             if st.button("✅ Cerrar Avisos de Remisión"):
@@ -258,9 +257,18 @@ if not df_vista.empty:
             df_trabajo[col_precio] = pd.to_numeric(df_trabajo[col_precio].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
             df_trabajo_completo[col_precio] = pd.to_numeric(df_trabajo_completo[col_precio].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
 
+        # PARSEADOR SEGURO DE FECHAS
+        def parse_fecha_segura(val):
+            if pd.isna(val) or str(val).strip() == '': return ''
+            v_str = str(val).strip()
+            try: return pd.to_datetime(v_str, dayfirst=True).strftime('%d-%b-%y')
+            except:
+                try: return pd.to_datetime(v_str).strftime('%d-%b-%y')
+                except: return v_str # Si no entiende, deja el texto original intacto
+
         for c_fecha in [col_asignacion, col_vencimiento, col_fecha_confi]:
             if c_fecha and c_fecha in df_trabajo.columns:
-                df_trabajo[c_fecha] = pd.to_datetime(df_trabajo[c_fecha], errors='coerce', dayfirst=True).dt.strftime('%d-%b-%y').fillna('')
+                df_trabajo[c_fecha] = df_trabajo[c_fecha].apply(parse_fecha_segura)
                 
         for c_txt in [col_remision, col_comentarios, col_estatus, col_guia, col_origen]:
             if c_txt and c_txt in df_trabajo.columns:
@@ -280,8 +288,11 @@ if not df_vista.empty:
             df_trabajo[col_guia] = df_trabajo[col_guia].apply(limpiar_guia_display)
         
         if col_estatus:
-            estatus_excluidos = ['RECIBIDO', 'FACTURADO', 'CANCELADO', 'CANCELO KARLA', 'RECOLECCION', 'REASIGNAR']
-            df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.strip().str.upper().isin(estatus_excluidos)].copy()
+            if modo_consulta:
+                df_proceso = df_trabajo.copy()
+            else:
+                estatus_excluidos = ['RECIBIDO', 'FACTURADO', 'CANCELADO', 'CANCELO KARLA', 'RECOLECCION', 'REASIGNAR']
+                df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.strip().str.upper().isin(estatus_excluidos)].copy()
         else:
             df_proceso = df_trabajo.copy()
             
@@ -378,7 +389,15 @@ if vista_actual == "⚙️ Panel Operativo":
     hoy_str = datetime.datetime.now().strftime('%d-%b-%y')
     hoy_dt = pd.to_datetime(datetime.datetime.now().date())
     
-    vencidas_pasadas_kpi = len(df_proceso[(pd.to_datetime(df_proceso[col_vencimiento], format='%d-%b-%y', errors='coerce') < hoy_dt) & (df_proceso[col_vencimiento] != '') & (~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR"))]) if col_vencimiento else 0
+    def parse_dt_safe(val):
+        try: return pd.to_datetime(val, dayfirst=True)
+        except: return pd.NaT
+
+    if col_vencimiento:
+        fechas_venc_dt = df_proceso[col_vencimiento].apply(parse_dt_safe)
+        vencidas_pasadas_kpi = len(df_proceso[(fechas_venc_dt < hoy_dt) & (df_proceso[col_vencimiento] != '') & (~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR"))])
+    else: vencidas_pasadas_kpi = 0
+        
     vencen_hoy = len(df_proceso[df_proceso[col_vencimiento] == hoy_str]) if col_vencimiento else 0
     recolecciones = len(df_recoleccion_total)
     por_confirmar_kpi = len(df_proceso[df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")]) if col_estatus else 0
@@ -459,7 +478,7 @@ if vista_actual == "⚙️ Panel Operativo":
                 st.dataframe(df_vencimientos[cols_venc], column_config=base_config, hide_index=True, use_container_width=True)
                 
     if col_vencimiento and not df_filtrado.empty:
-        fechas_venc_filtro = pd.to_datetime(df_filtrado[col_vencimiento], format='%d-%b-%y', errors='coerce')
+        fechas_venc_filtro = df_filtrado[col_vencimiento].apply(parse_dt_safe)
         df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR"))].copy()
     else:
         df_atrasadas = pd.DataFrame()
@@ -978,7 +997,7 @@ if btn_guardar and permiso_edicion:
                         nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
-                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 12px 24px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-family: sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid white;">📄 Descargar {nombre_archivo}</a>'
+                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="pointer-events: auto; display: inline-block; padding: 12px 24px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-family: sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid white;">📄 Descargar {nombre_archivo}</a>'
                 
                 html_botones_flotantes += '</div>'
                 st.session_state['pdfs_generados'] = html_botones_flotantes

@@ -13,12 +13,21 @@ from google.oauth2.service_account import Credentials
 
 warnings.filterwarnings("ignore")
 
-st.set_page_config(page_title="Dashboard PMR - Operación", page_icon="📦", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="Dashboard PMR - Operación",
+    page_icon="📦",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 st.markdown("""
     <style>
         [data-testid="stDataFrame"] { zoom: 0.95; }
-        .block-container { padding-top: 2rem; padding-bottom: 40px; max-width: 98% !important; }
+        .block-container { 
+            padding-top: 2rem; 
+            padding-bottom: 40px; 
+            max-width: 98% !important; 
+        }
         @media (min-width: 768px) {
             div.element-container:has(#panel-fijo) + div {
                 position: sticky; top: 2.875rem; z-index: 999;
@@ -33,14 +42,16 @@ st.markdown("""
         }
         div[data-testid="stRadio"] div[role="radiogroup"] label:hover { background-color: #3b3b3b; }
         div[data-testid="stRadio"] div[role="radiogroup"] label:has(input:checked) {
-            background-color: #ff4b4b !important; border-color: #ff4b4b !important; box-shadow: 0 0 10px rgba(255, 75, 75, 0.4);
+            background-color: #ff4b4b !important; border-color: #ff4b4b !important;
+            box-shadow: 0 0 10px rgba(255, 75, 75, 0.4);
         }
         div[data-testid="stRadio"] div[role="radiogroup"] label p { color: white !important; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
-
+# =====================================================================
 # === [BLOQUE 0: CONEXIÓN TEMPRANA Y SISTEMA DE LOGIN] ===
+# =====================================================================
 SHEET_ID = "10jrOsS054n0atMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
 
 @st.cache_resource
@@ -56,6 +67,7 @@ if 'autenticado' not in st.session_state:
 
 if not st.session_state['autenticado']:
     st.markdown("<h1 style='text-align: center; color: #FF4B4B;'>🛡️ Acceso al Sistema PMR</h1>", unsafe_allow_html=True)
+    
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         with st.form("login_form"):
@@ -68,8 +80,10 @@ if not st.session_state['autenticado']:
                     doc = init_connection()
                     ws_usuarios = doc.worksheet("Usuarios") 
                     df_usuarios = pd.DataFrame(ws_usuarios.get_all_records())
+                    
                     df_usuarios['Usuario'] = df_usuarios['Usuario'].astype(str).str.strip().str.lower()
                     df_usuarios['Password'] = df_usuarios['Password'].astype(str).str.strip()
+                    
                     match = df_usuarios[(df_usuarios['Usuario'] == usuario_input) & (df_usuarios['Password'] == password_input)]
                     
                     if not match.empty:
@@ -83,20 +97,21 @@ if not st.session_state['autenticado']:
                     st.error(f"Error al conectar con la base de usuarios: {e}")
     st.stop() 
 
-
-# === [BLOQUE 2: MENÚ LATERAL Y CONTROLES] ===
+# =====================================================================
+# === [BLOQUE 2: MENÚ LATERAL Y ENCABEZADO] ===
+# =====================================================================
 with st.sidebar:
     st.success(f"👤 Operador activo:\n**{st.session_state['usuario_actual']}**")
-    st.markdown("### 🧭 Navegación")
-    vista_actual = st.radio("Selecciona una vista:", ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", "🏢 Talleres", "📦 Inventario", "🧾 Facturación"])
-    
     st.markdown("---")
     aseguradora_sel = st.selectbox("Aseguradora:", ["GNP", "Multiasistencias"])
     modo_consulta = st.checkbox("Modo Consulta (Solo lectura)", value=False)
-    
+    st.markdown("---")
+    st.markdown("### 🧭 Navegación")
+    vista_actual = st.radio("Selecciona una vista:", 
+                            ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", 
+                             "🏢 Talleres", "📦 Inventario", "🧾 Facturación"], label_visibility="collapsed")
     st.markdown("---")
     btn_guardar = st.button("💾 Guardar Cambios", type="primary", use_container_width=True)
-    
     if st.button("🚪 Cerrar Sesión", use_container_width=True):
         st.session_state['autenticado'] = False
         st.rerun()
@@ -104,13 +119,15 @@ with st.sidebar:
 st.markdown('<span id="panel-fijo"></span>', unsafe_allow_html=True)
 col_l1, col_l2 = st.columns([1.2, 4])
 with col_l1:
-    if os.path.exists(r"C:\Users\dell\OneDrive\PMR\Automatizacion PMR\logo.png"):
-        st.image(r"C:\Users\dell\OneDrive\PMR\Automatizacion PMR\logo.png", width=180)
+    if os.path.exists("logo.png"):
+        st.image("logo.png", width=180)
 with col_l2:
     st.markdown(f"<h1 style='text-align: left; margin-top: 30px;'>PMR - {vista_actual}</h1>", unsafe_allow_html=True)
 
 
+# =====================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
+# =====================================================================
 def obtener_dataframe(nombre_hoja):
     try:
         doc = init_connection()
@@ -275,7 +292,7 @@ df_editado_cobro = pd.DataFrame()
 df_editado = pd.DataFrame()
 
 
-# === [BLOQUE 4: VISTAS] ===
+# === [BLOQUE 4: VISTA 1 - ANALÍTICO] ===
 if vista_actual == "📊 Analítico":
     st.markdown("## 📊 Rendimiento de Operación")
     
@@ -324,6 +341,7 @@ if vista_actual == "📊 Analítico":
         fig_bar.update_layout(yaxis={'categoryorder':'total ascending'}, margin=dict(t=10, b=0, l=0, r=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig_bar, use_container_width=True)
 
+# === [BLOQUE 5: VISTA 2 - PANEL OPERATIVO] ===
 if vista_actual == "⚙️ Panel Operativo":
     st.markdown("### 📈 Indicadores Diarios")
     hoy_str = datetime.datetime.now().strftime('%d-%b-%y')
@@ -400,6 +418,32 @@ if vista_actual == "⚙️ Panel Operativo":
             df_editado_venc = st.data_editor(df_vencimientos[cols_venc], column_config=config_venc, disabled=[c for c in cols_venc if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios, col_guia]], hide_index=True, use_container_width=True, key="ed_venc")
             for col in [col_id, col_marca, col_modelo]:
                 if col in df_vencimientos.columns: df_editado_venc[col] = df_vencimientos[col].values
+                
+    if col_vencimiento and not df_filtrado.empty:
+        fechas_venc_filtro = pd.to_datetime(df_filtrado[col_vencimiento], format='%d-%b-%y', errors='coerce')
+        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR"))].copy()
+    else:
+        df_atrasadas = pd.DataFrame()
+    with st.expander(f"❌ Vencimientos Atrasados (Pendientes) | {df_atrasadas['Siniestro'].nunique() if not df_atrasadas.empty else 0} Siniestros", expanded=False):
+        if not df_atrasadas.empty:
+            df_atrasadas['Cancelar'] = False; df_atrasadas['Reasignar'] = False; df_atrasadas['Nueva Fecha'] = None
+            cols_atr = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_comentarios, 'Cancelar', 'Reasignar', 'Nueva Fecha'] if c in df_atrasadas.columns]
+            config_atr = base_config.copy()
+            config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MM/YYYY")})
+            df_editado_atrasadas = st.data_editor(df_atrasadas[cols_atr], column_config=config_atr, disabled=[c for c in cols_atr if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios]], hide_index=True, use_container_width=True, key="ed_atr")
+            for col in [col_id, col_marca, col_modelo]:
+                if col in df_atrasadas.columns: df_editado_atrasadas[col] = df_atrasadas[col].values
+
+    df_por_cobrar = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper() == "ENTREGADO"].copy() if col_estatus else pd.DataFrame()
+    with st.expander(f"💰 Por Cobrar (Entregados) | {df_por_cobrar['Siniestro'].nunique() if not df_por_cobrar.empty else 0} Siniestros", expanded=False):
+        if not df_por_cobrar.empty:
+            df_por_cobrar['Marcar Recibido'] = False
+            cols_cobro = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_comentarios, 'Marcar Recibido'] if c in df_por_cobrar.columns]
+            config_cobro = base_config.copy()
+            config_cobro.update({"Marcar Recibido": st.column_config.CheckboxColumn("🏁 Marcar Recibido", default=False)})
+            df_editado_cobro = st.data_editor(df_por_cobrar[cols_cobro], column_config=config_cobro, disabled=[c for c in cols_cobro if c not in ['Marcar Recibido', col_comentarios]], hide_index=True, use_container_width=True, key="ed_cobro")
+            for col in [col_id, col_desc]: 
+                if col in df_por_cobrar.columns: df_editado_cobro[col] = df_por_cobrar[col].values
 
     df_asignados = df_filtrado[~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")].copy() if col_estatus else df_filtrado.copy()
     with st.expander(f"📋 Pedidos Asignados (General) | {df_asignados['Siniestro'].nunique() if not df_asignados.empty else 0} Siniestros", expanded=False):
@@ -428,6 +472,122 @@ if vista_actual == "⚙️ Panel Operativo":
                         dfs_editados.append(df_editado_parcial)
         if dfs_editados: df_editado = pd.concat(dfs_editados, ignore_index=True)
 
+    df_recoleccion = df_recoleccion_total.copy()
+    if taller_sel: df_recoleccion = df_recoleccion[df_recoleccion[col_taller].astype(str).isin(taller_sel)]
+    if siniestro_sel:
+        ids_sel = [s.split(" - ")[0] for s in siniestro_sel]
+        df_recoleccion = df_recoleccion[df_recoleccion['Siniestro'].isin(ids_sel)]
+    if desc_sel: df_recoleccion = df_recoleccion[df_recoleccion[col_desc].astype(str).isin(desc_sel)]
+
+    with st.expander(f"↩️ Piezas para Recolección | {df_recoleccion['Siniestro'].nunique() if not df_recoleccion.empty else 0} Siniestros", expanded=False):
+        if not df_recoleccion.empty:
+            cols_rec = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_recoleccion.columns]
+            st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
+
+# === [BLOQUE 6: VISTA 3 - PEDIDOS Y PROVEEDORES] ===
+if vista_actual == "🛒 Pedidos y Proveedores":
+    st.markdown("### 🛒 Panel de Compras (Por Llegar)")
+    if not df_compras.empty:
+        df_compras['Recibido_Bool'] = df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
+        df_compras_disp = df_compras[df_compras['Recibido_Bool'] == False].copy()
+        if not df_compras_disp.empty:
+            df_compras_disp = df_compras_disp.drop(columns=['Recibido_Bool'])
+            df_compras_disp['Fecha_Compra_Dt'] = pd.to_datetime(df_compras_disp['Fecha Compra'], format='%d-%b-%y', errors='coerce')
+            df_compras_disp['ETA_Dias'] = pd.to_numeric(df_compras_disp['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
+            df_compras_disp['Llegada_Calculada'] = df_compras_disp['Fecha_Compra_Dt'] + pd.to_timedelta(df_compras_disp['ETA_Dias'], unit='d')
+            df_compras_disp['Fecha Llegada'] = df_compras_disp['Llegada_Calculada'].dt.strftime('%d-%b-%y').fillna('-')
+            df_compras_disp = df_compras_disp.sort_values(by='Llegada_Calculada', ascending=True)
+
+            df_compras_disp['Filtro_Busqueda'] = df_compras_disp['Siniestro'].astype(str) + " | " + df_compras_disp['Descripción Pieza'].astype(str)
+            lista_pedidos = sorted(list(df_compras_disp['Filtro_Busqueda'].unique()))
+            busqueda_pedido = st.multiselect("🔍 Buscar Pedido:", options=lista_pedidos)
+            if busqueda_pedido: df_compras_disp = df_compras_disp[df_compras_disp['Filtro_Busqueda'].isin(busqueda_pedido)].copy()
+
+            for col_c in df_compras_disp.columns:
+                if col_c not in ['Recibido', 'Filtro_Busqueda', 'Fecha_Compra_Dt', 'ETA_Dias', 'Llegada_Calculada']:
+                    df_compras_disp[col_c] = df_compras_disp[col_c].fillna("").astype(str).replace(['nan', 'None'], '')
+            df_compras_disp['Imprimir Remisión'] = False
+            df_compras_disp['Recibido'] = False 
+            
+            config_compras = {
+                'Costo Compra': st.column_config.NumberColumn("Costo Compra", format="$ %.2f"), 'Tiempo Entrega (Días)': st.column_config.NumberColumn("Tiempo Entrega", step=1),
+                'Fecha Compra': st.column_config.TextColumn("Fecha Compra", disabled=True), 'Fecha Llegada': st.column_config.TextColumn("Llegada Estimada", disabled=True),
+                'Recibido': st.column_config.CheckboxColumn("✅ Marcar Recibido", default=False), 'Imprimir Remisión': st.column_config.CheckboxColumn("🖨️ Imprimir al Recibir", default=False),
+                'Filtro_Busqueda': None, 'Fecha_Compra_Dt': None, 'ETA_Dias': None, 'Llegada_Calculada': None
+            }
+            
+            cols_ordenadas = ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Fecha Llegada', 'Recibido', 'Imprimir Remisión', 'Filtro_Busqueda', 'Fecha_Compra_Dt', 'ETA_Dias', 'Llegada_Calculada']
+            df_compras_disp = df_compras_disp[[c for c in cols_ordenadas if c in df_compras_disp.columns]]
+
+            df_editado_compras = st.data_editor(df_compras_disp, column_config=config_compras, disabled=[c for c in df_compras_disp.columns if c not in ['Costo Compra', 'Tiempo Entrega (Días)', 'Proveedor', 'Recibido', 'Imprimir Remisión']], hide_index=True, use_container_width=True, key="ed_compras")
+            df_editado_compras.index = df_compras_disp.index 
+            for col in ['Siniestro', 'Descripción Pieza']:
+                if col in df_compras.columns: df_editado_compras[col] = df_compras_disp[col].values
+        else: st.success("✅ Todos los pedidos de compras han sido recibidos.")
+    else: st.warning("No hay órdenes de compra registradas actualmente.")
+
+# === [BLOQUE 7: VISTAS 4 Y 5 - TALLERES E INVENTARIO] ===
+if vista_actual == "🏢 Talleres":
+    st.markdown("### 🏢 Base de Datos de Talleres")
+    if not df_catalogo.empty:
+        col_taller_cat = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
+        if col_taller_cat:
+            busqueda_taller = st.multiselect("🔍 Buscar Taller para editar:", options=sorted(list(df_catalogo[col_taller_cat].dropna().astype(str).unique())))
+            df_cat_disp = df_catalogo[df_catalogo[col_taller_cat].astype(str).isin(busqueda_taller)].copy() if busqueda_taller else df_catalogo.copy()
+        else: df_cat_disp = df_catalogo.copy()
+        
+        df_cat_disp = df_cat_disp[[c for c in df_cat_disp.columns if "Unnamed" not in str(c)]]
+        for c in df_cat_disp.columns: df_cat_disp[c] = df_cat_disp[c].fillna("").astype(str).replace(['nan', 'None', '0', '0.0'], '')
+        st.data_editor(df_cat_disp, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_cat")
+
+if vista_actual == "📦 Inventario":
+    st.markdown("### 📦 Control de Inventario Físico")
+    if not df_inventario.empty:
+        col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
+        df_inv_filtrado = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
+        
+        df_inv_filtrado['Filtro_Busqueda'] = df_inv_filtrado.apply(lambda r: " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+        busqueda_inv = st.multiselect("🔍 Buscar Pieza:", options=sorted(list(df_inv_filtrado['Filtro_Busqueda'].dropna().unique())))
+        df_inv_disp = df_inv_filtrado[(df_inv_filtrado['Filtro_Busqueda'].isin(busqueda_inv)) & (~df_inv_filtrado['Sin Existencia'])].copy() if busqueda_inv else df_inv_filtrado[~df_inv_filtrado['Sin Existencia']].copy()
+        
+        if 'Filtro_Busqueda' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Filtro_Busqueda'])
+        for c in df_inv_disp.columns:
+            if c != 'Sin Existencia': df_inv_disp[c] = df_inv_disp[c].fillna("").astype(str).replace(['nan', 'None', '0.0'], '').str.upper()
+        
+        st.data_editor(df_inv_disp, num_rows="dynamic", column_config={'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)}, use_container_width=True, hide_index=True, key="ed_inv")
+
+# === [BLOQUE 8: FACTURACIÓN] ===
+if vista_actual == "🧾 Facturación":
+    st.markdown("### 🧾 Pedidos Listos para Facturar")
+    df_fact = df_trabajo[df_trabajo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"].copy() if col_estatus else pd.DataFrame()
+    if not df_fact.empty:
+        df_fact['Siniestro'] = df_fact[col_id].apply(lambda x: str(x)[:-2] if str(x).endswith('.0') else str(x)) if col_id else ""
+        df_fact['Vehiculo_Info'] = df_fact.apply(lambda r: f"{r.get(col_marca, '')} {r.get(col_modelo, '')} {str(int(float(r[col_anio]))) if col_anio and pd.notnull(r.get(col_anio)) else ''}".strip(), axis=1)
+        
+        dict_placas = dict(zip(df_placas['Siniestro'].astype(str).str.strip().str.replace('.0', '', regex=False), df_placas['Placa'].astype(str))) if not df_placas.empty and 'Siniestro' in df_placas.columns else {}
+        
+        dfs_editados_fact = []
+        for taller, df_taller_fact in df_fact.groupby(col_taller):
+            with st.expander(f"🏢 {taller} | {df_taller_fact['Siniestro'].nunique()} Siniestro(s) para Facturar", expanded=False):
+                for siniestro_f, df_g in df_taller_fact.groupby('Siniestro'):
+                    placa_val = dict_placas.get(str(siniestro_f).strip(), "⚠️ PLACA PENDIENTE")
+                    sufijo_multi = f" // {siniestro_f} // {placa_val} // {df_g['Vehiculo_Info'].iloc[0]}"
+                    st.markdown(f"**🚗 {siniestro_f} | {df_g['Vehiculo_Info'].iloc[0]}**")
+                    
+                    df_mostrar_f = df_g.copy()
+                    df_mostrar_f['Facturado'] = False
+                    df_mostrar_f['Concepto Factura'] = df_mostrar_f.apply(lambda r: f"{r.get(col_desc, '')}{sufijo_multi}" if aseguradora_sel == "Multiasistencias" else r.get(col_desc, ''), axis=1)
+                    
+                    cols_mostrar = [c for c in ['Facturado', col_cant, 'Concepto Factura', col_precio, col_origen] if c in df_mostrar_f.columns or c == 'Facturado']
+                    config_fact = {'Facturado': st.column_config.CheckboxColumn("✅ Facturado", default=False), 'Concepto Factura': st.column_config.TextColumn("Descripción para Factura", width="large"), col_precio: st.column_config.NumberColumn("Precio", format="$ %.2f")}
+                    
+                    df_editado_parcial_f = st.data_editor(df_mostrar_f[cols_mostrar], column_config=config_fact, disabled=[c for c in cols_mostrar if c != 'Facturado'], hide_index=True, use_container_width=True, key=f"fact_{taller}_{siniestro_f}")
+                    for col_llave in [col_id, col_desc]:
+                        if col_llave in df_g.columns: df_editado_parcial_f[col_llave] = df_g[col_llave].values
+                    dfs_editados_fact.append(df_editado_parcial_f)
+                    
+        if dfs_editados_fact: df_editado_fact = pd.concat(dfs_editados_fact, ignore_index=True)
+    else: st.success("✅ No hay pedidos pendientes de facturación.")
 
 # === [BLOQUE 9: MOTOR DE GUARDADO Y PDF] ===
 if btn_guardar:
@@ -445,7 +605,31 @@ if btn_guardar:
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Confirmar Surtido') else None)
-            cambios_a_guardar.setdefault(k, {}).update({'estatus': nuevo_estatus} if nuevo_estatus and nuevo_estatus != orig['estatus_db'] else {})
+            if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+
+    if not df_editado_venc.empty:
+        for _, row in df_editado_venc.iterrows():
+            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            orig = originales.get(k, {'estatus_db': ''})
+            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Reasignar') else None)
+            if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+
+    if not df_editado_atrasadas.empty:
+        for _, row in df_editado_atrasadas.iterrows():
+            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            orig = originales.get(k, {'estatus_db': ''})
+            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Reasignar') else None)
+            if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+
+    if not df_editado_cobro.empty:
+        for _, row in df_editado_cobro.iterrows():
+            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            if row.get('Marcar Recibido'): cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
+
+    if not df_editado_fact.empty:
+        for _, row in df_editado_fact.iterrows():
+            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            if row.get('Facturado'): cambios_a_guardar.setdefault(k, {})['estatus'] = "FACTURADO"
 
     if not df_editado.empty:
         for _, row in df_editado.iterrows():
@@ -487,7 +671,107 @@ if btn_guardar:
                         if 'usuario_rem' in c and idx_usr_rem >= 0: datos_uni[i][idx_usr_rem] = c['usuario_rem']
                 
                 ws_uni.update(range_name='A1', values=datos_uni)
+
+            # --- GENERACIÓN DE PDF FLOTANTE ---
+            llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
+            if llaves_a_imprimir:
+                marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
+                cols_agrup = [col_id, col_taller, col_marca, col_modelo]
+                agrupadores = [c for c in cols_agrup if c in marcados_remision.columns]
+                
+                html_botones_flotantes = '<div style="position: fixed; top: 15px; left: 50%; transform: translateX(-50%); z-index: 999999; display: flex; flex-direction: column; gap: 10px; align-items: center; pointer-events: none;">'
+                usuario_print = st.session_state.get('usuario_actual', 'Sistema')
+                
+                for keys, df_g in marcados_remision.groupby(agrupadores):
+                    siniestro_v = keys[agrupadores.index(col_id)] if col_id in agrupadores else ""
+                    taller_v = keys[agrupadores.index(col_taller)] if col_taller in agrupadores else ""
+                    marca_v = keys[agrupadores.index(col_marca)] if col_marca in agrupadores else ""
+                    modelo_v = keys[agrupadores.index(col_modelo)] if col_modelo in agrupadores else ""
+                    
+                    folio_str_print = "S/N"
+                    for _, row_rem in df_g.iterrows():
+                        key_rem = generar_llave(row_rem.get(col_id, ''), row_rem.get(col_desc, ''))
+                        if key_rem in cambios_a_guardar and 'remision_num' in cambios_a_guardar[key_rem]:
+                            folio_str_print = cambios_a_guardar[key_rem]['remision_num']
+                            break
+                    
+                    fecha_actual = datetime.datetime.now()
+                    hora_am_pm = fecha_actual.strftime('%I:%M %p')
+                    firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%Y')} {hora_am_pm}"
+                    
+                    dir_v = ""
+                    col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
+                    if not df_catalogo.empty and col_cat_taller:
+                        match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == str(taller_v).strip().upper()]
+                        if not match_taller.empty:
+                            col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
+                            if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
+                    
+                    def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
+
+                    pdf = FPDF(orientation='L', unit='mm', format='A4')
+                    pdf.add_page()
+                    
+                    def dibujar_bloque_remision(x_offset):
+                        y_offset = 15
+                        if os.path.exists("logo.png"):
+                            try: pdf.image("logo.png", x_offset, y_offset - 3, 30)
+                            except: pass
+                        
+                        pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
+                        pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"), ln=True)
+                        pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5)
+                        pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"), ln=True)
+                        pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_x(x_offset + 32)
+                        pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"), ln=True); pdf.set_x(x_offset + 32)
+                        pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"), ln=True)
+
+                        pdf.set_text_color(0, 0, 0); pdf.set_xy(x_offset + 105, y_offset); pdf.set_font("Arial", 'B', 9)
+                        pdf.cell(30, 5, "REMISION", border=1, align='C', ln=True); pdf.set_x(x_offset + 105)
+                        pdf.set_text_color(200, 0, 0); pdf.set_font("Arial", 'B', 10)
+                        pdf.cell(30, 6, folio_str_print, border=1, align='C', ln=True)
+                        
+                        y_datos = y_offset + 22; pdf.set_xy(x_offset, y_datos); pdf.set_fill_color(220, 220, 220)
+                        pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
+                        pdf.cell(20, 5, "TALLER", border=1, fill=True); pdf.set_font("Arial", '', 7)
+                        pdf.cell(115, 5, limpiar_texto(f" {taller_v}"), border=1, ln=True); pdf.set_x(x_offset)
+                        pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "DIRECCION", border=1, fill=True)
+                        pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}"), border=1, ln=True); pdf.set_x(x_offset)
+                        pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "SINIESTRO", border=1, fill=True)
+                        pdf.set_font("Arial", 'B', 8); pdf.cell(45, 5, limpiar_texto(f" {siniestro_v}"), border=1)
+                        pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "VEHICULO", border=1, fill=True)
+                        pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}"), border=1, ln=True)
+
+                        y_tabla = y_datos + 20; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0)
+                        pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
+                        pdf.cell(15, 6, "CANT", border=1, fill=True, align='C')
+                        pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C'); pdf.ln(6)
+
+                        pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
+                        for _, row_rem in df_g.iterrows():
+                            cant_v = str(row_rem.get(col_cant, 1))
+                            if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
+                            pdf.set_x(x_offset); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C')
+                            pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, ''))), border=1); pdf.ln(5)
+                            
+                        pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)
+                        pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
+
+                    dibujar_bloque_remision(10)
+                    pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
+                    dibujar_bloque_remision(152)
+
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                        pdf.output(tmp.name)
+                        nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
+                        with open(tmp.name, "rb") as f: pdf_bytes = f.read()
+                        b64 = base64.b64encode(pdf_bytes).decode()
+                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="pointer-events: auto; display: inline-block; padding: 12px 24px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-family: sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid white;">📄 Descargar {nombre_archivo}</a>'
+                
+                html_botones_flotantes += '</div>'
+                st.markdown(html_botones_flotantes, unsafe_allow_html=True)
+            
             st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅")
-            st.rerun()
+            
         except Exception as e:
             st.error(f"❌ Error guardando: {e}")

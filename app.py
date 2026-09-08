@@ -108,60 +108,48 @@ usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
 rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 
 # =====================================================================
-# === [BLOQUE 2: MENÚ LATERAL Y NAVEGACIÓN] ===
-# =====================================================================
+# === [BLOQUE 2: MENÚ LATERAL Y HEADER PRINCIPAL] ===
 with st.sidebar:
-    st.success(f"👤 Operador activo:\n**{st.session_state['usuario_actual']}**\n\n🛡️ Rol: **{st.session_state['rol_actual']}**")
+    st.success(f"👤 Operador activo: {st.session_state.get('usuario_actual', 'Daniel Cantú')}\n\n🛡️ Rol: Administrador")
     st.markdown("---")
-    aseguradora_sel = st.selectbox("Aseguradora:", ["GNP", "Multiasistencias"])
-    modo_consulta = st.checkbox("Modo Consulta (Solo lectura)", value=False)
+    st.markdown("🧭 **Navegación**")
+    vista_actual = st.radio("Navegación", ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", "🏢 Talleres", "📦 Inventario", "🧾 Facturación"], label_visibility="collapsed")
     st.markdown("---")
-    st.markdown("### 🧭 Navegación")
-    vista_actual = st.radio("Selecciona una vista:", 
-                            ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", 
-                             "🏢 Talleres", "📦 Inventario", "🧾 Facturación"], label_visibility="collapsed")
-    st.markdown("---")
-    if st.button("🚪 Cerrar Sesión", use_container_width=True):
-        st.session_state['autenticado'] = False
+    if st.button("🚪 Cerrar Sesión"):
+        st.session_state.clear()
         st.rerun()
 
-permiso_edicion = True
-if rol_activo in ['SOLO LECTURA', 'VISITANTE'] or usuario_activo in ['DIONICIO CANTÚ', 'DIONICIO CANTU']:
-    permiso_edicion = False
-elif rol_activo in ['ALMACÉN', 'ALMACEN'] or usuario_activo in ['JUAN GARZA', 'JUAN GRAZA']:
-    if vista_actual == "📦 Inventario":
-        permiso_edicion = True
-    else:
-        permiso_edicion = False
+# HEADER Y CONTROLES SUPERIORES (Fuera del sidebar)
+st.markdown('<div id="panel-fijo"></div>', unsafe_allow_html=True)
 
-# =====================================================================
-# === PANEL SUPERIOR FIJO ===
-# =====================================================================
-st.markdown('<span id="panel-fijo"></span>', unsafe_allow_html=True)
-cabecera = st.container()
-with cabecera:
-    col_logo, col_tit, col_btn = st.columns([1.2, 4, 2])
-    with col_logo:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", width=150)
-    with col_tit:
-        # Etiqueta dinámica de la aseguradora en el título principal
-        color_aseg = "#00529B" if aseguradora_sel == "GNP" else "#00823B"
-        st.markdown(f"<h2 style='margin-top: 10px; margin-bottom: 0px;'>PMR - {vista_actual} | <span style='color:{color_aseg}; font-size: 0.9em;'>🛡️ {aseguradora_sel}</span></h2>", unsafe_allow_html=True)
-        
-        if st.session_state.get('pdfs_generados'):
-            st.markdown(st.session_state['pdfs_generados'], unsafe_allow_html=True)
-            if st.button("✅ Cerrar Avisos de Remisión"):
-                st.session_state['pdfs_generados'] = ""
-                st.rerun()
-                
+col_logo, col_tit, col_ctrl = st.columns([1.5, 4, 3])
+with col_logo:
+    if os.path.exists("logo.png"): st.image("logo.png", width=130)
+
+with col_ctrl:
+    # Mudanza del selector de aseguradora y controles aquí arriba
+    aseguradora_sel = st.selectbox("🛡️ Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
+    
+    col_btn, col_chk = st.columns([1.2, 1])
     with col_btn:
-        st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
-        if permiso_edicion and not modo_consulta:
-            btn_guardar = st.button("💾 Guardar Cambios", type="primary", use_container_width=True)
-        else:
-            btn_guardar = False
-            st.button("🔒 Solo Lectura", disabled=True, use_container_width=True)
+        btn_guardar = st.button("💾 Guardar Cambios", use_container_width=True, type="primary")
+    with col_chk:
+        modo_consulta = st.checkbox("Modo Lectura", value=False)
+    
+    permiso_edicion = not modo_consulta
+
+with col_tit:
+    color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00529B"
+    st.markdown(f"<h2 style='margin-bottom: 0;'>PMR - {vista_actual.split(' ')[0]} {vista_actual.split(' ', 1)[1]} | <span style='color: {color_aseg}; font-weight: bold;'>🛡️ {aseguradora_sel}</span></h2>", unsafe_allow_html=True)
+    
+    # Aquí se anclan los botones de remisión para que siempre queden a la vista
+    if 'pdfs_generados' in st.session_state and st.session_state['pdfs_generados']:
+        st.markdown(st.session_state['pdfs_generados'], unsafe_allow_html=True)
+        if st.button("✅ Cerrar Avisos de Remisión", key="close_pdfs"):
+            st.session_state['pdfs_generados'] = ""
+            st.rerun()
+
+st.markdown("---")
 
 # =====================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -934,7 +922,6 @@ if btn_guardar and permiso_edicion:
     
     originales = {}
     for _, r in df_trabajo_completo.iterrows():
-        # Tomamos el Siniestro directo para máxima seguridad en la llave
         k = generar_llave(r.get('Siniestro', r.get(col_id, '')), r.get(col_desc, ''))
         originales[k] = {
             'comentario': str(r.get(col_comentarios, '')).strip(),
@@ -976,12 +963,9 @@ if btn_guardar and permiso_edicion:
             guia_actual = str(row.get(col_guia, '')).strip()
             nueva_fecha = row.get('Nueva Fecha')
             
-            # --- CAPTURA INTELIGENTE DE FECHA (Forzando formato correcto) ---
             if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                try:
-                    fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
-                except:
-                    fecha_str = str(nueva_fecha)
+                try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
+                except: fecha_str = str(nueva_fecha)
                 cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                 if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
             elif row.get('Reasignar') and not nuevo_estatus:
@@ -999,12 +983,9 @@ if btn_guardar and permiso_edicion:
             comentario_actual = str(row.get(col_comentarios, '')).strip()
             nueva_fecha = row.get('Nueva Fecha')
             
-            # --- CAPTURA INTELIGENTE DE FECHA ---
             if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                try:
-                    fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
-                except:
-                    fecha_str = str(nueva_fecha)
+                try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
+                except: fecha_str = str(nueva_fecha)
                 cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                 if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
             elif row.get('Reasignar') and not nuevo_estatus:
@@ -1127,17 +1108,22 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- 2. PUENTE A BD_COMPRAS ---
+            # --- 2. PUENTE A BD_COMPRAS (ANTI-FILAS FANTASMA) ---
             if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
                 try:
                     ws_comp = doc.worksheet("BD_COMPRAS")
-                    datos_comp = ws_comp.get_all_values()
+                    datos_comp_crudos = ws_comp.get_all_values()
                     
-                    if not datos_comp:
+                    if not datos_comp_crudos:
                         headers_comp = ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Recibido']
                         datos_comp = [headers_comp]
                     else:
-                        headers_comp = [str(h).strip() for h in datos_comp[0]]
+                        headers_comp = [str(h).strip() for h in datos_comp_crudos[0]]
+                        # FILTRO ANTI-FANTASMAS: Solo guardamos en memoria las filas que realmente tienen texto
+                        datos_comp = [headers_comp]
+                        for fila in datos_comp_crudos[1:]:
+                            if any(str(celda).strip() for celda in fila): 
+                                datos_comp.append(fila)
                         
                     def get_col_idx(name):
                         if name in headers_comp: return headers_comp.index(name)
@@ -1203,7 +1189,7 @@ if btn_guardar and permiso_edicion:
                 except Exception as e_comp:
                     st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
 
-            # --- GENERACIÓN DE PDF Y VISTA COMPACTA ---
+            # --- GENERACIÓN DE PDF COMPACTA ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
                 marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]

@@ -373,7 +373,7 @@ if vista_actual == "📊 Analítico":
         if not df_compras_llegar.empty:
             def parse_spanish_date(d_str):
                 if not isinstance(d_str, str): return pd.NaT
-                d_str = d_str.lower()
+                d_str = d_str.lower().replace('-', '/') # <--- CORRECCIÓN DE GUIONES
                 meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
                 for text, num in meses.items():
                     if text in d_str:
@@ -568,7 +568,6 @@ if vista_actual == "⚙️ Panel Operativo":
                                 "Cancelar": st.column_config.CheckboxColumn("🚫 Can") 
                             })
                             
-                            # AQUÍ DESBLOQUEAMOS LAS FECHAS DE ASIGNACIÓN Y VENCIMIENTO
                             columnas_editables = columnas_checkbox + [col_comentarios, col_guia, col_asignacion, col_vencimiento]
                             df_editado_parcial = st.data_editor(df_grupo[orden_deseado], column_config=config_pedidos, disabled=[c for c in orden_deseado if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                             for col in [col_id, col_taller, col_marca, col_modelo, col_desc, 'Siniestro', 'Vehiculo_Info']:
@@ -602,7 +601,7 @@ if vista_actual == "🛒 Pedidos y Proveedores":
             
             def parse_spanish_date(d_str):
                 if not isinstance(d_str, str): return pd.NaT
-                d_str = d_str.lower()
+                d_str = d_str.lower().replace('-', '/') # <--- CORRECCIÓN DE GUIONES
                 meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
                 for text, num in meses.items():
                     if text in d_str:
@@ -779,16 +778,21 @@ if vista_actual == "📦 Inventario":
                             st.rerun()
                         except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
 
-        # --- MÓDULO NUEVO DE SALIDAS Y VENTAS ---
+        # --- MÓDULO NUEVO DE SALIDAS Y VENTAS (CORREGIDO ID Y CERO STOCK) ---
         st.markdown("---")
         with st.expander("📉 Registrar Salida / Venta", expanded=False):
             if not df_inventario.empty:
                 col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
                 df_inv_act = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
-                df_stock = df_inv_act[~df_inv_act['Sin Existencia']].copy()
+                
+                # Filtro estricto: Que NO tenga etiqueta de "Sin Existencia" Y que la Cantidad Numérica sea mayor a 0
+                df_inv_act['Cantidad_Num'] = pd.to_numeric(df_inv_act['Cantidad'], errors='coerce').fillna(0)
+                df_stock = df_inv_act[(~df_inv_act['Sin Existencia']) & (df_inv_act['Cantidad_Num'] > 0)].copy()
                 
                 if not df_stock.empty:
-                    df_stock['Filtro_Venta'] = df_stock.apply(lambda r: " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+                    # Se crea un ID único basado en la fila real de Google Sheets para evitar fallas por nombres iguales o celdas vacías
+                    df_stock['GS_Row'] = df_stock.index + 2
+                    df_stock['Filtro_Venta'] = df_stock.apply(lambda r: f"ID:{r['GS_Row']} - " + " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
                     
                     with st.form("form_salida_inv", clear_on_submit=True):
                         st.info("Selecciona una pieza para descontar del inventario. Si la cantidad llega a 0, se ocultará automáticamente.")
@@ -803,81 +807,73 @@ if vista_actual == "📦 Inventario":
                                 st.error("❌ Por favor selecciona una pieza.")
                             else:
                                 try:
+                                    fila_encontrada = int(pieza_sel.split(' - ')[0].replace('ID:', '').strip())
+                                    
                                     doc = init_connection()
                                     ws_i = doc.worksheet("BD_INVENTARIO")
                                     datos_i = ws_i.get_all_values()
-                                    
                                     headers = [str(h).strip().upper() for h in datos_i[0]]
-                                    idx_oem = headers.index('NÚMERO DE PARTE (OEM)') if 'NÚMERO DE PARTE (OEM)' in headers else 1
-                                    idx_marca = headers.index('MARCA') if 'MARCA' in headers else 4
-                                    idx_modelo = headers.index('MODELO') if 'MODELO' in headers else 5
-                                    idx_desc = headers.index('DESCRIPCIÓN DE LA PIEZA') if 'DESCRIPCIÓN DE LA PIEZA' in headers else 3
                                     idx_cant = headers.index('CANTIDAD') if 'CANTIDAD' in headers else 9
                                     idx_sin = headers.index('NO. SINIESTRO / LOTE') if 'NO. SINIESTRO / LOTE' in headers else 13
                                     idx_sinexist = headers.index('SIN EXISTENCIA') if 'SIN EXISTENCIA' in headers else 15
                                     
-                                    fila_encontrada = None
-                                    nueva_cant = 0
+                                    cant_actual_str = str(datos_i[fila_encontrada-1][idx_cant]).strip()
+                                    cant_actual = int(float(cant_actual_str)) if cant_actual_str.replace('.','',1).isdigit() else 0
+                                    nueva_cant = cant_actual - cant_descontar
                                     
-                                    for idx, r in enumerate(datos_i):
-                                        if idx == 0: continue
-                                        def get_v(col_index): return str(r[col_index]).strip() if col_index < len(r) else ""
+                                    if nueva_cant <= 0:
+                                        nueva_cant = 0
+                                        ws_i.update_cell(fila_encontrada, idx_sinexist + 1, "SI")
+                                    
+                                    ws_i.update_cell(fila_encontrada, idx_cant + 1, nueva_cant)
+                                    
+                                    if destino_salida.strip():
+                                        val_previo = str(datos_i[fila_encontrada-1][idx_sin]) if len(datos_i[fila_encontrada-1]) > idx_sin else ""
+                                        nuevo_dest = f"{val_previo} [Salida: {destino_salida.upper()}]".strip()
+                                        ws_i.update_cell(fila_encontrada, idx_sin + 1, nuevo_dest)
                                         
-                                        filtro_row = " | ".join([e.upper() for e in [get_v(idx_oem), get_v(idx_marca), get_v(idx_modelo), get_v(idx_desc)] if e not in ['NAN', 'NONE', '']])
-                                        
-                                        if filtro_row == pieza_sel and get_v(idx_sinexist).upper() != 'SI':
-                                            fila_encontrada = idx + 1 
-                                            cant_actual = int(float(r[idx_cant])) if get_v(idx_cant) and get_v(idx_cant).replace('.','',1).isdigit() else 0
-                                            nueva_cant = cant_actual - cant_descontar
-                                            break
-                                            
-                                    if fila_encontrada:
-                                        if nueva_cant <= 0:
-                                            nueva_cant = 0
-                                            ws_i.update_cell(fila_encontrada, idx_sinexist + 1, "SI")
-                                        
-                                        ws_i.update_cell(fila_encontrada, idx_cant + 1, nueva_cant)
-                                        
-                                        if destino_salida.strip():
-                                            val_previo = str(datos_i[fila_encontrada-1][idx_sin]) if len(datos_i[fila_encontrada-1]) > idx_sin else ""
-                                            nuevo_dest = f"{val_previo} [Salida: {destino_salida.upper()}]".strip()
-                                            ws_i.update_cell(fila_encontrada, idx_sin + 1, nuevo_dest)
-                                            
-                                        st.success(f"✅ Salida registrada. Nuevo stock: {nueva_cant}")
-                                        st.cache_data.clear()
-                                        time.sleep(1)
-                                        st.rerun()
-                                    else:
-                                        st.error("❌ No se encontró la pieza o ya no tiene existencia.")
+                                    st.success(f"✅ Salida registrada. Nuevo stock: {nueva_cant}")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
                                         
                                 except Exception as e:
                                     st.error(f"❌ Error al conectar con la nube: {e}")
                 else:
-                    st.warning("No hay piezas disponibles en stock.")
+                    st.warning("No hay piezas disponibles en stock (Cantidades agotadas).")
 
     st.markdown("---")
     if not df_inventario.empty:
         col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
         df_inv_filtrado = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
         
-        df_inv_filtrado['Filtro_Busqueda'] = df_inv_filtrado.apply(lambda r: " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+        # Filtramos también la vista global para que se oculten las que tienen cantidad 0
+        df_inv_filtrado['Cantidad_Num_Vista'] = pd.to_numeric(df_inv_filtrado['Cantidad'], errors='coerce').fillna(0)
+        df_inv_filtrado = df_inv_filtrado[(~df_inv_filtrado['Sin Existencia']) & (df_inv_filtrado['Cantidad_Num_Vista'] > 0)].copy()
         
-        busqueda_inv = st.multiselect("🔍 Buscar Pieza:", options=sorted(list(df_inv_filtrado['Filtro_Busqueda'].dropna().unique())))
-        
-        df_inv_disp = df_inv_filtrado[(df_inv_filtrado['Filtro_Busqueda'].isin(busqueda_inv)) & (~df_inv_filtrado['Sin Existencia'])].copy() if busqueda_inv else df_inv_filtrado[~df_inv_filtrado['Sin Existencia']].copy()
-        
-        if 'Filtro_Busqueda' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Filtro_Busqueda'])
-        for c in df_inv_disp.columns:
-            if c != 'Sin Existencia': df_inv_disp[c] = df_inv_disp[c].fillna("").astype(str).replace(['nan', 'None', '0.0'], '').str.upper()
-        
-        df_inv_disp.insert(0, 'Nº', range(1, len(df_inv_disp) + 1))
-        st.markdown(f"**🔢 Total de piezas listadas:** {len(df_inv_disp)}")
-        
-        if permiso_edicion:
-            config_inv = {'Nº': st.column_config.NumberColumn("Nº", disabled=True), 'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)}
-            st.data_editor(df_inv_disp, num_rows="dynamic", column_config=config_inv, use_container_width=True, hide_index=True, key="ed_inv")
+        if not df_inv_filtrado.empty:
+            df_inv_filtrado['Filtro_Busqueda'] = df_inv_filtrado.apply(lambda r: " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+            
+            busqueda_inv = st.multiselect("🔍 Buscar Pieza:", options=sorted(list(df_inv_filtrado['Filtro_Busqueda'].dropna().unique())))
+            
+            df_inv_disp = df_inv_filtrado[df_inv_filtrado['Filtro_Busqueda'].isin(busqueda_inv)].copy() if busqueda_inv else df_inv_filtrado.copy()
+            
+            if 'Filtro_Busqueda' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Filtro_Busqueda'])
+            if 'Cantidad_Num_Vista' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Cantidad_Num_Vista'])
+            
+            for c in df_inv_disp.columns:
+                if c != 'Sin Existencia': df_inv_disp[c] = df_inv_disp[c].fillna("").astype(str).replace(['nan', 'None', '0.0'], '').str.upper()
+            
+            df_inv_disp.insert(0, 'Nº', range(1, len(df_inv_disp) + 1))
+            st.markdown(f"**🔢 Total de piezas listadas:** {len(df_inv_disp)}")
+            
+            if permiso_edicion:
+                config_inv = {'Nº': st.column_config.NumberColumn("Nº", disabled=True), 'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)}
+                st.data_editor(df_inv_disp, num_rows="dynamic", column_config=config_inv, use_container_width=True, hide_index=True, key="ed_inv")
+            else:
+                st.dataframe(df_inv_disp, use_container_width=True, hide_index=True)
         else:
-            st.dataframe(df_inv_disp, use_container_width=True, hide_index=True)
+            st.info("El inventario está vacío o todas las piezas están agotadas.")
 
 # === [BLOQUE 8: FACTURACIÓN] ===
 if vista_actual == "🧾 Facturación":
@@ -940,13 +936,22 @@ if btn_guardar and permiso_edicion:
     cambios_bd_compras = {}
 
     if not df_editado_conf.empty:
+        tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+        fecha_hoy_conf = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
+        
         for _, row in df_editado_conf.iterrows():
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Confirmar Surtido') else None)
             comentario_actual = str(row.get(col_comentarios, '')).strip()
-            if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-            if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+            
+            if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
+                cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+                if nuevo_estatus == "EN PROCESAMIENTO":
+                    cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_conf
+                    
+            if comentario_actual != orig['comentario']: 
+                cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
     if not df_editado_venc.empty:
         for _, row in df_editado_venc.iterrows():
@@ -989,7 +994,6 @@ if btn_guardar and permiso_edicion:
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
             if row.get('Facturado'): cambios_a_guardar.setdefault(k, {})['estatus'] = "FACTURADO"
 
-    # --- LÓGICA DE ACTUALIZACIÓN DESDE PANEL OPERATIVO ---
     if not df_editado.empty:
         for _, row in df_editado.iterrows():
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
@@ -1007,7 +1011,6 @@ if btn_guardar and permiso_edicion:
             if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
             if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
             
-            # Guardado manual si editaste Asignación o Vencimiento directo en la tabla
             if venc_actual and venc_actual != orig['vencimiento_db']: cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
             if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
             
@@ -1022,7 +1025,6 @@ if btn_guardar and permiso_edicion:
                 cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
                 cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
 
-    # --- LÓGICA DE ACTUALIZACIÓN DESDE PESTAÑA COMPRAS ---
     if not df_editado_compras.empty:
         for _, row in df_editado_compras.iterrows():
             k = generar_llave(row.get('Siniestro', ''), row.get('Descripción Pieza', ''))
@@ -1058,6 +1060,7 @@ if btn_guardar and permiso_edicion:
                 idx_guia = headers.index(col_guia) if col_guia in headers else -1
                 idx_venc = headers.index(col_vencimiento) if col_vencimiento in headers else -1
                 idx_asig = headers.index(col_asignacion) if col_asignacion in headers else -1
+                idx_confi = headers.index(col_fecha_confi) if col_fecha_confi in headers else -1
                 
                 max_folios = {"MULTI": 0, "GNP": 0}
                 for pref in ["MULTI", "GNP"]:
@@ -1088,6 +1091,7 @@ if btn_guardar and permiso_edicion:
                         if 'guia' in c and idx_guia >= 0: datos_uni[i][idx_guia] = c['guia']
                         if 'vencimiento' in c and idx_venc >= 0: datos_uni[i][idx_venc] = c['vencimiento']
                         if 'asignacion' in c and idx_asig >= 0: datos_uni[i][idx_asig] = c['asignacion']
+                        if 'fecha_confi' in c and idx_confi >= 0: datos_uni[i][idx_confi] = c['fecha_confi']
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
@@ -1146,7 +1150,6 @@ if btn_guardar and permiso_edicion:
                             if nuevo_eta != '0' and not str(datos_comp[i][i_tiempo]).strip():
                                 datos_comp[i][i_tiempo] = nuevo_eta
                                 
-                    # Ajuste de zona horaria para la fecha de compra en la base de datos (UTC-6)
                     tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
                     fecha_hoy_comp = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
                     
@@ -1195,20 +1198,27 @@ if btn_guardar and permiso_edicion:
                             folio_str_print = cambios_a_guardar[key_rem]['remision_num']
                             break
                     
-                    # --- AQUÍ ESTÁ EL AJUSTE FINAL DE LA ZONA HORARIA (UTC-6) PARA LA FIRMA DEL PDF ---
                     tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
                     fecha_actual = datetime.datetime.now(tz_mx)
                     hora_am_pm = fecha_actual.strftime('%I:%M %p')
                     firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%Y')} {hora_am_pm}"
                     
                     dir_v = ""
+                    aviso_taller_html = "" 
                     col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
                     if not df_catalogo.empty and col_cat_taller:
                         match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == str(taller_v).strip().upper()]
                         if not match_taller.empty:
                             col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
                             if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
+                        else:
+                            aviso_taller_html = f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-weight: bold; font-size: 1.05em; width: 100%; text-align: center; border: 1px solid #E65100; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>⚠️ AVISO: El CDR '{taller_v}' no existe en el Catálogo de Talleres. La dirección en la remisión saldrá en blanco.</div>"
+                    else:
+                        aviso_taller_html = f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-weight: bold; font-size: 1.05em; width: 100%; text-align: center; border: 1px solid #E65100; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>⚠️ AVISO: El CDR '{taller_v}' no existe en el Catálogo de Talleres. La dirección en la remisión saldrá en blanco.</div>"
                     
+                    if aviso_taller_html:
+                        html_botones_flotantes += aviso_taller_html
+
                     def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
 
                     pdf = FPDF(orientation='L', unit='mm', format='A4')
@@ -1287,8 +1297,8 @@ if btn_guardar and permiso_edicion:
                                 <span style="color: #4CAF50; font-weight: bold; font-size: 1.1em; margin-right: 15px;">✓ {folio_str_print}</span>
                                 <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 10px 20px; background-color: #2E7D32; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #1B5E20;">📥 Descargar PDF</a>
                             </div>
-                            <embed src="data:application/pdf;base64,{b64}" type="application/pdf" width="100%" height="350px" style="border: 1px solid #333; border-radius: 8px; margin-top: 10px;" />
-                            <span style="color: #999; font-size: 0.85em; margin-top: -5px;">👆 Utiliza el ícono de la impresora en la barra superior del visor para imprimir directamente.</span>
+                            <iframe src="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH" width="100%" height="450px" style="border: 1px solid #333; border-radius: 8px; margin-top: 10px;"></iframe>
+                            <span style="color: #999; font-size: 0.85em; margin-top: 5px;">👆 Utiliza el ícono de la impresora en la barra superior del visor para imprimir directamente.</span>
                         </div>
                         '''
                 

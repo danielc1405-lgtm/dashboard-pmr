@@ -601,7 +601,7 @@ if vista_actual == "🛒 Pedidos y Proveedores":
             
             def parse_spanish_date(d_str):
                 if not isinstance(d_str, str): return pd.NaT
-                d_str = d_str.lower().replace('-', '/') # <--- CORRECCIÓN DE GUIONES
+                d_str = d_str.lower().replace('-', '/') 
                 meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
                 for text, num in meses.items():
                     if text in d_str:
@@ -617,9 +617,22 @@ if vista_actual == "🛒 Pedidos y Proveedores":
             df_compras_disp = df_compras_disp.sort_values(by='Llegada_Calculada', ascending=True)
 
             df_compras_disp['Filtro_Busqueda'] = df_compras_disp['Siniestro'].astype(str) + " | " + df_compras_disp['Descripción Pieza'].astype(str)
-            lista_pedidos = sorted(list(df_compras_disp['Filtro_Busqueda'].unique()))
-            busqueda_pedido = st.multiselect("🔍 Buscar Pedido:", options=lista_pedidos)
+            
+            # --- NUEVOS FILTROS EN DOS COLUMNAS ---
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                lista_pedidos = sorted(list(df_compras_disp['Filtro_Busqueda'].unique()))
+                busqueda_pedido = st.multiselect("🔍 Buscar por Siniestro / Pieza:", options=lista_pedidos)
+            with col_b2:
+                # Llenamos los vacíos con 'SIN ASIGNAR' para que se puedan filtrar
+                df_compras_disp['Prov_Filtro'] = df_compras_disp['Proveedor'].replace('', 'SIN ASIGNAR')
+                lista_provs = sorted(list(df_compras_disp['Prov_Filtro'].unique()))
+                busqueda_prov = st.multiselect("🏢 Filtrar por Proveedor:", options=lista_provs)
+
             if busqueda_pedido: df_compras_disp = df_compras_disp[df_compras_disp['Filtro_Busqueda'].isin(busqueda_pedido)].copy()
+            if busqueda_prov: df_compras_disp = df_compras_disp[df_compras_disp['Prov_Filtro'].isin(busqueda_prov)].copy()
+            
+            if 'Prov_Filtro' in df_compras_disp.columns: df_compras_disp = df_compras_disp.drop(columns=['Prov_Filtro'])
 
             for col_c in df_compras_disp.columns:
                 if col_c not in ['Recibido', 'Filtro_Busqueda', 'Fecha_Compra_Dt', 'ETA_Dias', 'Llegada_Calculada']:
@@ -1095,7 +1108,7 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- 2. PUENTE A BD_COMPRAS ---
+            # --- 2. PUENTE A BD_COMPRAS (SOBREESCRITURA FORZADA) ---
             if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
                 try:
                     ws_comp = doc.worksheet("BD_COMPRAS")
@@ -1143,12 +1156,10 @@ if btn_guardar and permiso_edicion:
                             nuevo_costo = cambios_a_guardar[k_c].get('compra_costo', '0')
                             nuevo_eta = cambios_a_guardar[k_c].get('compra_eta', '0')
                             
-                            if nuevo_prov and not str(datos_comp[i][i_prov]).strip():
-                                datos_comp[i][i_prov] = nuevo_prov
-                            if nuevo_costo != '0' and not str(datos_comp[i][i_costo]).strip():
-                                datos_comp[i][i_costo] = nuevo_costo
-                            if nuevo_eta != '0' and not str(datos_comp[i][i_tiempo]).strip():
-                                datos_comp[i][i_tiempo] = nuevo_eta
+                            # Ahora sobreescribe siempre si hay información nueva desde Panel Operativo
+                            if nuevo_prov: datos_comp[i][i_prov] = nuevo_prov
+                            if nuevo_costo != '0': datos_comp[i][i_costo] = nuevo_costo
+                            if nuevo_eta != '0': datos_comp[i][i_tiempo] = nuevo_eta
                                 
                     tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
                     fecha_hoy_comp = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
@@ -1212,9 +1223,9 @@ if btn_guardar and permiso_edicion:
                             col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
                             if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
                         else:
-                            aviso_taller_html = f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-weight: bold; font-size: 1.05em; width: 100%; text-align: center; border: 1px solid #E65100; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>⚠️ AVISO: El CDR '{taller_v}' no existe en el Catálogo de Talleres. La dirección en la remisión saldrá en blanco.</div>"
+                            aviso_taller_html = f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-weight: bold; font-size: 1.05em; width: 100%; text-align: center; border: 1px solid #E65100; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>⚠️ AVISO: El CDR '{taller_v}' no está registrado. Ve a la pestaña '🏢 Talleres' en el menú izquierdo para agregarlo.</div>"
                     else:
-                        aviso_taller_html = f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-weight: bold; font-size: 1.05em; width: 100%; text-align: center; border: 1px solid #E65100; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>⚠️ AVISO: El CDR '{taller_v}' no existe en el Catálogo de Talleres. La dirección en la remisión saldrá en blanco.</div>"
+                        aviso_taller_html = f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-weight: bold; font-size: 1.05em; width: 100%; text-align: center; border: 1px solid #E65100; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>⚠️ AVISO: El CDR '{taller_v}' no está registrado. Ve a la pestaña '🏢 Talleres' en el menú izquierdo para agregarlo.</div>"
                     
                     if aviso_taller_html:
                         html_botones_flotantes += aviso_taller_html
@@ -1291,13 +1302,14 @@ if btn_guardar and permiso_edicion:
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
                         
+                        # --- CORRECCIÓN HTML: USAMOS <embed> ---
                         html_botones_flotantes += f'''
                         <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; width: 100%; padding-bottom: 20px;">
                             <div style="display: flex; gap: 15px; align-items: center; justify-content: center; width: 100%;">
                                 <span style="color: #4CAF50; font-weight: bold; font-size: 1.1em; margin-right: 15px;">✓ {folio_str_print}</span>
                                 <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 10px 20px; background-color: #2E7D32; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #1B5E20;">📥 Descargar PDF</a>
                             </div>
-                            <iframe src="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH" width="100%" height="450px" style="border: 1px solid #333; border-radius: 8px; margin-top: 10px;"></iframe>
+                            <embed src="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH" type="application/pdf" width="100%" height="450px" style="border: 1px solid #333; border-radius: 8px; margin-top: 10px;" />
                             <span style="color: #999; font-size: 0.85em; margin-top: 5px;">👆 Utiliza el ícono de la impresora en la barra superior del visor para imprimir directamente.</span>
                         </div>
                         '''

@@ -891,6 +891,7 @@ if btn_guardar and permiso_edicion:
         }
         
     cambios_a_guardar = {}
+    cambios_bd_compras = {}
 
     if not df_editado_conf.empty:
         for _, row in df_editado_conf.iterrows():
@@ -942,24 +943,59 @@ if btn_guardar and permiso_edicion:
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
             if row.get('Facturado'): cambios_a_guardar.setdefault(k, {})['estatus'] = "FACTURADO"
 
+    # --- LÓGICA DE ACTUALIZACIÓN DESDE PANEL OPERATIVO ---
     if not df_editado.empty:
         for _, row in df_editado.iterrows():
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': '', 'remision_bool': False})
             actual_rem_bool = row.get('Remision', False)
-            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN TRANSITO" if row.get('Remision') else "EN PROCESAMIENTO" if row.get('Pedido') else None
+            pedido_bool = row.get('Pedido', False)
+            
+            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN TRANSITO" if row.get('Remision') else "EN PROCESAMIENTO" if pedido_bool else None
             comentario_actual = str(row.get(col_comentarios, '')).strip()
             guia_actual = str(row.get(col_guia, '')).strip()
             
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
             if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
             if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+            
             if actual_rem_bool and not orig['remision_bool']: 
                 cambios_a_guardar.setdefault(k, {}).update({'imprimir_remision': True, 'generar_nuevo_folio': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema')})
+                
+            # Puente para enviar compras desde el Panel Operativo a BD_COMPRAS
+            if pedido_bool:
+                cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
+                cambios_a_guardar[k]['compra_prov'] = str(row.get('Proveedor', '')).strip()
+                cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
+                cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
+
+    # --- LÓGICA DE ACTUALIZACIÓN DESDE PESTAÑA COMPRAS ---
+    if not df_editado_compras.empty:
+        for _, row in df_editado_compras.iterrows():
+            k = generar_llave(row.get('Siniestro', ''), row.get('Descripción Pieza', ''))
+            orig = originales.get(k, {'estatus_db': '', 'remision_bool': False})
+            
+            cambios_bd_compras.setdefault(k, {})
+            cambios_bd_compras[k]['costo'] = str(row.get('Costo Compra', '')).replace('$', '').strip()
+            cambios_bd_compras[k]['tiempo'] = row.get('Tiempo Entrega (Días)', '')
+            cambios_bd_compras[k]['prov'] = row.get('Proveedor', '')
+            cambios_bd_compras[k]['recibido'] = 'SI' if row.get('Recibido') else 'NO'
+            
+            if row.get('Recibido'):
+                cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
+                
+            # Conexión universal para imprimir desde Compras
+            if row.get('Imprimir Remisión'):
+                cambios_a_guardar.setdefault(k, {})['imprimir_remision'] = True
+                if not orig['remision_bool']:
+                    cambios_a_guardar[k]['generar_nuevo_folio'] = True
+                    cambios_a_guardar[k]['usuario_rem'] = st.session_state.get('usuario_actual', 'Sistema')
 
     with st.spinner("Sincronizando en la nube..."):
         try:
             doc = init_connection()
+            
+            # --- 1. SINCRONIZAR BD_UNIFICADA ---
             if cambios_a_guardar:
                 ws_uni = doc.worksheet("BD_UNIFICADA")
                 datos_uni = ws_uni.get_all_values()
@@ -1001,6 +1037,79 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
+            # --- 2. PUENTE A BD_COMPRAS ---
+            if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
+                try:
+                    ws_comp = doc.worksheet("BD_COMPRAS")
+                    datos_comp = ws_comp.get_all_values()
+                    
+                    if not datos_comp:
+                        headers_comp = ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Recibido']
+                        datos_comp = [headers_comp]
+                    else:
+                        headers_comp = [str(h).strip() for h in datos_comp[0]]
+                        
+                    def get_col_idx(name):
+                        if name in headers_comp: return headers_comp.index(name)
+                        headers_comp.append(name)
+                        datos_comp[0] = headers_comp
+                        for r in datos_comp[1:]: r.append("")
+                        return len(headers_comp) - 1
+                        
+                    idx_c_sin = get_col_idx('Siniestro')
+                    idx_c_desc = get_col_idx('Descripción Pieza')
+                    i_tall = get_col_idx('Taller')
+                    i_veh = get_col_idx('Vehículo')
+                    i_prov = get_col_idx('Proveedor')
+                    i_costo = get_col_idx('Costo Compra')
+                    i_fcomp = get_col_idx('Fecha Compra')
+                    i_tiempo = get_col_idx('Tiempo Entrega (Días)')
+                    i_rec = get_col_idx('Recibido')
+                    
+                    llaves_en_compras = set()
+                    
+                    # Actualizar las compras que ya existían
+                    for i in range(1, len(datos_comp)):
+                        while len(datos_comp[i]) < len(headers_comp): datos_comp[i].append("")
+                        k_c = generar_llave(datos_comp[i][idx_c_sin], datos_comp[i][idx_c_desc])
+                        llaves_en_compras.add(k_c)
+                        
+                        # Actualización fuerte desde pestaña compras
+                        if k_c in cambios_bd_compras:
+                            cb = cambios_bd_compras[k_c]
+                            if str(cb['costo']).strip(): datos_comp[i][i_costo] = cb['costo']
+                            if str(cb['tiempo']).strip(): datos_comp[i][i_tiempo] = cb['tiempo']
+                            if str(cb['prov']).strip(): datos_comp[i][i_prov] = cb['prov']
+                            datos_comp[i][i_rec] = cb['recibido']
+                            
+                        # Actualización suave desde el Panel Operativo (solo si el proveedor estaba vacío)
+                        elif k_c in cambios_a_guardar and cambios_a_guardar[k_c].get('crear_compra'):
+                            nuevo_prov = cambios_a_guardar[k_c].get('compra_prov', '')
+                            if nuevo_prov and not str(datos_comp[i][i_prov]).strip():
+                                datos_comp[i][i_prov] = nuevo_prov
+                                
+                    # Agregar compras totalmente nuevas
+                    fecha_hoy_comp = datetime.datetime.now().strftime('%d/%b/%y')
+                    nuevas_filas = []
+                    for k, v in cambios_a_guardar.items():
+                        if v.get('crear_compra') and k not in llaves_en_compras:
+                            n_row = [""] * len(headers_comp)
+                            n_row[idx_c_sin] = k[0]
+                            n_row[idx_c_desc] = k[1]
+                            n_row[i_tall] = v.get('compra_taller', '')
+                            n_row[i_veh] = v.get('compra_vehiculo', '')
+                            n_row[i_prov] = v.get('compra_prov', '')
+                            n_row[i_fcomp] = fecha_hoy_comp
+                            n_row[i_rec] = 'NO'
+                            nuevas_filas.append(n_row)
+                            
+                    if nuevas_filas:
+                        datos_comp.extend(nuevas_filas)
+                        
+                    ws_comp.update(range_name='A1', values=datos_comp, value_input_option='USER_ENTERED')
+                except Exception as e_comp:
+                    st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
+
             # --- GENERACIÓN DE PDF FLOTANTE ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
@@ -1026,7 +1135,7 @@ if btn_guardar and permiso_edicion:
                     
                     fecha_actual = datetime.datetime.now()
                     hora_am_pm = fecha_actual.strftime('%I:%M %p')
-                    firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%Y')} {hora_am_pm}"
+                    firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%y')} {hora_am_pm}"
                     
                     dir_v = ""
                     col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
@@ -1108,7 +1217,6 @@ if btn_guardar and permiso_edicion:
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
                         
-                        # --- CORRECCIÓN HTML Y VISTA PREVIA INCRUSTADA ---
                         html_botones_flotantes += f'''
                         <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; width: 100%; padding-bottom: 20px;">
                             <div style="display: flex; gap: 15px; align-items: center; justify-content: center; width: 100%;">

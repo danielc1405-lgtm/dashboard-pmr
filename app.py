@@ -966,33 +966,48 @@ if btn_guardar and permiso_edicion:
             if comentario_actual != orig['comentario']: 
                 cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
+    # --- CORRECCIÓN: LECTURA INTELIGENTE DE NUEVA FECHA ---
     if not df_editado_venc.empty:
         for _, row in df_editado_venc.iterrows():
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': ''})
-            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Reasignar') else None)
+            
+            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
             comentario_actual = str(row.get(col_comentarios, '')).strip()
             guia_actual = str(row.get(col_guia, '')).strip()
-            nueva_fecha = row.get('Nueva Fecha', pd.NaT)
+            nueva_fecha = row.get('Nueva Fecha')
+            
+            # Si se seleccionó una fecha, fuerza la reasignación
+            if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
+                fecha_str = nueva_fecha.strftime('%d/%b/%y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
+                cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
+                if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
+            elif row.get('Reasignar') and not nuevo_estatus:
+                nuevo_estatus = "EN PROCESAMIENTO"
             
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
             if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
             if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-            if row.get('Reasignar') and pd.notna(nueva_fecha):
-                cambios_a_guardar.setdefault(k, {})['vencimiento'] = nueva_fecha.strftime('%d/%b/%y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
 
     if not df_editado_atrasadas.empty:
         for _, row in df_editado_atrasadas.iterrows():
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Reasignar') else None)
+            
+            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
             comentario_actual = str(row.get(col_comentarios, '')).strip()
-            nueva_fecha = row.get('Nueva Fecha', pd.NaT)
+            nueva_fecha = row.get('Nueva Fecha')
+            
+            # Si se seleccionó una fecha, fuerza la reasignación
+            if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
+                fecha_str = nueva_fecha.strftime('%d/%b/%y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
+                cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
+                if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
+            elif row.get('Reasignar') and not nuevo_estatus:
+                nuevo_estatus = "EN PROCESAMIENTO"
             
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
             if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-            if row.get('Reasignar') and pd.notna(nueva_fecha):
-                cambios_a_guardar.setdefault(k, {})['vencimiento'] = nueva_fecha.strftime('%d/%b/%y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
 
     if not df_editado_cobro.empty:
         for _, row in df_editado_cobro.iterrows():
@@ -1108,7 +1123,7 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- 2. PUENTE A BD_COMPRAS (SOBREESCRITURA FORZADA) ---
+            # --- 2. PUENTE A BD_COMPRAS ---
             if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
                 try:
                     ws_comp = doc.worksheet("BD_COMPRAS")
@@ -1156,7 +1171,6 @@ if btn_guardar and permiso_edicion:
                             nuevo_costo = cambios_a_guardar[k_c].get('compra_costo', '0')
                             nuevo_eta = cambios_a_guardar[k_c].get('compra_eta', '0')
                             
-                            # Ahora sobreescribe siempre si hay información nueva desde Panel Operativo
                             if nuevo_prov: datos_comp[i][i_prov] = nuevo_prov
                             if nuevo_costo != '0': datos_comp[i][i_costo] = nuevo_costo
                             if nuevo_eta != '0': datos_comp[i][i_tiempo] = nuevo_eta
@@ -1186,14 +1200,15 @@ if btn_guardar and permiso_edicion:
                 except Exception as e_comp:
                     st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
 
-            # --- GENERACIÓN DE PDF FLOTANTE ---
+            # --- GENERACIÓN DE PDF Y VISTA COMPACTA ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
                 marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
                 cols_agrup = [col_id, col_taller, col_marca, col_modelo]
                 agrupadores = [c for c in cols_agrup if c in marcados_remision.columns]
                 
-                html_botones_flotantes = '<div style="display: flex; flex-direction: column; gap: 15px; margin-top: 5px; padding: 15px; background-color: #1e1e24; border-radius: 8px; border: 1px solid #333; width: 100%;">'
+                avisos_unicos = set()
+                botones_descarga_html = []
                 usuario_print = st.session_state.get('usuario_actual', 'Sistema')
                 
                 for keys, df_g in marcados_remision.groupby(agrupadores):
@@ -1215,7 +1230,6 @@ if btn_guardar and permiso_edicion:
                     firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%Y')} {hora_am_pm}"
                     
                     dir_v = ""
-                    aviso_taller_html = "" 
                     col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
                     if not df_catalogo.empty and col_cat_taller:
                         match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == str(taller_v).strip().upper()]
@@ -1223,12 +1237,9 @@ if btn_guardar and permiso_edicion:
                             col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
                             if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
                         else:
-                            aviso_taller_html = f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-weight: bold; font-size: 1.05em; width: 100%; text-align: center; border: 1px solid #E65100; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>⚠️ AVISO: El CDR '{taller_v}' no está registrado. Ve a la pestaña '🏢 Talleres' en el menú izquierdo para agregarlo.</div>"
+                            avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado. Ve a la pestaña '🏢 Talleres' para agregarlo.")
                     else:
-                        aviso_taller_html = f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; margin-bottom: 10px; font-weight: bold; font-size: 1.05em; width: 100%; text-align: center; border: 1px solid #E65100; box-shadow: 0 4px 6px rgba(0,0,0,0.3);'>⚠️ AVISO: El CDR '{taller_v}' no está registrado. Ve a la pestaña '🏢 Talleres' en el menú izquierdo para agregarlo.</div>"
-                    
-                    if aviso_taller_html:
-                        html_botones_flotantes += aviso_taller_html
+                        avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado. Ve a la pestaña '🏢 Talleres' para agregarlo.")
 
                     def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
 
@@ -1302,20 +1313,23 @@ if btn_guardar and permiso_edicion:
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
                         
-                        # --- CORRECCIÓN HTML: USAMOS <embed> ---
-                        html_botones_flotantes += f'''
-                        <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; width: 100%; padding-bottom: 20px;">
-                            <div style="display: flex; gap: 15px; align-items: center; justify-content: center; width: 100%;">
-                                <span style="color: #4CAF50; font-weight: bold; font-size: 1.1em; margin-right: 15px;">✓ {folio_str_print}</span>
-                                <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 10px 20px; background-color: #2E7D32; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #1B5E20;">📥 Descargar PDF</a>
-                            </div>
-                            <embed src="data:application/pdf;base64,{b64}#toolbar=1&navpanes=0&view=FitH" type="application/pdf" width="100%" height="450px" style="border: 1px solid #333; border-radius: 8px; margin-top: 10px;" />
-                            <span style="color: #999; font-size: 0.85em; margin-top: 5px;">👆 Utiliza el ícono de la impresora en la barra superior del visor para imprimir directamente.</span>
-                        </div>
+                        btn_html = f'''
+                        <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" target="_blank" style="display: inline-block; padding: 10px 20px; background-color: #2E7D32; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #1B5E20; text-align: center; min-width: 180px;">
+                            📥 {folio_str_print}<br><span style="font-size: 0.8em; font-weight: normal;">{siniestro_v}</span>
+                        </a>
                         '''
+                        botones_descarga_html.append(btn_html)
+
+                html_final = '<div style="display: flex; flex-direction: column; gap: 15px; margin-top: 5px; padding: 15px; background-color: #1e1e24; border-radius: 8px; border: 1px solid #333; width: 100%;">'
                 
-                html_botones_flotantes += '</div>'
-                st.session_state['pdfs_generados'] = html_botones_flotantes
+                for aviso in avisos_unicos:
+                    html_final += f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; font-weight: bold; font-size: 1.05em; text-align: center; border: 1px solid #E65100;'>{aviso}</div>"
+                
+                html_final += '<div style="display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; align-items: center; margin-top: 10px;">'
+                html_final += "".join(botones_descarga_html)
+                html_final += '</div></div>'
+                
+                st.session_state['pdfs_generados'] = html_final
             
             st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅")
             st.cache_data.clear()

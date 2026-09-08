@@ -5,6 +5,8 @@ import warnings
 import time
 import os
 import datetime
+import tempfile
+import base64
 from fpdf import FPDF
 import plotly.express as px
 import gspread
@@ -161,7 +163,6 @@ with cabecera:
 
 # =====================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
-# =====================================================================
 def obtener_dataframe(nombre_hoja):
     try:
         doc = init_connection()
@@ -264,9 +265,10 @@ if not df_vista.empty:
         def parse_fecha_segura(val):
             if pd.isna(val) or str(val).strip() == '': return ''
             v_str = str(val).strip()
-            try: return pd.to_datetime(v_str, dayfirst=True).strftime('%d-%b-%y')
+            if v_str.startswith("'"): v_str = v_str[1:] # Limpia el apóstrofe
+            try: return pd.to_datetime(v_str, dayfirst=True).strftime('%d/%m/%Y')
             except:
-                try: return pd.to_datetime(v_str).strftime('%d-%b-%y')
+                try: return pd.to_datetime(v_str).strftime('%d/%m/%Y')
                 except: return v_str 
 
         for c_fecha in [col_asignacion, col_vencimiento, col_fecha_confi]:
@@ -367,13 +369,13 @@ if vista_actual == "📊 Analítico":
         df_compras['Recibido_Bool'] = df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
         df_compras_llegar = df_compras[df_compras['Recibido_Bool'] == False].copy()
         if not df_compras_llegar.empty:
-            df_compras_llegar['Fecha_Compra_Dt'] = pd.to_datetime(df_compras_llegar['Fecha Compra'], format='%d-%b-%y', errors='coerce')
+            df_compras_llegar['Fecha_Compra_Dt'] = pd.to_datetime(df_compras_llegar['Fecha Compra'], dayfirst=True, errors='coerce')
             df_compras_llegar['ETA_Dias'] = pd.to_numeric(df_compras_llegar['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
             df_compras_llegar['Llegada_Calculada'] = df_compras_llegar['Fecha_Compra_Dt'] + pd.to_timedelta(df_compras_llegar['ETA_Dias'], unit='d')
             df_compras_llegar = df_compras_llegar.sort_values(by='Llegada_Calculada', ascending=True)
             hoy_comparacion = pd.to_datetime(datetime.datetime.now().date())
             df_compras_llegar['Estatus'] = df_compras_llegar['Llegada_Calculada'].apply(lambda x: "🔴 Atrasado" if pd.notna(x) and x < hoy_comparacion else "🟢 En tiempo")
-            df_compras_llegar['Fecha Llegada'] = df_compras_llegar['Llegada_Calculada'].dt.strftime('%d-%b-%y').fillna('-')
+            df_compras_llegar['Fecha Llegada'] = df_compras_llegar['Llegada_Calculada'].dt.strftime('%d/%m/%Y').fillna('-')
             cols_llegar = [c for c in ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Fecha Llegada', 'Estatus'] if c in df_compras_llegar.columns]
             st.dataframe(df_compras_llegar[cols_llegar], use_container_width=True, hide_index=True)
         else: st.info("✅ Todos los pedidos han sido recibidos.")
@@ -389,7 +391,7 @@ if vista_actual == "📊 Analítico":
 
 if vista_actual == "⚙️ Panel Operativo":
     st.markdown("### 📈 Indicadores Diarios")
-    hoy_str = datetime.datetime.now().strftime('%d-%b-%y')
+    hoy_str = datetime.datetime.now().strftime('%d/%m/%Y')
     hoy_dt = pd.to_datetime(datetime.datetime.now().date())
     
     def parse_dt_safe(val):
@@ -906,9 +908,13 @@ if btn_guardar and permiso_edicion:
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Reasignar') else None)
             comentario_actual = str(row.get(col_comentarios, '')).strip()
             guia_actual = str(row.get(col_guia, '')).strip()
+            nueva_fecha = row.get('Nueva Fecha', pd.NaT)
+            
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
             if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
             if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+            if row.get('Reasignar') and pd.notna(nueva_fecha):
+                cambios_a_guardar.setdefault(k, {})['vencimiento'] = nueva_fecha.strftime('%d/%m/%Y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
 
     if not df_editado_atrasadas.empty:
         for _, row in df_editado_atrasadas.iterrows():
@@ -916,8 +922,12 @@ if btn_guardar and permiso_edicion:
             orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Reasignar') else None)
             comentario_actual = str(row.get(col_comentarios, '')).strip()
+            nueva_fecha = row.get('Nueva Fecha', pd.NaT)
+            
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
             if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+            if row.get('Reasignar') and pd.notna(nueva_fecha):
+                cambios_a_guardar.setdefault(k, {})['vencimiento'] = nueva_fecha.strftime('%d/%m/%Y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
 
     if not df_editado_cobro.empty:
         for _, row in df_editado_cobro.iterrows():
@@ -958,6 +968,7 @@ if btn_guardar and permiso_edicion:
                 idx_usr_rem = headers.index("Usuario Remisión") if "Usuario Remisión" in headers else -1
                 idx_coment = headers.index(col_comentarios) if col_comentarios in headers else -1
                 idx_guia = headers.index(col_guia) if col_guia in headers else -1
+                idx_venc = headers.index(col_vencimiento) if col_vencimiento in headers else -1
                 
                 max_folios = {"MULTI": 0, "GNP": 0}
                 for pref in ["MULTI", "GNP"]:
@@ -980,8 +991,10 @@ if btn_guardar and permiso_edicion:
                         if 'usuario_rem' in c and idx_usr_rem >= 0: datos_uni[i][idx_usr_rem] = c['usuario_rem']
                         if 'comentario' in c and idx_coment >= 0: datos_uni[i][idx_coment] = c['comentario']
                         if 'guia' in c and idx_guia >= 0: datos_uni[i][idx_guia] = c['guia']
+                        if 'vencimiento' in c and idx_venc >= 0: datos_uni[i][idx_venc] = c['vencimiento']
                 
-                ws_uni.update(range_name='A1', values=datos_uni)
+                # Se agrega value_input_option='USER_ENTERED' para evitar el apóstrofe en Google Sheets
+                ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
             # --- GENERACIÓN DE PDF FLOTANTE ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]

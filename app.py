@@ -28,7 +28,9 @@ st.markdown("""
         .block-container { 
             padding-top: 2rem; 
             padding-bottom: 40px; 
-            max-width: 98% !important; 
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            max-width: 100% !important; 
         }
         @media (min-width: 768px) {
             div.element-container:has(#panel-fijo) + div {
@@ -369,7 +371,18 @@ if vista_actual == "📊 Analítico":
         df_compras['Recibido_Bool'] = df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
         df_compras_llegar = df_compras[df_compras['Recibido_Bool'] == False].copy()
         if not df_compras_llegar.empty:
-            df_compras_llegar['Fecha_Compra_Dt'] = pd.to_datetime(df_compras_llegar['Fecha Compra'], dayfirst=True, errors='coerce')
+            def parse_spanish_date(d_str):
+                if not isinstance(d_str, str): return pd.NaT
+                d_str = d_str.lower()
+                meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+                for text, num in meses.items():
+                    if text in d_str:
+                        d_str = d_str.replace(text, num)
+                        break
+                try: return pd.to_datetime(d_str, format='%d/%m/%y', errors='coerce')
+                except: return pd.NaT
+
+            df_compras_llegar['Fecha_Compra_Dt'] = df_compras_llegar['Fecha Compra'].apply(parse_spanish_date)
             df_compras_llegar['ETA_Dias'] = pd.to_numeric(df_compras_llegar['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
             df_compras_llegar['Llegada_Calculada'] = df_compras_llegar['Fecha_Compra_Dt'] + pd.to_timedelta(df_compras_llegar['ETA_Dias'], unit='d')
             df_compras_llegar = df_compras_llegar.sort_values(by='Llegada_Calculada', ascending=True)
@@ -529,20 +542,21 @@ if vista_actual == "⚙️ Panel Operativo":
                 df_asignados['Cancelar'] = estatus_upper.str.contains("CANCELADO")
             df_asignados['Remision'] = df_asignados[col_remision].astype(str).str.strip() != '' if col_remision else False
             df_asignados['Proveedor'] = "" 
-            df_asignados['Costo Compra'] = 0.0 # <--- NUEVA COLUMNA
-            df_asignados['ETA (Días)'] = 0     # <--- NUEVA COLUMNA
+            df_asignados['Costo Compra'] = 0.0 
+            df_asignados['ETA (Días)'] = 0     
             
             for taller, df_taller in df_asignados.groupby(col_taller):
                 with st.expander(f"🏢 {taller} | {df_taller['Siniestro'].nunique()} Siniestro(s)", expanded=False):
                     for siniestro_auto, df_grupo in df_taller.groupby('Siniestro'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion:
-                            # --- SE AGREGAN COSTO Y ETA AL ORDEN DESEADO ---
                             columnas_checkbox = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Remision', 'Entregado', 'Recibido', 'Reasignacion', 'Cancelar']
                             orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_checkbox
                             
                             config_pedidos = base_config.copy()
                             config_pedidos.update({ 
+                                col_asignacion: st.column_config.TextColumn("Asig. (Doble clic p/editar)"),
+                                col_vencimiento: st.column_config.TextColumn("Venc. (Doble clic p/editar)"),
                                 "Pedido": st.column_config.CheckboxColumn("🛒 Ped"), 
                                 "Proveedor": st.column_config.TextColumn("🏢 Proveedor"), 
                                 "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="$ %.2f"), 
@@ -554,7 +568,9 @@ if vista_actual == "⚙️ Panel Operativo":
                                 "Cancelar": st.column_config.CheckboxColumn("🚫 Can") 
                             })
                             
-                            df_editado_parcial = st.data_editor(df_grupo[orden_deseado], column_config=config_pedidos, disabled=[c for c in orden_deseado if c not in columnas_checkbox and c not in [col_comentarios, col_guia]], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
+                            # AQUÍ DESBLOQUEAMOS LAS FECHAS DE ASIGNACIÓN Y VENCIMIENTO
+                            columnas_editables = columnas_checkbox + [col_comentarios, col_guia, col_asignacion, col_vencimiento]
+                            df_editado_parcial = st.data_editor(df_grupo[orden_deseado], column_config=config_pedidos, disabled=[c for c in orden_deseado if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                             for col in [col_id, col_taller, col_marca, col_modelo, col_desc, 'Siniestro', 'Vehiculo_Info']:
                                 if col in df_grupo.columns: df_editado_parcial[col] = df_grupo[col].values
                             dfs_editados.append(df_editado_parcial)
@@ -583,10 +599,22 @@ if vista_actual == "🛒 Pedidos y Proveedores":
         df_compras_disp = df_compras[df_compras['Recibido_Bool'] == False].copy()
         if not df_compras_disp.empty:
             df_compras_disp = df_compras_disp.drop(columns=['Recibido_Bool'])
-            df_compras_disp['Fecha_Compra_Dt'] = pd.to_datetime(df_compras_disp['Fecha Compra'], format='%d-%b-%y', errors='coerce')
+            
+            def parse_spanish_date(d_str):
+                if not isinstance(d_str, str): return pd.NaT
+                d_str = d_str.lower()
+                meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+                for text, num in meses.items():
+                    if text in d_str:
+                        d_str = d_str.replace(text, num)
+                        break
+                try: return pd.to_datetime(d_str, format='%d/%m/%y', errors='coerce')
+                except: return pd.NaT
+
+            df_compras_disp['Fecha_Compra_Dt'] = df_compras_disp['Fecha Compra'].apply(parse_spanish_date)
             df_compras_disp['ETA_Dias'] = pd.to_numeric(df_compras_disp['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
             df_compras_disp['Llegada_Calculada'] = df_compras_disp['Fecha_Compra_Dt'] + pd.to_timedelta(df_compras_disp['ETA_Dias'], unit='d')
-            df_compras_disp['Fecha Llegada'] = df_compras_disp['Llegada_Calculada'].dt.strftime('%d-%b-%y').fillna('-')
+            df_compras_disp['Fecha Llegada'] = df_compras_disp['Llegada_Calculada'].dt.strftime('%d/%b/%y').fillna('-')
             df_compras_disp = df_compras_disp.sort_values(by='Llegada_Calculada', ascending=True)
 
             df_compras_disp['Filtro_Busqueda'] = df_compras_disp['Siniestro'].astype(str) + " | " + df_compras_disp['Descripción Pieza'].astype(str)
@@ -903,7 +931,9 @@ if btn_guardar and permiso_edicion:
             'guia': str(r.get(col_guia, '')).strip(),
             'estatus_db': str(r.get(col_estatus, '')).strip().upper(),
             'remision_bool': str(r.get(col_remision, '')).strip() != '',
-            'aseg': str(r.get(col_aseg, '')).strip().upper() 
+            'aseg': str(r.get(col_aseg, '')).strip().upper(),
+            'vencimiento_db': str(r.get(col_vencimiento, '')).strip(),
+            'asignacion_db': str(r.get(col_asignacion, '')).strip()
         }
         
     cambios_a_guardar = {}
@@ -963,22 +993,27 @@ if btn_guardar and permiso_edicion:
     if not df_editado.empty:
         for _, row in df_editado.iterrows():
             k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-            orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': '', 'remision_bool': False})
+            orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
             actual_rem_bool = row.get('Remision', False)
             pedido_bool = row.get('Pedido', False)
             
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN TRANSITO" if row.get('Remision') else "EN PROCESAMIENTO" if pedido_bool else None
             comentario_actual = str(row.get(col_comentarios, '')).strip()
             guia_actual = str(row.get(col_guia, '')).strip()
+            venc_actual = str(row.get(col_vencimiento, '')).strip()
+            asig_actual = str(row.get(col_asignacion, '')).strip()
             
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
             if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
             if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
             
+            # Guardado manual si editaste Asignación o Vencimiento directo en la tabla
+            if venc_actual and venc_actual != orig['vencimiento_db']: cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
+            if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
+            
             if actual_rem_bool and not orig['remision_bool']: 
                 cambios_a_guardar.setdefault(k, {}).update({'imprimir_remision': True, 'generar_nuevo_folio': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema')})
                 
-            # Puente Extendido para enviar compras desde el Panel Operativo a BD_COMPRAS
             if pedido_bool:
                 cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
                 cambios_a_guardar[k]['compra_prov'] = str(row.get('Proveedor', '')).strip()
@@ -999,15 +1034,14 @@ if btn_guardar and permiso_edicion:
             cambios_bd_compras[k]['prov'] = row.get('Proveedor', '')
             cambios_bd_compras[k]['recibido'] = 'SI' if row.get('Recibido') else 'NO'
             
-            if row.get('Recibido'):
-                cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
-                
-            # Conexión universal para imprimir desde Compras
             if row.get('Imprimir Remisión'):
                 cambios_a_guardar.setdefault(k, {})['imprimir_remision'] = True
+                cambios_a_guardar[k]['estatus'] = "EN TRANSITO"
                 if not orig['remision_bool']:
                     cambios_a_guardar[k]['generar_nuevo_folio'] = True
                     cambios_a_guardar[k]['usuario_rem'] = st.session_state.get('usuario_actual', 'Sistema')
+            elif row.get('Recibido'):
+                cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO" 
 
     with st.spinner("Sincronizando en la nube..."):
         try:
@@ -1023,6 +1057,7 @@ if btn_guardar and permiso_edicion:
                 idx_coment = headers.index(col_comentarios) if col_comentarios in headers else -1
                 idx_guia = headers.index(col_guia) if col_guia in headers else -1
                 idx_venc = headers.index(col_vencimiento) if col_vencimiento in headers else -1
+                idx_asig = headers.index(col_asignacion) if col_asignacion in headers else -1
                 
                 max_folios = {"MULTI": 0, "GNP": 0}
                 for pref in ["MULTI", "GNP"]:
@@ -1052,6 +1087,7 @@ if btn_guardar and permiso_edicion:
                         if 'comentario' in c and idx_coment >= 0: datos_uni[i][idx_coment] = c['comentario']
                         if 'guia' in c and idx_guia >= 0: datos_uni[i][idx_guia] = c['guia']
                         if 'vencimiento' in c and idx_venc >= 0: datos_uni[i][idx_venc] = c['vencimiento']
+                        if 'asignacion' in c and idx_asig >= 0: datos_uni[i][idx_asig] = c['asignacion']
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
@@ -1086,13 +1122,11 @@ if btn_guardar and permiso_edicion:
                     
                     llaves_en_compras = set()
                     
-                    # Actualizar las compras que ya existían
                     for i in range(1, len(datos_comp)):
                         while len(datos_comp[i]) < len(headers_comp): datos_comp[i].append("")
                         k_c = generar_llave(datos_comp[i][idx_c_sin], datos_comp[i][idx_c_desc])
                         llaves_en_compras.add(k_c)
                         
-                        # Actualización fuerte desde pestaña compras
                         if k_c in cambios_bd_compras:
                             cb = cambios_bd_compras[k_c]
                             if str(cb['costo']).strip(): datos_comp[i][i_costo] = cb['costo']
@@ -1100,7 +1134,6 @@ if btn_guardar and permiso_edicion:
                             if str(cb['prov']).strip(): datos_comp[i][i_prov] = cb['prov']
                             datos_comp[i][i_rec] = cb['recibido']
                             
-                        # Actualización suave desde el Panel Operativo
                         elif k_c in cambios_a_guardar and cambios_a_guardar[k_c].get('crear_compra'):
                             nuevo_prov = cambios_a_guardar[k_c].get('compra_prov', '')
                             nuevo_costo = cambios_a_guardar[k_c].get('compra_costo', '0')
@@ -1113,8 +1146,10 @@ if btn_guardar and permiso_edicion:
                             if nuevo_eta != '0' and not str(datos_comp[i][i_tiempo]).strip():
                                 datos_comp[i][i_tiempo] = nuevo_eta
                                 
-                    # Agregar compras totalmente nuevas
-                    fecha_hoy_comp = datetime.datetime.now().strftime('%d/%b/%y')
+                    # Ajuste de zona horaria para la fecha de compra en la base de datos (UTC-6)
+                    tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+                    fecha_hoy_comp = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
+                    
                     nuevas_filas = []
                     for k, v in cambios_a_guardar.items():
                         if v.get('crear_compra') and k not in llaves_en_compras:
@@ -1160,7 +1195,9 @@ if btn_guardar and permiso_edicion:
                             folio_str_print = cambios_a_guardar[key_rem]['remision_num']
                             break
                     
-                    fecha_actual = datetime.datetime.now()
+                    # --- AQUÍ ESTÁ EL AJUSTE FINAL DE LA ZONA HORARIA (UTC-6) PARA LA FIRMA DEL PDF ---
+                    tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+                    fecha_actual = datetime.datetime.now(tz_mx)
                     hora_am_pm = fecha_actual.strftime('%I:%M %p')
                     firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%Y')} {hora_am_pm}"
                     

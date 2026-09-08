@@ -975,7 +975,7 @@ if btn_guardar and permiso_edicion:
                     numeros = df_completo[col_remision].astype(str).str.extract(rf'(?i){pref}\s*-\s*0*(\d+)', expand=False)
                     max_folios[pref] = int(pd.to_numeric(numeros, errors='coerce').max() if pd.notna(pd.to_numeric(numeros, errors='coerce').max()) else 0)
 
-                # --- NUEVA LÓGICA: UN SOLO FOLIO POR SINIESTRO ---
+                # --- LÓGICA: UN SOLO FOLIO POR SINIESTRO ---
                 folios_asignados_en_sesion = {}
                 
                 for k, v in cambios_a_guardar.items():
@@ -987,7 +987,6 @@ if btn_guardar and permiso_edicion:
                             max_folios[pref] += 1
                             folios_asignados_en_sesion[siniestro_id] = f"{pref} - {max_folios[pref]:03d}"
                             
-                        # Asignar el mismo folio a todas las piezas del pedido actual
                         v['remision_num'] = folios_asignados_en_sesion[siniestro_id]
 
                 for i in range(1, len(datos_uni)):
@@ -1003,14 +1002,14 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- GENERACIÓN DE PDF FLOTANTE ---
+            # --- GENERACIÓN DE PDF FLOTANTE (NUEVO FORMATO Y BOTONES) ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
                 marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
                 cols_agrup = [col_id, col_taller, col_marca, col_modelo]
                 agrupadores = [c for c in cols_agrup if c in marcados_remision.columns]
                 
-                html_botones_flotantes = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; padding: 10px; background-color: #1e1e24; border-radius: 8px; border: 1px solid #333; width: 100%;">'
+                html_botones_flotantes = '<div style="display: flex; flex-direction: column; gap: 15px; margin-top: 5px; padding: 15px; background-color: #1e1e24; border-radius: 8px; border: 1px solid #333; width: 100%;">'
                 usuario_print = st.session_state.get('usuario_actual', 'Sistema')
                 
                 for keys, df_g in marcados_remision.groupby(agrupadores):
@@ -1040,7 +1039,9 @@ if btn_guardar and permiso_edicion:
                     
                     def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
 
+                    # Creamos el PDF y apagamos el salto de página automático para evitar que lo corte a 2 caras
                     pdf = FPDF(orientation='L', unit='mm', format='A4')
+                    pdf.set_auto_page_break(auto=False, margin=0) 
                     pdf.add_page()
                     
                     def dibujar_bloque_remision(x_offset):
@@ -1096,9 +1097,11 @@ if btn_guardar and permiso_edicion:
                             pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
                             y_item += 5
                             
+                        # Firma asegurada en la parte inferior derecha del recuadro
                         pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)
                         pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
 
+                    # Dibujamos las dos caras sobre la misma página 
                     dibujar_bloque_remision(10)
                     pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
                     dibujar_bloque_remision(152)
@@ -1108,7 +1111,16 @@ if btn_guardar and permiso_edicion:
                         nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
-                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 8px 16px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; font-family: sans-serif; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">📄 Descargar: {nombre_archivo}</a>'
+                        
+                        # Inyección de los dos botones: Descarga e Imprimir nativo
+                        html_botones_flotantes += f'''
+                        <div style="display: flex; gap: 15px; align-items: center; justify-content: center;">
+                            <span style="color: #4CAF50; font-weight: bold; font-size: 1.1em;">✓ {folio_str_print}</span>
+                            <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 10px 20px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">📄 Descargar PDF</a>
+                            
+                            <button onclick="var frm = document.createElement('iframe'); frm.style.display = 'none'; frm.src = 'data:application/pdf;base64,{b64}'; document.body.appendChild(frm); setTimeout(function() {{ frm.contentWindow.focus(); frm.contentWindow.print(); }}, 800);" style="display: inline-block; padding: 10px 20px; background-color: #00529B; color: white; border: none; border-radius: 6px; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.2); cursor: pointer;">🖨️ Imprimir</button>
+                        </div>
+                        '''
                 
                 html_botones_flotantes += '</div>'
                 st.session_state['pdfs_generados'] = html_botones_flotantes

@@ -934,7 +934,8 @@ if btn_guardar and permiso_edicion:
     
     originales = {}
     for _, r in df_trabajo_completo.iterrows():
-        k = generar_llave(r.get(col_id, ''), r.get(col_desc, ''))
+        # Tomamos el Siniestro directo para máxima seguridad en la llave
+        k = generar_llave(r.get('Siniestro', r.get(col_id, '')), r.get(col_desc, ''))
         originales[k] = {
             'comentario': str(r.get(col_comentarios, '')).strip(),
             'guia': str(r.get(col_guia, '')).strip(),
@@ -948,12 +949,12 @@ if btn_guardar and permiso_edicion:
     cambios_a_guardar = {}
     cambios_bd_compras = {}
 
+    tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+    fecha_hoy_conf = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
+
     if not df_editado_conf.empty:
-        tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
-        fecha_hoy_conf = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
-        
         for _, row in df_editado_conf.iterrows():
-            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Confirmar Surtido') else None)
             comentario_actual = str(row.get(col_comentarios, '')).strip()
@@ -966,20 +967,21 @@ if btn_guardar and permiso_edicion:
             if comentario_actual != orig['comentario']: 
                 cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
-    # --- CORRECCIÓN: LECTURA INTELIGENTE DE NUEVA FECHA ---
     if not df_editado_venc.empty:
         for _, row in df_editado_venc.iterrows():
-            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': ''})
-            
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
             comentario_actual = str(row.get(col_comentarios, '')).strip()
             guia_actual = str(row.get(col_guia, '')).strip()
             nueva_fecha = row.get('Nueva Fecha')
             
-            # Si se seleccionó una fecha, fuerza la reasignación
+            # --- CAPTURA INTELIGENTE DE FECHA (Forzando formato correcto) ---
             if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                fecha_str = nueva_fecha.strftime('%d/%b/%y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
+                try:
+                    fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
+                except:
+                    fecha_str = str(nueva_fecha)
                 cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                 if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
             elif row.get('Reasignar') and not nuevo_estatus:
@@ -991,16 +993,18 @@ if btn_guardar and permiso_edicion:
 
     if not df_editado_atrasadas.empty:
         for _, row in df_editado_atrasadas.iterrows():
-            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-            
             nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
             comentario_actual = str(row.get(col_comentarios, '')).strip()
             nueva_fecha = row.get('Nueva Fecha')
             
-            # Si se seleccionó una fecha, fuerza la reasignación
+            # --- CAPTURA INTELIGENTE DE FECHA ---
             if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                fecha_str = nueva_fecha.strftime('%d/%b/%y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
+                try:
+                    fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
+                except:
+                    fecha_str = str(nueva_fecha)
                 cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                 if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
             elif row.get('Reasignar') and not nuevo_estatus:
@@ -1011,7 +1015,7 @@ if btn_guardar and permiso_edicion:
 
     if not df_editado_cobro.empty:
         for _, row in df_editado_cobro.iterrows():
-            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
             comentario_actual = str(row.get(col_comentarios, '')).strip()
             if row.get('Marcar Recibido'): cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
@@ -1019,12 +1023,12 @@ if btn_guardar and permiso_edicion:
 
     if not df_editado_fact.empty:
         for _, row in df_editado_fact.iterrows():
-            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
             if row.get('Facturado'): cambios_a_guardar.setdefault(k, {})['estatus'] = "FACTURADO"
 
     if not df_editado.empty:
         for _, row in df_editado.iterrows():
-            k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
             orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
             actual_rem_bool = row.get('Remision', False)
             pedido_bool = row.get('Pedido', False)
@@ -1175,7 +1179,6 @@ if btn_guardar and permiso_edicion:
                             if nuevo_costo != '0': datos_comp[i][i_costo] = nuevo_costo
                             if nuevo_eta != '0': datos_comp[i][i_tiempo] = nuevo_eta
                                 
-                    tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
                     fecha_hoy_comp = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
                     
                     nuevas_filas = []
@@ -1224,7 +1227,6 @@ if btn_guardar and permiso_edicion:
                             folio_str_print = cambios_a_guardar[key_rem]['remision_num']
                             break
                     
-                    tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
                     fecha_actual = datetime.datetime.now(tz_mx)
                     hora_am_pm = fecha_actual.strftime('%I:%M %p')
                     firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%Y')} {hora_am_pm}"

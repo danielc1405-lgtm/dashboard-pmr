@@ -606,21 +606,26 @@ if vista_actual == "🛒 Pedidos y Proveedores":
 
             df_compras_disp['Filtro_Busqueda'] = df_compras_disp['Siniestro'].astype(str) + " | " + df_compras_disp['Descripción Pieza'].astype(str)
             
-            # --- NUEVOS FILTROS EN DOS COLUMNAS ---
-            col_b1, col_b2 = st.columns(2)
+            # --- NUEVOS FILTROS EN TRES COLUMNAS ---
+            col_b1, col_b2, col_b3 = st.columns(3)
             with col_b1:
                 lista_pedidos = sorted(list(df_compras_disp['Filtro_Busqueda'].unique()))
-                busqueda_pedido = st.multiselect("🔍 Buscar por Siniestro / Pieza:", options=lista_pedidos)
+                busqueda_pedido = st.multiselect("🔍 Buscar por Siniestro/Pieza:", options=lista_pedidos)
             with col_b2:
-                # Llenamos los vacíos con 'SIN ASIGNAR' para que se puedan filtrar
+                df_compras_disp['Taller_Filtro'] = df_compras_disp['Taller'].replace('', 'SIN ASIGNAR')
+                lista_talleres = sorted(list(df_compras_disp['Taller_Filtro'].unique()))
+                busqueda_taller = st.multiselect("🏢 Filtrar por Taller (CDR):", options=lista_talleres)
+            with col_b3:
                 df_compras_disp['Prov_Filtro'] = df_compras_disp['Proveedor'].replace('', 'SIN ASIGNAR')
                 lista_provs = sorted(list(df_compras_disp['Prov_Filtro'].unique()))
-                busqueda_prov = st.multiselect("🏢 Filtrar por Proveedor:", options=lista_provs)
+                busqueda_prov = st.multiselect("🏭 Filtrar por Proveedor:", options=lista_provs)
 
             if busqueda_pedido: df_compras_disp = df_compras_disp[df_compras_disp['Filtro_Busqueda'].isin(busqueda_pedido)].copy()
+            if busqueda_taller: df_compras_disp = df_compras_disp[df_compras_disp['Taller_Filtro'].isin(busqueda_taller)].copy()
             if busqueda_prov: df_compras_disp = df_compras_disp[df_compras_disp['Prov_Filtro'].isin(busqueda_prov)].copy()
             
             if 'Prov_Filtro' in df_compras_disp.columns: df_compras_disp = df_compras_disp.drop(columns=['Prov_Filtro'])
+            if 'Taller_Filtro' in df_compras_disp.columns: df_compras_disp = df_compras_disp.drop(columns=['Taller_Filtro'])
 
             for col_c in df_compras_disp.columns:
                 if col_c not in ['Recibido', 'Filtro_Busqueda', 'Fecha_Compra_Dt', 'ETA_Dias', 'Llegada_Calculada']:

@@ -1108,12 +1108,15 @@ if btn_guardar and permiso_edicion:
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
                         
-                        # --- CORRECCIÓN HTML Y BOTONES DE DESCARGA / ABRIR ---
+                        # --- CORRECCIÓN HTML Y VISTA PREVIA INCRUSTADA ---
                         html_botones_flotantes += f'''
-                        <div style="display: flex; gap: 15px; align-items: center; justify-content: center; width: 100%;">
-                            <span style="color: #4CAF50; font-weight: bold; font-size: 1.1em; margin-right: 15px;">✓ {folio_str_print}</span>
-                            <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 10px 20px; background-color: #2E7D32; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #1B5E20;">📥 Descargar PDF</a>
-                            <a href="data:application/pdf;base64,{b64}" target="_blank" style="display: inline-block; padding: 10px 20px; background-color: #00529B; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #003366;">🖨️ Abrir para Imprimir</a>
+                        <div style="display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; width: 100%; padding-bottom: 20px;">
+                            <div style="display: flex; gap: 15px; align-items: center; justify-content: center; width: 100%;">
+                                <span style="color: #4CAF50; font-weight: bold; font-size: 1.1em; margin-right: 15px;">✓ {folio_str_print}</span>
+                                <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 10px 20px; background-color: #2E7D32; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #1B5E20;">📥 Descargar PDF</a>
+                            </div>
+                            <embed src="data:application/pdf;base64,{b64}" type="application/pdf" width="100%" height="350px" style="border: 1px solid #333; border-radius: 8px; margin-top: 10px;" />
+                            <span style="color: #999; font-size: 0.85em; margin-top: -5px;">👆 Utiliza el ícono de la impresora en la barra superior del visor para imprimir directamente.</span>
                         </div>
                         '''
                 

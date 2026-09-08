@@ -529,15 +529,31 @@ if vista_actual == "⚙️ Panel Operativo":
                 df_asignados['Cancelar'] = estatus_upper.str.contains("CANCELADO")
             df_asignados['Remision'] = df_asignados[col_remision].astype(str).str.strip() != '' if col_remision else False
             df_asignados['Proveedor'] = "" 
+            df_asignados['Costo Compra'] = 0.0 # <--- NUEVA COLUMNA
+            df_asignados['ETA (Días)'] = 0     # <--- NUEVA COLUMNA
+            
             for taller, df_taller in df_asignados.groupby(col_taller):
                 with st.expander(f"🏢 {taller} | {df_taller['Siniestro'].nunique()} Siniestro(s)", expanded=False):
                     for siniestro_auto, df_grupo in df_taller.groupby('Siniestro'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion:
-                            columnas_checkbox = ['Pedido', 'Proveedor', 'Remision', 'Entregado', 'Recibido', 'Reasignacion', 'Cancelar']
+                            # --- SE AGREGAN COSTO Y ETA AL ORDEN DESEADO ---
+                            columnas_checkbox = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Remision', 'Entregado', 'Recibido', 'Reasignacion', 'Cancelar']
                             orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_checkbox
+                            
                             config_pedidos = base_config.copy()
-                            config_pedidos.update({ "Pedido": st.column_config.CheckboxColumn("🛒 Ped"), "Proveedor": st.column_config.TextColumn("🏢 Proveedor"), "Remision": st.column_config.CheckboxColumn("📝 Rem"), "Entregado": st.column_config.CheckboxColumn("🚚 Ent"), "Recibido": st.column_config.CheckboxColumn("🏁 Rec"), "Reasignacion": st.column_config.CheckboxColumn("🔄 Reasig"), "Cancelar": st.column_config.CheckboxColumn("🚫 Can") })
+                            config_pedidos.update({ 
+                                "Pedido": st.column_config.CheckboxColumn("🛒 Ped"), 
+                                "Proveedor": st.column_config.TextColumn("🏢 Proveedor"), 
+                                "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="$ %.2f"), 
+                                "ETA (Días)": st.column_config.NumberColumn("⏳ Días", step=1),
+                                "Remision": st.column_config.CheckboxColumn("📝 Rem"), 
+                                "Entregado": st.column_config.CheckboxColumn("🚚 Ent"), 
+                                "Recibido": st.column_config.CheckboxColumn("🏁 Rec"), 
+                                "Reasignacion": st.column_config.CheckboxColumn("🔄 Reasig"), 
+                                "Cancelar": st.column_config.CheckboxColumn("🚫 Can") 
+                            })
+                            
                             df_editado_parcial = st.data_editor(df_grupo[orden_deseado], column_config=config_pedidos, disabled=[c for c in orden_deseado if c not in columnas_checkbox and c not in [col_comentarios, col_guia]], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                             for col in [col_id, col_taller, col_marca, col_modelo, col_desc, 'Siniestro', 'Vehiculo_Info']:
                                 if col in df_grupo.columns: df_editado_parcial[col] = df_grupo[col].values
@@ -962,10 +978,12 @@ if btn_guardar and permiso_edicion:
             if actual_rem_bool and not orig['remision_bool']: 
                 cambios_a_guardar.setdefault(k, {}).update({'imprimir_remision': True, 'generar_nuevo_folio': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema')})
                 
-            # Puente para enviar compras desde el Panel Operativo a BD_COMPRAS
+            # Puente Extendido para enviar compras desde el Panel Operativo a BD_COMPRAS
             if pedido_bool:
                 cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
                 cambios_a_guardar[k]['compra_prov'] = str(row.get('Proveedor', '')).strip()
+                cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
+                cambios_a_guardar[k]['compra_eta'] = str(row.get('ETA (Días)', '0')).strip()
                 cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
                 cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
 
@@ -1082,11 +1100,18 @@ if btn_guardar and permiso_edicion:
                             if str(cb['prov']).strip(): datos_comp[i][i_prov] = cb['prov']
                             datos_comp[i][i_rec] = cb['recibido']
                             
-                        # Actualización suave desde el Panel Operativo (solo si el proveedor estaba vacío)
+                        # Actualización suave desde el Panel Operativo
                         elif k_c in cambios_a_guardar and cambios_a_guardar[k_c].get('crear_compra'):
                             nuevo_prov = cambios_a_guardar[k_c].get('compra_prov', '')
+                            nuevo_costo = cambios_a_guardar[k_c].get('compra_costo', '0')
+                            nuevo_eta = cambios_a_guardar[k_c].get('compra_eta', '0')
+                            
                             if nuevo_prov and not str(datos_comp[i][i_prov]).strip():
                                 datos_comp[i][i_prov] = nuevo_prov
+                            if nuevo_costo != '0' and not str(datos_comp[i][i_costo]).strip():
+                                datos_comp[i][i_costo] = nuevo_costo
+                            if nuevo_eta != '0' and not str(datos_comp[i][i_tiempo]).strip():
+                                datos_comp[i][i_tiempo] = nuevo_eta
                                 
                     # Agregar compras totalmente nuevas
                     fecha_hoy_comp = datetime.datetime.now().strftime('%d/%b/%y')
@@ -1099,6 +1124,8 @@ if btn_guardar and permiso_edicion:
                             n_row[i_tall] = v.get('compra_taller', '')
                             n_row[i_veh] = v.get('compra_vehiculo', '')
                             n_row[i_prov] = v.get('compra_prov', '')
+                            n_row[i_costo] = v.get('compra_costo', '0')
+                            n_row[i_tiempo] = v.get('compra_eta', '0')
                             n_row[i_fcomp] = fecha_hoy_comp
                             n_row[i_rec] = 'NO'
                             nuevas_filas.append(n_row)
@@ -1135,7 +1162,7 @@ if btn_guardar and permiso_edicion:
                     
                     fecha_actual = datetime.datetime.now()
                     hora_am_pm = fecha_actual.strftime('%I:%M %p')
-                    firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%y')} {hora_am_pm}"
+                    firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%Y')} {hora_am_pm}"
                     
                     dir_v = ""
                     col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)

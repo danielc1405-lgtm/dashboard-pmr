@@ -265,10 +265,10 @@ if not df_vista.empty:
         def parse_fecha_segura(val):
             if pd.isna(val) or str(val).strip() == '': return ''
             v_str = str(val).strip()
-            if v_str.startswith("'"): v_str = v_str[1:] # Limpia el apóstrofe
-            try: return pd.to_datetime(v_str, dayfirst=True).strftime('%d/%m/%Y')
+            if v_str.startswith("'"): v_str = v_str[1:] 
+            try: return pd.to_datetime(v_str, dayfirst=True).strftime('%d/%b/%y')
             except:
-                try: return pd.to_datetime(v_str).strftime('%d/%m/%Y')
+                try: return pd.to_datetime(v_str).strftime('%d/%b/%y')
                 except: return v_str 
 
         for c_fecha in [col_asignacion, col_vencimiento, col_fecha_confi]:
@@ -375,7 +375,7 @@ if vista_actual == "📊 Analítico":
             df_compras_llegar = df_compras_llegar.sort_values(by='Llegada_Calculada', ascending=True)
             hoy_comparacion = pd.to_datetime(datetime.datetime.now().date())
             df_compras_llegar['Estatus'] = df_compras_llegar['Llegada_Calculada'].apply(lambda x: "🔴 Atrasado" if pd.notna(x) and x < hoy_comparacion else "🟢 En tiempo")
-            df_compras_llegar['Fecha Llegada'] = df_compras_llegar['Llegada_Calculada'].dt.strftime('%d/%m/%Y').fillna('-')
+            df_compras_llegar['Fecha Llegada'] = df_compras_llegar['Llegada_Calculada'].dt.strftime('%d/%b/%y').fillna('-')
             cols_llegar = [c for c in ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Fecha Llegada', 'Estatus'] if c in df_compras_llegar.columns]
             st.dataframe(df_compras_llegar[cols_llegar], use_container_width=True, hide_index=True)
         else: st.info("✅ Todos los pedidos han sido recibidos.")
@@ -391,7 +391,7 @@ if vista_actual == "📊 Analítico":
 
 if vista_actual == "⚙️ Panel Operativo":
     st.markdown("### 📈 Indicadores Diarios")
-    hoy_str = datetime.datetime.now().strftime('%d/%m/%Y')
+    hoy_str = datetime.datetime.now().strftime('%d/%b/%y')
     hoy_dt = pd.to_datetime(datetime.datetime.now().date())
     
     def parse_dt_safe(val):
@@ -474,7 +474,7 @@ if vista_actual == "⚙️ Panel Operativo":
                 df_vencimientos['Cancelar'] = False; df_vencimientos['Reasignar'] = False; df_vencimientos['Nueva Fecha'] = pd.NaT
                 cols_venc = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_comentarios, 'Cancelar', 'Reasignar', 'Nueva Fecha'] if c in df_vencimientos.columns]
                 config_venc = base_config.copy()
-                config_venc.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MM/YYYY")})
+                config_venc.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
                 df_editado_venc = st.data_editor(df_vencimientos[cols_venc], column_config=config_venc, disabled=[c for c in cols_venc if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios, col_guia]], hide_index=True, use_container_width=True, key="ed_venc")
                 for col in [col_id, col_marca, col_modelo]:
                     if col in df_vencimientos.columns: df_editado_venc[col] = df_vencimientos[col].values
@@ -493,7 +493,7 @@ if vista_actual == "⚙️ Panel Operativo":
                 df_atrasadas['Cancelar'] = False; df_atrasadas['Reasignar'] = False; df_atrasadas['Nueva Fecha'] = pd.NaT
                 cols_atr = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_comentarios, 'Cancelar', 'Reasignar', 'Nueva Fecha'] if c in df_atrasadas.columns]
                 config_atr = base_config.copy()
-                config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MM/YYYY")})
+                config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
                 df_editado_atrasadas = st.data_editor(df_atrasadas[cols_atr], column_config=config_atr, disabled=[c for c in cols_atr if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios]], hide_index=True, use_container_width=True, key="ed_atr")
                 for col in [col_id, col_marca, col_modelo]:
                     if col in df_atrasadas.columns: df_editado_atrasadas[col] = df_atrasadas[col].values
@@ -914,7 +914,7 @@ if btn_guardar and permiso_edicion:
             if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
             if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
             if row.get('Reasignar') and pd.notna(nueva_fecha):
-                cambios_a_guardar.setdefault(k, {})['vencimiento'] = nueva_fecha.strftime('%d/%m/%Y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
+                cambios_a_guardar.setdefault(k, {})['vencimiento'] = nueva_fecha.strftime('%d/%b/%y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
 
     if not df_editado_atrasadas.empty:
         for _, row in df_editado_atrasadas.iterrows():
@@ -927,7 +927,7 @@ if btn_guardar and permiso_edicion:
             if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
             if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
             if row.get('Reasignar') and pd.notna(nueva_fecha):
-                cambios_a_guardar.setdefault(k, {})['vencimiento'] = nueva_fecha.strftime('%d/%m/%Y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
+                cambios_a_guardar.setdefault(k, {})['vencimiento'] = nueva_fecha.strftime('%d/%b/%y') if hasattr(nueva_fecha, 'strftime') else str(nueva_fecha)
 
     if not df_editado_cobro.empty:
         for _, row in df_editado_cobro.iterrows():
@@ -975,12 +975,11 @@ if btn_guardar and permiso_edicion:
                     numeros = df_completo[col_remision].astype(str).str.extract(rf'(?i){pref}\s*-\s*0*(\d+)', expand=False)
                     max_folios[pref] = int(pd.to_numeric(numeros, errors='coerce').max() if pd.notna(pd.to_numeric(numeros, errors='coerce').max()) else 0)
 
-                # --- LÓGICA: UN SOLO FOLIO POR SINIESTRO ---
                 folios_asignados_en_sesion = {}
                 
                 for k, v in cambios_a_guardar.items():
                     if v.get('generar_nuevo_folio'):
-                        siniestro_id = k[0] # El ID del siniestro
+                        siniestro_id = k[0] 
                         if siniestro_id not in folios_asignados_en_sesion:
                             aseguradora_base = originales.get(k, {}).get('aseg', 'GNP')
                             pref = "MULTI" if "MULTI" in aseguradora_base else "GNP"
@@ -1002,7 +1001,7 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- GENERACIÓN DE PDF FLOTANTE (NUEVO FORMATO Y BOTONES) ---
+            # --- GENERACIÓN DE PDF FLOTANTE ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
                 marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
@@ -1039,7 +1038,6 @@ if btn_guardar and permiso_edicion:
                     
                     def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
 
-                    # Creamos el PDF y apagamos el salto de página automático para evitar que lo corte a 2 caras
                     pdf = FPDF(orientation='L', unit='mm', format='A4')
                     pdf.set_auto_page_break(auto=False, margin=0) 
                     pdf.add_page()
@@ -1097,11 +1095,9 @@ if btn_guardar and permiso_edicion:
                             pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
                             y_item += 5
                             
-                        # Firma asegurada en la parte inferior derecha del recuadro
                         pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)
                         pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
 
-                    # Dibujamos las dos caras sobre la misma página 
                     dibujar_bloque_remision(10)
                     pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
                     dibujar_bloque_remision(152)
@@ -1112,13 +1108,12 @@ if btn_guardar and permiso_edicion:
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
                         
-                        # Inyección de los dos botones: Descarga e Imprimir nativo
+                        # --- CORRECCIÓN HTML Y BOTONES DE DESCARGA / ABRIR ---
                         html_botones_flotantes += f'''
-                        <div style="display: flex; gap: 15px; align-items: center; justify-content: center;">
-                            <span style="color: #4CAF50; font-weight: bold; font-size: 1.1em;">✓ {folio_str_print}</span>
-                            <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 10px 20px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">📄 Descargar PDF</a>
-                            
-                            <button onclick="var frm = document.createElement('iframe'); frm.style.display = 'none'; frm.src = 'data:application/pdf;base64,{b64}'; document.body.appendChild(frm); setTimeout(function() {{ frm.contentWindow.focus(); frm.contentWindow.print(); }}, 800);" style="display: inline-block; padding: 10px 20px; background-color: #00529B; color: white; border: none; border-radius: 6px; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.2); cursor: pointer;">🖨️ Imprimir</button>
+                        <div style="display: flex; gap: 15px; align-items: center; justify-content: center; width: 100%;">
+                            <span style="color: #4CAF50; font-weight: bold; font-size: 1.1em; margin-right: 15px;">✓ {folio_str_print}</span>
+                            <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 10px 20px; background-color: #2E7D32; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #1B5E20;">📥 Descargar PDF</a>
+                            <a href="data:application/pdf;base64,{b64}" target="_blank" style="display: inline-block; padding: 10px 20px; background-color: #00529B; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #003366;">🖨️ Abrir para Imprimir</a>
                         </div>
                         '''
                 

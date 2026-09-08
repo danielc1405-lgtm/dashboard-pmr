@@ -975,12 +975,20 @@ if btn_guardar and permiso_edicion:
                     numeros = df_completo[col_remision].astype(str).str.extract(rf'(?i){pref}\s*-\s*0*(\d+)', expand=False)
                     max_folios[pref] = int(pd.to_numeric(numeros, errors='coerce').max() if pd.notna(pd.to_numeric(numeros, errors='coerce').max()) else 0)
 
+                # --- NUEVA LÓGICA: UN SOLO FOLIO POR SINIESTRO ---
+                folios_asignados_en_sesion = {}
+                
                 for k, v in cambios_a_guardar.items():
                     if v.get('generar_nuevo_folio'):
-                        aseguradora_base = originales.get(k, {}).get('aseg', 'GNP')
-                        pref = "MULTI" if "MULTI" in aseguradora_base else "GNP"
-                        max_folios[pref] += 1
-                        v['remision_num'] = f"{pref} - {max_folios[pref]:03d}"
+                        siniestro_id = k[0] # El ID del siniestro
+                        if siniestro_id not in folios_asignados_en_sesion:
+                            aseguradora_base = originales.get(k, {}).get('aseg', 'GNP')
+                            pref = "MULTI" if "MULTI" in aseguradora_base else "GNP"
+                            max_folios[pref] += 1
+                            folios_asignados_en_sesion[siniestro_id] = f"{pref} - {max_folios[pref]:03d}"
+                            
+                        # Asignar el mismo folio a todas las piezas del pedido actual
+                        v['remision_num'] = folios_asignados_en_sesion[siniestro_id]
 
                 for i in range(1, len(datos_uni)):
                     k = generar_llave(datos_uni[i][idx_id], datos_uni[i][idx_desc])
@@ -995,14 +1003,13 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- GENERACIÓN DE PDF FLOTANTE Y CORREGIDO ---
+            # --- GENERACIÓN DE PDF FLOTANTE ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
                 marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
                 cols_agrup = [col_id, col_taller, col_marca, col_modelo]
                 agrupadores = [c for c in cols_agrup if c in marcados_remision.columns]
                 
-                # Se ajusta el contenedor HTML para que sea inline y se acomode limpio en el layout
                 html_botones_flotantes = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; padding: 10px; background-color: #1e1e24; border-radius: 8px; border: 1px solid #333; width: 100%;">'
                 usuario_print = st.session_state.get('usuario_actual', 'Sistema')
                 
@@ -1036,7 +1043,6 @@ if btn_guardar and permiso_edicion:
                     pdf = FPDF(orientation='L', unit='mm', format='A4')
                     pdf.add_page()
                     
-                    # Función reestructurada controlando X e Y manualmente para evitar sobreescritura
                     def dibujar_bloque_remision(x_offset):
                         y_offset = 15
                         if os.path.exists("logo.png"):
@@ -1061,30 +1067,25 @@ if btn_guardar and permiso_edicion:
                         y_datos = y_offset + 22; pdf.set_fill_color(220, 220, 220)
                         pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
                         
-                        # Fila 1: Taller
                         pdf.set_xy(x_offset, y_datos)
                         pdf.cell(20, 5, "TALLER", border=1, fill=True); pdf.set_font("Arial", '', 7)
                         pdf.cell(115, 5, limpiar_texto(f" {taller_v}")[:75], border=1)
                         
-                        # Fila 2: Dirección
                         y_datos += 5; pdf.set_xy(x_offset, y_datos)
                         pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "DIRECCION", border=1, fill=True)
                         pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}")[:85], border=1)
                         
-                        # Fila 3: Siniestro y Vehículo
                         y_datos += 5; pdf.set_xy(x_offset, y_datos)
                         pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "SINIESTRO", border=1, fill=True)
                         pdf.set_font("Arial", 'B', 8); pdf.cell(45, 5, limpiar_texto(f" {siniestro_v}"), border=1)
                         pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "VEHICULO", border=1, fill=True)
                         pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}")[:35], border=1)
 
-                        # Encabezados de Tabla
                         y_tabla = y_datos + 10; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0)
                         pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
                         pdf.cell(15, 6, "CANT", border=1, fill=True, align='C')
                         pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C')
 
-                        # Contenido de Tabla
                         y_item = y_tabla + 6
                         pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
                         for _, row_rem in df_g.iterrows():
@@ -1095,7 +1096,6 @@ if btn_guardar and permiso_edicion:
                             pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
                             y_item += 5
                             
-                        # Firma Digital
                         pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)
                         pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
 

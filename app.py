@@ -993,17 +993,17 @@ if btn_guardar and permiso_edicion:
                         if 'guia' in c and idx_guia >= 0: datos_uni[i][idx_guia] = c['guia']
                         if 'vencimiento' in c and idx_venc >= 0: datos_uni[i][idx_venc] = c['vencimiento']
                 
-                # Se agrega value_input_option='USER_ENTERED' para evitar el apóstrofe en Google Sheets
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- GENERACIÓN DE PDF FLOTANTE ---
+            # --- GENERACIÓN DE PDF FLOTANTE Y CORREGIDO ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
                 marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
                 cols_agrup = [col_id, col_taller, col_marca, col_modelo]
                 agrupadores = [c for c in cols_agrup if c in marcados_remision.columns]
                 
-                html_botones_flotantes = '<div style="position: fixed; top: 15px; left: 50%; transform: translateX(-50%); z-index: 999999; display: flex; flex-direction: column; gap: 10px; align-items: center; pointer-events: auto;">'
+                # Se ajusta el contenedor HTML para que sea inline y se acomode limpio en el layout
+                html_botones_flotantes = '<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 5px; padding: 10px; background-color: #1e1e24; border-radius: 8px; border: 1px solid #333; width: 100%;">'
                 usuario_print = st.session_state.get('usuario_actual', 'Sistema')
                 
                 for keys, df_g in marcados_remision.groupby(agrupadores):
@@ -1036,6 +1036,7 @@ if btn_guardar and permiso_edicion:
                     pdf = FPDF(orientation='L', unit='mm', format='A4')
                     pdf.add_page()
                     
+                    # Función reestructurada controlando X e Y manualmente para evitar sobreescritura
                     def dibujar_bloque_remision(x_offset):
                         y_offset = 15
                         if os.path.exists("logo.png"):
@@ -1043,41 +1044,58 @@ if btn_guardar and permiso_edicion:
                             except: pass
                         
                         pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
-                        pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"), ln=True)
+                        pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"))
                         pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5)
-                        pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"), ln=True)
-                        pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_x(x_offset + 32)
-                        pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"), ln=True); pdf.set_x(x_offset + 32)
-                        pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"), ln=True)
+                        pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"))
+                        pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_xy(x_offset + 32, y_offset + 9)
+                        pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"))
+                        pdf.set_xy(x_offset + 32, y_offset + 12)
+                        pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"))
 
                         pdf.set_text_color(0, 0, 0); pdf.set_xy(x_offset + 105, y_offset); pdf.set_font("Arial", 'B', 9)
-                        pdf.cell(30, 5, "REMISION", border=1, align='C', ln=True); pdf.set_x(x_offset + 105)
+                        pdf.cell(30, 5, "REMISION", border=1, align='C')
                         pdf.set_text_color(200, 0, 0); pdf.set_font("Arial", 'B', 10)
-                        pdf.cell(30, 6, folio_str_print, border=1, align='C', ln=True)
+                        pdf.set_xy(x_offset + 105, y_offset + 5)
+                        pdf.cell(30, 6, folio_str_print, border=1, align='C')
                         
-                        y_datos = y_offset + 22; pdf.set_xy(x_offset, y_datos); pdf.set_fill_color(220, 220, 220)
+                        y_datos = y_offset + 22; pdf.set_fill_color(220, 220, 220)
                         pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
+                        
+                        # Fila 1: Taller
+                        pdf.set_xy(x_offset, y_datos)
                         pdf.cell(20, 5, "TALLER", border=1, fill=True); pdf.set_font("Arial", '', 7)
-                        pdf.cell(115, 5, limpiar_texto(f" {taller_v}"), border=1, ln=True); pdf.set_x(x_offset)
+                        pdf.cell(115, 5, limpiar_texto(f" {taller_v}")[:75], border=1)
+                        
+                        # Fila 2: Dirección
+                        y_datos += 5; pdf.set_xy(x_offset, y_datos)
                         pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "DIRECCION", border=1, fill=True)
-                        pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}"), border=1, ln=True); pdf.set_x(x_offset)
+                        pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}")[:85], border=1)
+                        
+                        # Fila 3: Siniestro y Vehículo
+                        y_datos += 5; pdf.set_xy(x_offset, y_datos)
                         pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "SINIESTRO", border=1, fill=True)
                         pdf.set_font("Arial", 'B', 8); pdf.cell(45, 5, limpiar_texto(f" {siniestro_v}"), border=1)
                         pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "VEHICULO", border=1, fill=True)
-                        pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}"), border=1, ln=True)
+                        pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}")[:35], border=1)
 
-                        y_tabla = y_datos + 20; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0)
+                        # Encabezados de Tabla
+                        y_tabla = y_datos + 10; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0)
                         pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
                         pdf.cell(15, 6, "CANT", border=1, fill=True, align='C')
-                        pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C'); pdf.ln(6)
+                        pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C')
 
+                        # Contenido de Tabla
+                        y_item = y_tabla + 6
                         pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
                         for _, row_rem in df_g.iterrows():
                             cant_v = str(row_rem.get(col_cant, 1))
                             if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
-                            pdf.set_x(x_offset); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C')
-                            pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, ''))), border=1); pdf.ln(5)
+                            pdf.set_xy(x_offset, y_item)
+                            pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C')
+                            pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
+                            y_item += 5
                             
+                        # Firma Digital
                         pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)
                         pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
 
@@ -1090,7 +1108,7 @@ if btn_guardar and permiso_edicion:
                         nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
-                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="pointer-events: auto; display: inline-block; padding: 12px 24px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-family: sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid white;">📄 Descargar {nombre_archivo}</a>'
+                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 8px 16px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; font-family: sans-serif; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">📄 Descargar: {nombre_archivo}</a>'
                 
                 html_botones_flotantes += '</div>'
                 st.session_state['pdfs_generados'] = html_botones_flotantes

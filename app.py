@@ -110,7 +110,10 @@ rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 # =====================================================================
 # === [BLOQUE 2: MENÚ LATERAL Y HEADER PRINCIPAL] ===
 with st.sidebar:
-    st.success(f"👤 Operador activo: {st.session_state.get('usuario_actual', 'Daniel Cantú')}\n\n🛡️ Rol: Administrador")
+    # Obtenemos el rol de la sesión actual, si no hay, por seguridad se asigna Visor
+    rol_usuario = st.session_state.get('rol_actual', 'Visor')
+    
+    st.success(f"👤 Operador activo: {st.session_state.get('usuario_actual', 'Demo')}\n\n🛡️ Rol: {rol_usuario}")
     st.markdown("---")
     st.markdown("🧭 **Navegación**")
     vista_actual = st.radio("Navegación", ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", "🏢 Talleres", "📦 Inventario", "🧾 Facturación"], label_visibility="collapsed")
@@ -127,22 +130,27 @@ with col_logo:
     if os.path.exists("logo.png"): st.image("logo.png", width=130)
 
 with col_ctrl:
-    # Mudanza del selector de aseguradora y controles aquí arriba
     aseguradora_sel = st.selectbox("🛡️ Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
     
     col_btn, col_chk = st.columns([1.2, 1])
-    with col_btn:
-        btn_guardar = st.button("💾 Guardar Cambios", use_container_width=True, type="primary")
+    
+    # --- CANDADO DE SEGURIDAD PARA EL ROL VISOR ---
+    es_visor = "VISOR" in str(rol_usuario).upper()
+    
     with col_chk:
-        modo_consulta = st.checkbox("Modo Lectura", value=False)
+        # Si es visor, la casilla se marcaola y se bloquea para evitar trampas
+        modo_consulta = st.checkbox("Modo Lectura", value=True if es_visor else False, disabled=es_visor)
     
     permiso_edicion = not modo_consulta
+    
+    with col_btn:
+        # Deshabilita el botón de guardar si no hay permiso de edición
+        btn_guardar = st.button("💾 Guardar Cambios", use_container_width=True, type="primary", disabled=not permiso_edicion)
 
 with col_tit:
     color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00529B"
     st.markdown(f"<h2 style='margin-bottom: 0;'>PMR - {vista_actual.split(' ')[0]} {vista_actual.split(' ', 1)[1]} | <span style='color: {color_aseg}; font-weight: bold;'>🛡️ {aseguradora_sel}</span></h2>", unsafe_allow_html=True)
     
-    # Aquí se anclan los botones de remisión para que siempre queden a la vista
     if 'pdfs_generados' in st.session_state and st.session_state['pdfs_generados']:
         st.markdown(st.session_state['pdfs_generados'], unsafe_allow_html=True)
         if st.button("✅ Cerrar Avisos de Remisión", key="close_pdfs"):

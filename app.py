@@ -130,7 +130,9 @@ elif rol_activo in ['ALMACÉN', 'ALMACEN'] or usuario_activo in ['JUAN GARZA', '
     else:
         permiso_edicion = False
 
-# PANEL SUPERIOR FIJO
+# =====================================================================
+# === PANEL SUPERIOR FIJO ===
+# =====================================================================
 st.markdown('<span id="panel-fijo"></span>', unsafe_allow_html=True)
 cabecera = st.container()
 with cabecera:
@@ -139,7 +141,10 @@ with cabecera:
         if os.path.exists("logo.png"):
             st.image("logo.png", width=150)
     with col_tit:
-        st.markdown(f"<h2 style='margin-top: 10px; margin-bottom: 0px;'>PMR - {vista_actual}</h2>", unsafe_allow_html=True)
+        # Etiqueta dinámica de la aseguradora en el título principal
+        color_aseg = "#00529B" if aseguradora_sel == "GNP" else "#00823B"
+        st.markdown(f"<h2 style='margin-top: 10px; margin-bottom: 0px;'>PMR - {vista_actual} | <span style='color:{color_aseg}; font-size: 0.9em;'>🛡️ {aseguradora_sel}</span></h2>", unsafe_allow_html=True)
+        
         if st.session_state.get('pdfs_generados'):
             st.markdown(st.session_state['pdfs_generados'], unsafe_allow_html=True)
             if st.button("✅ Cerrar Avisos de Remisión"):
@@ -1072,7 +1077,7 @@ if btn_guardar and permiso_edicion:
                         nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
                         b64 = base64.b64encode(pdf_bytes).decode()
-                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="display: inline-block; padding: 12px 24px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-family: sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid white;">📄 Descargar {nombre_archivo}</a>'
+                        html_botones_flotantes += f'<a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" style="pointer-events: auto; display: inline-block; padding: 12px 24px; background-color: #FF4B4B; color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-family: sans-serif; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 2px solid white;">📄 Descargar {nombre_archivo}</a>'
                 
                 html_botones_flotantes += '</div>'
                 st.session_state['pdfs_generados'] = html_botones_flotantes

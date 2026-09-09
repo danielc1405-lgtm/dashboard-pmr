@@ -107,27 +107,29 @@ if not st.session_state['autenticado']:
 usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
 rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 
-# =====================================================================
 # ==============================================================================
-# === [BLOQUE 2: MENÚ UX HORIZONTAL Y HEADER PRINCIPAL] ===
+# === [BLOQUE 2: MENÚ UX COMPACTO Y HEADER PRINCIPAL] ===
 # ==============================================================================
-# Ya no usamos el sidebar. Todo va en la pantalla principal.
 rol_usuario = str(st.session_state.get('rol', st.session_state.get('rol_actual', 'Visor')))
 nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
 
 if "VISOR" in nombre_usuario.upper() or "DEMO" in str(st.session_state.get('usuario', '')).upper():
     rol_usuario = "Visor"
 
-# Estilos CSS para convertir los botones de radio nativos en "Pestañas" visuales
+# Magia CSS: Cortamos el espacio en blanco de arriba, ocultamos el header default
+# y hacemos los botones más compactos.
 st.markdown("""
     <style>
-    div.row-widget.stRadio > div { flex-direction: row; gap: 10px; flex-wrap: wrap; }
+    .block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
+    header { visibility: hidden; }
+    div.row-widget.stRadio > div { flex-direction: row; gap: 5px; flex-wrap: wrap; }
     div.row-widget.stRadio > div > label { 
         background-color: #262730; 
-        padding: 10px 15px; 
-        border-radius: 6px; 
+        padding: 5px 12px; 
+        border-radius: 4px; 
         cursor: pointer; 
         border: 1px solid #444; 
+        font-size: 0.9rem;
     }
     div.row-widget.stRadio > div > label:hover { border-color: #F63366; }
     div.row-widget.stRadio > div > label[data-checked="true"] { 
@@ -135,49 +137,46 @@ st.markdown("""
         color: white; 
         border-color: #F63366; 
     }
-    /* Oculta los circulitos nativos del radio button */
     div.row-widget.stRadio > div > label > div:first-child { display: none; }
+    hr { margin: 0.5em 0px; }
     </style>
 """, unsafe_allow_html=True)
 
-# Logo y Pestañas de Navegación
-col_logo, col_menu = st.columns([1.5, 8.5])
+# Todo en una sola fila compacta
+col_logo, col_menu, col_aseg, col_chk, col_btn, col_out = st.columns([1.2, 5.5, 1.5, 1, 1.2, 0.6], gap="small")
+
 with col_logo:
-    if os.path.exists("logo.png"): st.image("logo.png", width=140)
+    if os.path.exists("logo.png"): st.image("logo.png", width=90) # Logo reducido
+
+with col_aseg:
+    aseguradora_sel = st.selectbox("🛡️ Aseg.", ["Multiasistencias", "GNP"], label_visibility="collapsed")
 
 with col_menu:
     opciones_menu = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", "📦 Inventario", "🧾 Facturación"]
-    vista_actual = st.radio("Navegación:", opciones_menu, horizontal=True, label_visibility="collapsed")
+    vista_actual = st.radio("Nav:", opciones_menu, horizontal=True, label_visibility="collapsed")
+    
+    # Subtítulo súper compacto pegado abajo del menú
+    color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00529B"
+    st.markdown(f"<div style='font-size:0.85em; color:#aaa; margin-top:-5px;'><b>{vista_actual}</b> | <span style='color:{color_aseg}; font-weight:bold;'>{aseguradora_sel}</span> | 👤 {nombre_usuario}</div>", unsafe_allow_html=True)
+
+es_visor = "VISOR" in rol_usuario.upper()
+with col_chk:
+    st.markdown("<div style='margin-top:2px;'></div>", unsafe_allow_html=True) # Ligero ajuste de altura
+    modo_consulta = st.checkbox("Lectura", value=True if es_visor else False, disabled=es_visor)
+permiso_edicion = not modo_consulta
+
+with col_btn:
+    btn_guardar = st.button("💾 Guardar", use_container_width=True, type="primary", disabled=not permiso_edicion)
+
+with col_out:
+    if st.button("🚪"):
+        st.session_state.clear()
+        st.rerun()
 
 st.markdown("---")
 
-# Controles superiores (Aseguradora, Guardar, Salir)
-col_tit, col_ctrl = st.columns([4, 3])
-with col_ctrl:
-    col_aseg, col_chk, col_btn, col_out = st.columns([1.5, 1, 1.2, 0.6])
-    with col_aseg:
-        aseguradora_sel = st.selectbox("🛡️ Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
-    
-    es_visor = "VISOR" in rol_usuario.upper()
-    with col_chk:
-        modo_consulta = st.checkbox("Solo Lectura", value=True if es_visor else False, disabled=es_visor)
-    permiso_edicion = not modo_consulta
-    
-    with col_btn:
-        btn_guardar = st.button("💾 Guardar", use_container_width=True, type="primary", disabled=not permiso_edicion)
-        
-    with col_out:
-        if st.button("🚪"):
-            st.session_state.clear()
-            st.rerun()
-
-with col_tit:
-    color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00529B"
-    st.markdown(f"<h3 style='margin-top: -10px; margin-bottom: 0;'>PMR - {vista_actual.split(' ')[0]} {vista_actual.split(' ', 1)[1]} | <span style='color: {color_aseg}; font-weight: bold;'>🛡️ {aseguradora_sel}</span> <span style='font-size: 0.5em; color: gray;'>(👤 {nombre_usuario})</span></h3>", unsafe_allow_html=True)
-
-# --- SISTEMA NATIVO DE DESCARGA DE PDFS ---
+# --- SISTEMA NATIVO DE DESCARGA DE PDFS (Más discreto) ---
 if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
-    st.markdown("### 🖨️ Avisos y Remisiones Generadas")
     for aviso in st.session_state.get('avisos_remision', []):
         st.warning(aviso)
     
@@ -186,18 +185,18 @@ if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
         for i, pdf_obj in enumerate(st.session_state['pdfs_list']):
             with cols_pdf[i]:
                 st.download_button(
-                    label=f"📥 {pdf_obj['folio']}\n({pdf_obj['siniestro']})",
+                    label=f"📥 {pdf_obj['folio']}",
                     data=pdf_obj['bytes'],
                     file_name=pdf_obj['nombre'],
                     mime="application/pdf",
                     key=f"btn_pdf_dl_{i}"
                 )
         with cols_pdf[-1]:
-            if st.button("✅ Limpiar Bandeja", type="primary"):
+            if st.button("✅ Limpiar", type="primary"):
                 st.session_state['pdfs_list'] = []
                 st.session_state['avisos_remision'] = []
                 st.rerun()
-st.markdown("---")
+    st.markdown("---")
 
 # =====================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===

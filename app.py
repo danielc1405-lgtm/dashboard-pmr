@@ -110,19 +110,22 @@ rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 # =====================================================================
 # === [BLOQUE 2: MENÚ LATERAL Y HEADER PRINCIPAL] ===
 with st.sidebar:
-    # Obtenemos el rol de la sesión actual, si no hay, por seguridad se asigna Visor
-    rol_usuario = st.session_state.get('rol_actual', 'Visor')
+    rol_usuario = str(st.session_state.get('rol', st.session_state.get('rol_actual', 'Visor')))
+    nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
     
-    st.success(f"👤 Operador activo: {st.session_state.get('usuario_actual', 'Demo')}\n\n🛡️ Rol: {rol_usuario}")
+    if "VISOR" in nombre_usuario.upper() or "DEMO" in str(st.session_state.get('usuario', '')).upper():
+        rol_usuario = "Visor"
+
+    st.success(f"👤 Operador activo: {nombre_usuario}\n\n🛡️ Rol: {rol_usuario}")
     st.markdown("---")
     st.markdown("🧭 **Navegación**")
-    vista_actual = st.radio("Navegación", ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Pedidos y Proveedores", "🏢 Talleres", "📦 Inventario", "🧾 Facturación"], label_visibility="collapsed")
+    # Cambio de nombre de la pestaña a "Compras"
+    vista_actual = st.radio("Navegación", ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", "📦 Inventario", "🧾 Facturación"], label_visibility="collapsed")
     st.markdown("---")
     if st.button("🚪 Cerrar Sesión"):
         st.session_state.clear()
         st.rerun()
 
-# HEADER Y CONTROLES SUPERIORES (Fuera del sidebar)
 st.markdown('<div id="panel-fijo"></div>', unsafe_allow_html=True)
 
 col_logo, col_tit, col_ctrl = st.columns([1.5, 4, 3])
@@ -131,33 +134,45 @@ with col_logo:
 
 with col_ctrl:
     aseguradora_sel = st.selectbox("🛡️ Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
-    
     col_btn, col_chk = st.columns([1.2, 1])
-    
-    # --- CANDADO DE SEGURIDAD PARA EL ROL VISOR ---
-    es_visor = "VISOR" in str(rol_usuario).upper()
+    es_visor = "VISOR" in rol_usuario.upper()
     
     with col_chk:
-        # Si es visor, la casilla se marcaola y se bloquea para evitar trampas
         modo_consulta = st.checkbox("Modo Lectura", value=True if es_visor else False, disabled=es_visor)
-    
     permiso_edicion = not modo_consulta
     
     with col_btn:
-        # Deshabilita el botón de guardar si no hay permiso de edición
         btn_guardar = st.button("💾 Guardar Cambios", use_container_width=True, type="primary", disabled=not permiso_edicion)
 
 with col_tit:
     color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00529B"
     st.markdown(f"<h2 style='margin-bottom: 0;'>PMR - {vista_actual.split(' ')[0]} {vista_actual.split(' ', 1)[1]} | <span style='color: {color_aseg}; font-weight: bold;'>🛡️ {aseguradora_sel}</span></h2>", unsafe_allow_html=True)
     
-    if 'pdfs_generados' in st.session_state and st.session_state['pdfs_generados']:
-        st.markdown(st.session_state['pdfs_generados'], unsafe_allow_html=True)
-        if st.button("✅ Cerrar Avisos de Remisión", key="close_pdfs"):
-            st.session_state['pdfs_generados'] = ""
-            st.rerun()
-
-st.markdown("---")
+# --- NUEVO SISTEMA NATIVO DE DESCARGA DE PDFS ---
+if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
+    st.markdown("### 🖨️ Avisos y Remisiones")
+    for aviso in st.session_state.get('avisos_remision', []):
+        st.warning(aviso)
+    
+    if st.session_state.get('pdfs_list'):
+        cols_pdf = st.columns(len(st.session_state['pdfs_list']) + 1)
+        for i, pdf_obj in enumerate(st.session_state['pdfs_list']):
+            with cols_pdf[i]:
+                st.download_button(
+                    label=f"📥 {pdf_obj['folio']}\n({pdf_obj['siniestro']})",
+                    data=pdf_obj['bytes'],
+                    file_name=pdf_obj['nombre'],
+                    mime="application/pdf",
+                    key=f"btn_pdf_dl_{i}"
+                )
+        with cols_pdf[-1]:
+            if st.button("✅ Limpiar Avisos", type="primary"):
+                st.session_state['pdfs_list'] = []
+                st.session_state['avisos_remision'] = []
+                st.rerun()
+    st.markdown("---")
+else:
+    st.markdown("---")
 
 # =====================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -668,15 +683,13 @@ elif vista_actual == "⚙️ Panel Operativo":
             st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
 
 # === [BLOQUE 6: VISTA 3 - PEDIDOS Y PROVEEDORES] ===
-if vista_actual == "🛒 Pedidos y Proveedores":
+if vista_actual == "🛒 Compras":
     st.markdown("### 🛒 Panel de Compras (Gestión y Pagos)")
     if not df_compras.empty:
-        # Aseguramos que las nuevas columnas existan en memoria aunque Sheets esté vacío
         for c in ['Condición Pago', 'Días Crédito', 'Estatus Pago']:
             if c not in df_compras.columns: df_compras[c] = ""
             
         df_compras['Recibido_Bool'] = df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
-        # Mantenemos en la vista las piezas no recibidas, O las recibidas que aún no se pagan
         df_compras_disp = df_compras[(df_compras['Recibido_Bool'] == False) | (df_compras['Estatus Pago'].astype(str).str.upper() != 'PAGADO')].copy()
         
         if not df_compras_disp.empty:
@@ -697,7 +710,6 @@ if vista_actual == "🛒 Pedidos y Proveedores":
             df_compras_disp['ETA_Dias'] = pd.to_numeric(df_compras_disp['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
             df_compras_disp['Llegada_Calculada'] = df_compras_disp['Fecha_Compra_Dt'] + pd.to_timedelta(df_compras_disp['ETA_Dias'], unit='d')
             
-            # --- MOTOR FINANCIERO DE PAGOS ---
             df_compras_disp['Días Crédito'] = pd.to_numeric(df_compras_disp['Días Crédito'], errors='coerce').fillna(0)
             df_compras_disp['Fecha Límite Pago'] = pd.NaT
             mask_credito = df_compras_disp['Condición Pago'].astype(str).str.upper().str.contains('CREDITO|CRÉDITO')
@@ -718,11 +730,9 @@ if vista_actual == "🛒 Pedidos y Proveedores":
                 return "⚪ Configurar Pago"
             
             df_compras_disp['Alerta Pago'] = df_compras_disp.apply(calc_alerta_pago, axis=1)
-            # ----------------------------------
 
             df_compras_disp['Filtro_Busqueda'] = df_compras_disp['Siniestro'].astype(str) + " | " + df_compras_disp['Descripción Pieza'].astype(str)
             
-            # FILTROS
             col_b1, col_b2, col_b3 = st.columns(3)
             with col_b1:
                 lista_pedidos = sorted(list(df_compras_disp['Filtro_Busqueda'].unique()))
@@ -740,14 +750,15 @@ if vista_actual == "🛒 Pedidos y Proveedores":
             if busqueda_taller: df_compras_disp = df_compras_disp[df_compras_disp['Taller_Filtro'].isin(busqueda_taller)].copy()
             if busqueda_prov: df_compras_disp = df_compras_disp[df_compras_disp['Prov_Filtro'].isin(busqueda_prov)].copy()
             
-            # AGRUPACIÓN POR PROVEEDOR Y LUEGO SINIESTRO
             dfs_editados_compras = []
             df_compras_disp['Proveedor_Agrupador'] = df_compras_disp['Proveedor'].replace('', '⚠️ SIN PROVEEDOR ASIGNADO')
             
             for proveedor, df_prov in df_compras_disp.groupby('Proveedor_Agrupador'):
                 with st.expander(f"🏭 Proveedor: {proveedor} | {len(df_prov)} Partida(s)", expanded=False):
                     for siniestro_auto, df_grupo in df_prov.groupby('Siniestro'):
-                        st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo'].iloc[0]}**")
+                        # Solución al KeyError: Buscamos cualquier variante de la palabra Vehículo
+                        nombre_vehiculo = df_grupo.get('Vehículo', df_grupo.get('Vehiculo', df_grupo.get('Vehiculo_Info', pd.Series(['Sin Información'])))).iloc[0]
+                        st.markdown(f"**🚗 {siniestro_auto} | {nombre_vehiculo}**")
                         
                         df_grupo['Imprimir Remisión'] = False
                         df_grupo['Recibido'] = df_grupo['Recibido'].astype(str).str.upper().isin(['TRUE', 'SI', '1'])
@@ -770,7 +781,6 @@ if vista_actual == "🛒 Pedidos y Proveedores":
                             
                             df_ed_comp = st.data_editor(df_grupo[cols_mostrar], column_config=config_compras, disabled=[c for c in cols_mostrar if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_comp_{proveedor}_{siniestro_auto}")
                             
-                            # Reinyectamos llaves ocultas
                             for col in ['Siniestro', 'Descripción Pieza', 'Proveedor']:
                                 if col in df_grupo.columns: df_ed_comp[col] = df_grupo[col].values
                             dfs_editados_compras.append(df_ed_comp)
@@ -779,7 +789,6 @@ if vista_actual == "🛒 Pedidos y Proveedores":
                             cols_mostrar = [c for c in cols_ordenadas if c in df_grupo.columns]
                             st.dataframe(df_grupo[cols_mostrar], hide_index=True, use_container_width=True)
             
-            # Recolectamos la data editada
             if dfs_editados_compras: st.session_state['df_editado_compras_temp'] = pd.concat(dfs_editados_compras, ignore_index=True)
             else: st.session_state['df_editado_compras_temp'] = pd.DataFrame()
             
@@ -788,7 +797,35 @@ if vista_actual == "🛒 Pedidos y Proveedores":
     
     st.markdown("---")
     st.markdown("### 🏢 Directorio de Proveedores")
-    # ... (Mantén tu código del directorio de proveedores igual aquí abajo) ...
+    try: df_proveedores = cargar_datos.__wrapped__() if False else obtener_dataframe("BD_PROVEEDORES")
+    except Exception: df_proveedores = pd.DataFrame()
+    
+    if permiso_edicion:
+        with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
+            with st.form("form_proveedores", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                p_prov = c1.text_input("Proveedor * (Obligatorio)")
+                p_suc = c2.text_input("Sucursal")
+                p_tiempo = c3.text_input("Tiempo de Entrega (Ej. 5 a 7 días)")
+                c4, c5, c6 = st.columns(3)
+                p_contacto = c4.text_input("Nombre de Contacto")
+                p_tel = c5.text_input("Teléfono")
+                p_correo = c6.text_input("Correo")
+                p_dir = st.text_input("Dirección Completa")
+                if st.form_submit_button("💾 Guardar Proveedor"):
+                    if p_prov.strip() == "": st.error("❌ El nombre del Proveedor es obligatorio.")
+                    else:
+                        try:
+                            doc = init_connection()
+                            ws_p = doc.worksheet("BD_PROVEEDORES")
+                            ws_p.append_row([p_prov.upper(), p_suc.upper(), p_dir.upper(), p_tiempo.upper(), p_contacto.upper(), p_tel, p_correo])
+                            st.success(f"✅ Proveedor '{p_prov}' guardado exitosamente en la nube.")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+                        
+    if not df_proveedores.empty: st.dataframe(df_proveedores.fillna(""), use_container_width=True, hide_index=True)
 
 # === [BLOQUE 7: VISTAS 4 Y 5 - TALLERES E INVENTARIO] ===
 if vista_actual == "🏢 Talleres":
@@ -1155,7 +1192,6 @@ if btn_guardar and permiso_edicion:
                 cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
                 cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
 
-    # --- COMPRAS FINANCIERAS (PROCESAMIENTO) ---
     df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
     if not df_editado_compras.empty:
         for _, row in df_editado_compras.iterrows():
@@ -1238,7 +1274,7 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- 2. PUENTE A BD_COMPRAS (FINANZAS Y ANTI-FANTASMAS) ---
+            # --- 2. PUENTE A BD_COMPRAS ---
             if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
                 try:
                     ws_comp = doc.worksheet("BD_COMPRAS")
@@ -1325,7 +1361,7 @@ if btn_guardar and permiso_edicion:
                 except Exception as e_comp:
                     st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
 
-            # --- GENERACIÓN DE PDF COMPACTA ---
+            # --- GENERACIÓN DE PDF (AHORA USANDO SISTEMA NATIVO DE BYTES) ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
                 marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
@@ -1333,7 +1369,7 @@ if btn_guardar and permiso_edicion:
                 agrupadores = [c for c in cols_agrup if c in marcados_remision.columns]
                 
                 avisos_unicos = set()
-                botones_descarga_html = []
+                pdfs_list = []
                 usuario_print = st.session_state.get('usuario_actual', 'Sistema')
                 
                 for keys, df_g in marcados_remision.groupby(agrupadores):
@@ -1435,25 +1471,17 @@ if btn_guardar and permiso_edicion:
                         pdf.output(tmp.name)
                         nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
                         with open(tmp.name, "rb") as f: pdf_bytes = f.read()
-                        b64 = base64.b64encode(pdf_bytes).decode()
                         
-                        btn_html = f'''
-                        <a href="data:application/pdf;base64,{b64}" download="{nombre_archivo}" target="_blank" style="display: inline-block; padding: 10px 20px; background-color: #2E7D32; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; border: 1px solid #1B5E20; text-align: center; min-width: 180px;">
-                            📥 {folio_str_print}<br><span style="font-size: 0.8em; font-weight: normal;">{siniestro_v}</span>
-                        </a>
-                        '''
-                        botones_descarga_html.append(btn_html)
+                        pdfs_list.append({
+                            'folio': folio_str_print,
+                            'siniestro': siniestro_v,
+                            'bytes': pdf_bytes,
+                            'nombre': nombre_archivo
+                        })
 
-                html_final = '<div style="display: flex; flex-direction: column; gap: 15px; margin-top: 5px; padding: 15px; background-color: #1e1e24; border-radius: 8px; border: 1px solid #333; width: 100%;">'
-                
-                for aviso in avisos_unicos:
-                    html_final += f"<div style='background-color: #FFA726; color: #000; padding: 10px; border-radius: 6px; font-weight: bold; font-size: 1.05em; text-align: center; border: 1px solid #E65100;'>{aviso}</div>"
-                
-                html_final += '<div style="display: flex; gap: 15px; flex-wrap: wrap; justify-content: center; align-items: center; margin-top: 10px;">'
-                html_final += "".join(botones_descarga_html)
-                html_final += '</div></div>'
-                
-                st.session_state['pdfs_generados'] = html_final
+                # Guardamos los PDFs directamente en la sesión
+                st.session_state['pdfs_list'] = pdfs_list
+                if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
             
             st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅")
             st.cache_data.clear()

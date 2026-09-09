@@ -108,49 +108,76 @@ usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
 rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 
 # =====================================================================
-# === [BLOQUE 2: MENÚ LATERAL Y HEADER PRINCIPAL] ===
-with st.sidebar:
-    rol_usuario = str(st.session_state.get('rol', st.session_state.get('rol_actual', 'Visor')))
-    nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
-    
-    if "VISOR" in nombre_usuario.upper() or "DEMO" in str(st.session_state.get('usuario', '')).upper():
-        rol_usuario = "Visor"
+# ==============================================================================
+# === [BLOQUE 2: MENÚ UX HORIZONTAL Y HEADER PRINCIPAL] ===
+# ==============================================================================
+# Ya no usamos el sidebar. Todo va en la pantalla principal.
+rol_usuario = str(st.session_state.get('rol', st.session_state.get('rol_actual', 'Visor')))
+nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
 
-    st.success(f"👤 Operador activo: {nombre_usuario}\n\n🛡️ Rol: {rol_usuario}")
-    st.markdown("---")
-    st.markdown("🧭 **Navegación**")
-    # Cambio de nombre de la pestaña a "Compras"
-    vista_actual = st.radio("Navegación", ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", "📦 Inventario", "🧾 Facturación"], label_visibility="collapsed")
-    st.markdown("---")
-    if st.button("🚪 Cerrar Sesión"):
-        st.session_state.clear()
-        st.rerun()
+if "VISOR" in nombre_usuario.upper() or "DEMO" in str(st.session_state.get('usuario', '')).upper():
+    rol_usuario = "Visor"
 
-st.markdown('<div id="panel-fijo"></div>', unsafe_allow_html=True)
+# Estilos CSS para convertir los botones de radio nativos en "Pestañas" visuales
+st.markdown("""
+    <style>
+    div.row-widget.stRadio > div { flex-direction: row; gap: 10px; flex-wrap: wrap; }
+    div.row-widget.stRadio > div > label { 
+        background-color: #262730; 
+        padding: 10px 15px; 
+        border-radius: 6px; 
+        cursor: pointer; 
+        border: 1px solid #444; 
+    }
+    div.row-widget.stRadio > div > label:hover { border-color: #F63366; }
+    div.row-widget.stRadio > div > label[data-checked="true"] { 
+        background-color: #F63366; 
+        color: white; 
+        border-color: #F63366; 
+    }
+    /* Oculta los circulitos nativos del radio button */
+    div.row-widget.stRadio > div > label > div:first-child { display: none; }
+    </style>
+""", unsafe_allow_html=True)
 
-col_logo, col_tit, col_ctrl = st.columns([1.5, 4, 3])
+# Logo y Pestañas de Navegación
+col_logo, col_menu = st.columns([1.5, 8.5])
 with col_logo:
-    if os.path.exists("logo.png"): st.image("logo.png", width=130)
+    if os.path.exists("logo.png"): st.image("logo.png", width=140)
 
+with col_menu:
+    opciones_menu = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", "📦 Inventario", "🧾 Facturación"]
+    vista_actual = st.radio("Navegación:", opciones_menu, horizontal=True, label_visibility="collapsed")
+
+st.markdown("---")
+
+# Controles superiores (Aseguradora, Guardar, Salir)
+col_tit, col_ctrl = st.columns([4, 3])
 with col_ctrl:
-    aseguradora_sel = st.selectbox("🛡️ Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
-    col_btn, col_chk = st.columns([1.2, 1])
-    es_visor = "VISOR" in rol_usuario.upper()
+    col_aseg, col_chk, col_btn, col_out = st.columns([1.5, 1, 1.2, 0.6])
+    with col_aseg:
+        aseguradora_sel = st.selectbox("🛡️ Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
     
+    es_visor = "VISOR" in rol_usuario.upper()
     with col_chk:
-        modo_consulta = st.checkbox("Modo Lectura", value=True if es_visor else False, disabled=es_visor)
+        modo_consulta = st.checkbox("Solo Lectura", value=True if es_visor else False, disabled=es_visor)
     permiso_edicion = not modo_consulta
     
     with col_btn:
-        btn_guardar = st.button("💾 Guardar Cambios", use_container_width=True, type="primary", disabled=not permiso_edicion)
+        btn_guardar = st.button("💾 Guardar", use_container_width=True, type="primary", disabled=not permiso_edicion)
+        
+    with col_out:
+        if st.button("🚪"):
+            st.session_state.clear()
+            st.rerun()
 
 with col_tit:
     color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00529B"
-    st.markdown(f"<h2 style='margin-bottom: 0;'>PMR - {vista_actual.split(' ')[0]} {vista_actual.split(' ', 1)[1]} | <span style='color: {color_aseg}; font-weight: bold;'>🛡️ {aseguradora_sel}</span></h2>", unsafe_allow_html=True)
-    
-# --- NUEVO SISTEMA NATIVO DE DESCARGA DE PDFS ---
+    st.markdown(f"<h3 style='margin-top: -10px; margin-bottom: 0;'>PMR - {vista_actual.split(' ')[0]} {vista_actual.split(' ', 1)[1]} | <span style='color: {color_aseg}; font-weight: bold;'>🛡️ {aseguradora_sel}</span> <span style='font-size: 0.5em; color: gray;'>(👤 {nombre_usuario})</span></h3>", unsafe_allow_html=True)
+
+# --- SISTEMA NATIVO DE DESCARGA DE PDFS ---
 if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
-    st.markdown("### 🖨️ Avisos y Remisiones")
+    st.markdown("### 🖨️ Avisos y Remisiones Generadas")
     for aviso in st.session_state.get('avisos_remision', []):
         st.warning(aviso)
     
@@ -166,13 +193,11 @@ if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
                     key=f"btn_pdf_dl_{i}"
                 )
         with cols_pdf[-1]:
-            if st.button("✅ Limpiar Avisos", type="primary"):
+            if st.button("✅ Limpiar Bandeja", type="primary"):
                 st.session_state['pdfs_list'] = []
                 st.session_state['avisos_remision'] = []
                 st.rerun()
-    st.markdown("---")
-else:
-    st.markdown("---")
+st.markdown("---")
 
 # =====================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===

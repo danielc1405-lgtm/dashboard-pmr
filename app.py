@@ -546,7 +546,6 @@ elif vista_actual == "⚙️ Panel Operativo":
     if col_remision: base_config[col_remision] = st.column_config.TextColumn("Folio Remisión", width="small")
     if col_comentarios: base_config[col_comentarios] = st.column_config.TextColumn("Obs.") 
 
-    # --- PIEZAS POR CONFIRMAR AGRUPADAS (Corregido y blindado) ---
     df_por_confirmar = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")].copy() if col_estatus else pd.DataFrame()
     with st.expander(f"⏳ Piezas por Confirmar | {df_por_confirmar['Siniestro'].nunique() if not df_por_confirmar.empty else 0} Siniestros", expanded=False):
         dfs_editados_conf = []
@@ -621,7 +620,10 @@ elif vista_actual == "⚙️ Panel Operativo":
                 cols_cobro = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_comentarios] if c in df_por_cobrar.columns]
                 st.dataframe(df_por_cobrar[cols_cobro], column_config=base_config, hide_index=True, use_container_width=True)
 
-    df_asignados = df_filtrado[~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")].copy() if col_estatus else df_filtrado.copy()
+    # --- CAMBIO IMPORTANTE: Filtro estricto para "soltar" las piezas de Pedidos Asignados ---
+    mask_asignados = ~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO")
+    df_asignados = df_filtrado[mask_asignados].copy() if col_estatus else df_filtrado.copy()
+    
     with st.expander(f"📋 Pedidos Asignados (General) | {df_asignados['Siniestro'].nunique() if not df_asignados.empty else 0} Siniestros", expanded=False):
         dfs_editados = []
         if not df_asignados.empty:
@@ -1191,38 +1193,37 @@ if btn_guardar and permiso_edicion:
                 cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
                 cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
 
-    # --- COMPRAS FINANCIERAS Y CANCELACIONES ---
-    df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
-    if not df_editado_compras.empty:
-        for _, row in df_editado_compras.iterrows():
-            k = generar_llave(row.get('Siniestro', ''), row.get('Descripción Pieza', ''))
-            orig = originales.get(k, {'estatus_db': '', 'remision_bool': False})
-            
-            cambios_bd_compras.setdefault(k, {})
-            
-            # LÓGICA DE CANCELACIÓN DE COMPRA
-            if row.get('Cancelar Compra'):
-                cambios_bd_compras[k]['cancelar_compra'] = True
-                # Regresamos el estatus a la bandeja de entrada del Panel Operativo
-                cambios_a_guardar.setdefault(k, {})['estatus'] = "POR CONFIRMAR"
-            else:
-                cambios_bd_compras[k]['costo'] = str(row.get('Costo Compra', '')).replace('$', '').strip()
-                cambios_bd_compras[k]['tiempo'] = row.get('Tiempo Entrega (Días)', '')
-                cambios_bd_compras[k]['cond_pago'] = row.get('Condición Pago', '')
-                cambios_bd_compras[k]['dias_credito'] = row.get('Días Crédito', '')
-                cambios_bd_compras[k]['estatus_pago'] = row.get('Estatus Pago', '')
-                cambios_bd_compras[k]['prov'] = row.get('Proveedor', '')
-                cambios_bd_compras[k]['recibido'] = 'SI' if row.get('Recibido') else 'NO'
+    # --- COMPRAS FINANCIERAS Y CANCELACIONES (¡BLINDADAS!) ---
+    if vista_actual == "🛒 Compras":
+        df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
+        if not df_editado_compras.empty:
+            for _, row in df_editado_compras.iterrows():
+                k = generar_llave(row.get('Siniestro', ''), row.get('Descripción Pieza', ''))
+                orig = originales.get(k, {'estatus_db': '', 'remision_bool': False})
                 
-                if row.get('Imprimir Remisión'):
-                    cambios_a_guardar.setdefault(k, {})['imprimir_remision'] = True
-                    cambios_a_guardar[k]['estatus'] = "EN TRANSITO"
-                    if not orig['remision_bool']:
-                        cambios_a_guardar[k]['generar_nuevo_folio'] = True
-                        cambios_a_guardar[k]['usuario_rem'] = st.session_state.get('usuario_actual', 'Sistema')
-                        cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
-                elif row.get('Recibido'):
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO" 
+                cambios_bd_compras.setdefault(k, {})
+                
+                if row.get('Cancelar Compra'):
+                    cambios_bd_compras[k]['cancelar_compra'] = True
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = "POR CONFIRMAR"
+                else:
+                    cambios_bd_compras[k]['costo'] = str(row.get('Costo Compra', '')).replace('$', '').strip()
+                    cambios_bd_compras[k]['tiempo'] = row.get('Tiempo Entrega (Días)', '')
+                    cambios_bd_compras[k]['cond_pago'] = row.get('Condición Pago', '')
+                    cambios_bd_compras[k]['dias_credito'] = row.get('Días Crédito', '')
+                    cambios_bd_compras[k]['estatus_pago'] = row.get('Estatus Pago', '')
+                    cambios_bd_compras[k]['prov'] = row.get('Proveedor', '')
+                    cambios_bd_compras[k]['recibido'] = 'SI' if row.get('Recibido') else 'NO'
+                    
+                    if row.get('Imprimir Remisión'):
+                        cambios_a_guardar.setdefault(k, {})['imprimir_remision'] = True
+                        cambios_a_guardar[k]['estatus'] = "EN TRANSITO"
+                        if not orig['remision_bool']:
+                            cambios_a_guardar[k]['generar_nuevo_folio'] = True
+                            cambios_a_guardar[k]['usuario_rem'] = st.session_state.get('usuario_actual', 'Sistema')
+                            cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
+                    elif row.get('Recibido'):
+                        cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO" 
 
     with st.spinner("Sincronizando en la nube..."):
         try:
@@ -1281,7 +1282,7 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- 2. PUENTE A BD_COMPRAS (MECANISMO DE ELIMINACIÓN) ---
+            # --- 2. PUENTE A BD_COMPRAS ---
             if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
                 try:
                     ws_comp = doc.worksheet("BD_COMPRAS")
@@ -1369,7 +1370,7 @@ if btn_guardar and permiso_edicion:
                 except Exception as e_comp:
                     st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
 
-            # --- GENERACIÓN DE PDF (AHORA USANDO SISTEMA NATIVO DE BYTES) ---
+            # --- GENERACIÓN DE PDF ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
                 marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
@@ -1487,7 +1488,6 @@ if btn_guardar and permiso_edicion:
                             'nombre': nombre_archivo
                         })
 
-                # Guardamos los PDFs directamente en la sesión
                 st.session_state['pdfs_list'] = pdfs_list
                 if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
             

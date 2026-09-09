@@ -1055,7 +1055,143 @@ if vista_actual == "🧾 Facturación":
         if dfs_editados_fact: df_editado_fact = pd.concat(dfs_editados_fact, ignore_index=True)
     else: st.success("✅ No hay pedidos pendientes de facturación.")
 
-# --- COMPRAS FINANCIERAS Y CANCELACIONES ---
+# ==============================================================================
+# === [BLOQUE 9: MOTOR DE GUARDADO Y PDF] ===
+# ==============================================================================
+if btn_guardar and permiso_edicion:
+    def generar_llave(id_val, desc_val):
+        id_str = str(id_val).strip().upper()
+        if id_str.endswith('.0'): id_str = id_str[:-2]
+        desc_str = ' '.join(str(desc_val).strip().upper().split())
+        return (id_str if id_str not in ['NAN', 'NONE'] else '', desc_str if desc_str not in ['NAN', 'NONE'] else '')
+    
+    originales = {}
+    for _, r in df_trabajo_completo.iterrows():
+        k = generar_llave(r.get('Siniestro', r.get(col_id, '')), r.get(col_desc, ''))
+        originales[k] = {
+            'comentario': str(r.get(col_comentarios, '')).strip(),
+            'guia': str(r.get(col_guia, '')).strip(),
+            'estatus_db': str(r.get(col_estatus, '')).strip().upper(),
+            'remision_bool': str(r.get(col_remision, '')).strip() != '',
+            'aseg': str(r.get(col_aseg, '')).strip().upper(),
+            'vencimiento_db': str(r.get(col_vencimiento, '')).strip(),
+            'asignacion_db': str(r.get(col_asignacion, '')).strip()
+        }
+        
+    cambios_a_guardar = {}
+    cambios_bd_compras = {}
+
+    tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+    fecha_hoy_sistema = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
+
+    if not df_editado_conf.empty:
+        for _, row in df_editado_conf.iterrows():
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
+            orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
+            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Confirmar Surtido') else None)
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
+            
+            if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
+                cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+                if nuevo_estatus == "EN PROCESAMIENTO":
+                    cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
+                    
+            if comentario_actual != orig['comentario']: 
+                cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+
+    if not df_editado_venc.empty:
+        for _, row in df_editado_venc.iterrows():
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
+            orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': ''})
+            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
+            guia_actual = str(row.get(col_guia, '')).strip()
+            nueva_fecha = row.get('Nueva Fecha')
+            
+            if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
+                try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
+                except: fecha_str = str(nueva_fecha)
+                cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
+                if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
+            elif row.get('Reasignar') and not nuevo_estatus:
+                nuevo_estatus = "EN PROCESAMIENTO"
+            
+            if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+            if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+            if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+
+    if not df_editado_atrasadas.empty:
+        for _, row in df_editado_atrasadas.iterrows():
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
+            orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
+            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
+            nueva_fecha = row.get('Nueva Fecha')
+            
+            if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
+                try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
+                except: fecha_str = str(nueva_fecha)
+                cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
+                if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
+            elif row.get('Reasignar') and not nuevo_estatus:
+                nuevo_estatus = "EN PROCESAMIENTO"
+            
+            if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+            if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+
+    if not df_editado_cobro.empty:
+        for _, row in df_editado_cobro.iterrows():
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
+            orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
+            if row.get('Marcar Recibido'): 
+                cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
+                cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
+            if comentario_actual != orig['comentario']: 
+                cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+
+    if not df_editado_fact.empty:
+        for _, row in df_editado_fact.iterrows():
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
+            if row.get('Facturado'): 
+                cambios_a_guardar.setdefault(k, {})['estatus'] = "FACTURADO"
+                cambios_a_guardar[k]['fecha_facturacion'] = fecha_hoy_sistema
+
+    if not df_editado.empty:
+        for _, row in df_editado.iterrows():
+            k = generar_llave(row.get('Siniestro', row.get(col_id, '')), row.get(col_desc, ''))
+            orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
+            actual_rem_bool = row.get('Remision', False)
+            pedido_bool = row.get('Pedido', False)
+            
+            nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN TRANSITO" if row.get('Remision') else "EN PROCESAMIENTO" if pedido_bool else None
+            comentario_actual = str(row.get(col_comentarios, '')).strip()
+            guia_actual = str(row.get(col_guia, '')).strip()
+            venc_actual = str(row.get(col_vencimiento, '')).strip()
+            asig_actual = str(row.get(col_asignacion, '')).strip()
+            
+            if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
+                cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+                if nuevo_estatus == "RECIBIDO": cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
+                
+            if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+            if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+            
+            if venc_actual and venc_actual != orig['vencimiento_db']: cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
+            if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
+            
+            if actual_rem_bool and not orig['remision_bool']: 
+                cambios_a_guardar.setdefault(k, {}).update({'imprimir_remision': True, 'generar_nuevo_folio': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
+                
+            if pedido_bool:
+                cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
+                cambios_a_guardar[k]['compra_prov'] = str(row.get('Proveedor', '')).strip()
+                cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
+                cambios_a_guardar[k]['compra_eta'] = str(row.get('ETA (Días)', '0')).strip()
+                cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
+                cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
+
+    # --- COMPRAS FINANCIERAS Y CANCELACIONES ---
     df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
     if not df_editado_compras.empty:
         for _, row in df_editado_compras.iterrows():
@@ -1225,7 +1361,6 @@ if vista_actual == "🧾 Facturación":
                             n_row[i_rec] = 'NO'
                             nuevas_filas.append(n_row)
                     
-                    # Para no borrar el formato de colores de Sheets, solo reescribimos y llenamos de vacíos el sobrante
                     filas_a_escribir = nuevos_datos_comp + nuevas_filas
                     while len(filas_a_escribir) < len(datos_comp_crudos):
                         filas_a_escribir.append([""] * len(headers_comp))
@@ -1233,3 +1368,132 @@ if vista_actual == "🧾 Facturación":
                     ws_comp.update(range_name='A1', values=filas_a_escribir, value_input_option='USER_ENTERED')
                 except Exception as e_comp:
                     st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
+
+            # --- GENERACIÓN DE PDF (AHORA USANDO SISTEMA NATIVO DE BYTES) ---
+            llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
+            if llaves_a_imprimir:
+                marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
+                cols_agrup = [col_id, col_taller, col_marca, col_modelo]
+                agrupadores = [c for c in cols_agrup if c in marcados_remision.columns]
+                
+                avisos_unicos = set()
+                pdfs_list = []
+                usuario_print = st.session_state.get('usuario_actual', 'Sistema')
+                
+                for keys, df_g in marcados_remision.groupby(agrupadores):
+                    siniestro_v = keys[agrupadores.index(col_id)] if col_id in agrupadores else ""
+                    taller_v = keys[agrupadores.index(col_taller)] if col_taller in agrupadores else ""
+                    marca_v = keys[agrupadores.index(col_marca)] if col_marca in agrupadores else ""
+                    modelo_v = keys[agrupadores.index(col_modelo)] if col_modelo in agrupadores else ""
+                    
+                    folio_str_print = "S/N"
+                    for _, row_rem in df_g.iterrows():
+                        key_rem = generar_llave(row_rem.get(col_id, ''), row_rem.get(col_desc, ''))
+                        if key_rem in cambios_a_guardar and 'remision_num' in cambios_a_guardar[key_rem]:
+                            folio_str_print = cambios_a_guardar[key_rem]['remision_num']
+                            break
+                    
+                    fecha_actual = datetime.datetime.now(tz_mx)
+                    hora_am_pm = fecha_actual.strftime('%I:%M %p')
+                    firma_digital = f"Generado por: {usuario_print} - {fecha_actual.strftime('%d/%b/%Y')} {hora_am_pm}"
+                    
+                    dir_v = ""
+                    col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
+                    if not df_catalogo.empty and col_cat_taller:
+                        match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == str(taller_v).strip().upper()]
+                        if not match_taller.empty:
+                            col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
+                            if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
+                        else:
+                            avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado. Ve a la pestaña '🏢 Talleres' para agregarlo.")
+                    else:
+                        avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado. Ve a la pestaña '🏢 Talleres' para agregarlo.")
+
+                    def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
+
+                    pdf = FPDF(orientation='L', unit='mm', format='A4')
+                    pdf.set_auto_page_break(auto=False, margin=0) 
+                    pdf.add_page()
+                    
+                    def dibujar_bloque_remision(x_offset):
+                        y_offset = 15
+                        if os.path.exists("logo.png"):
+                            try: pdf.image("logo.png", x_offset, y_offset - 3, 30)
+                            except: pass
+                        
+                        pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
+                        pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"))
+                        pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5)
+                        pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"))
+                        pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_xy(x_offset + 32, y_offset + 9)
+                        pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"))
+                        pdf.set_xy(x_offset + 32, y_offset + 12)
+                        pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"))
+
+                        pdf.set_text_color(0, 0, 0); pdf.set_xy(x_offset + 105, y_offset); pdf.set_font("Arial", 'B', 9)
+                        pdf.cell(30, 5, "REMISION", border=1, align='C')
+                        pdf.set_text_color(200, 0, 0); pdf.set_font("Arial", 'B', 10)
+                        pdf.set_xy(x_offset + 105, y_offset + 5)
+                        pdf.cell(30, 6, folio_str_print, border=1, align='C')
+                        
+                        y_datos = y_offset + 22; pdf.set_fill_color(220, 220, 220)
+                        pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
+                        
+                        pdf.set_xy(x_offset, y_datos)
+                        pdf.cell(20, 5, "TALLER", border=1, fill=True); pdf.set_font("Arial", '', 7)
+                        pdf.cell(115, 5, limpiar_texto(f" {taller_v}")[:75], border=1)
+                        
+                        y_datos += 5; pdf.set_xy(x_offset, y_datos)
+                        pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "DIRECCION", border=1, fill=True)
+                        pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}")[:85], border=1)
+                        
+                        y_datos += 5; pdf.set_xy(x_offset, y_datos)
+                        pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "SINIESTRO", border=1, fill=True)
+                        pdf.set_font("Arial", 'B', 8); pdf.cell(45, 5, limpiar_texto(f" {siniestro_v}"), border=1)
+                        pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "VEHICULO", border=1, fill=True)
+                        pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}")[:35], border=1)
+
+                        y_tabla = y_datos + 10; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0)
+                        pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
+                        pdf.cell(15, 6, "CANT", border=1, fill=True, align='C')
+                        pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C')
+
+                        y_item = y_tabla + 6
+                        pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
+                        for _, row_rem in df_g.iterrows():
+                            cant_v = str(row_rem.get(col_cant, 1))
+                            if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
+                            pdf.set_xy(x_offset, y_item)
+                            pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C')
+                            pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
+                            y_item += 5
+                            
+                        pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)
+                        pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
+
+                    dibujar_bloque_remision(10)
+                    pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
+                    dibujar_bloque_remision(152)
+
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                        pdf.output(tmp.name)
+                        nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
+                        with open(tmp.name, "rb") as f: pdf_bytes = f.read()
+                        
+                        pdfs_list.append({
+                            'folio': folio_str_print,
+                            'siniestro': siniestro_v,
+                            'bytes': pdf_bytes,
+                            'nombre': nombre_archivo
+                        })
+
+                # Guardamos los PDFs directamente en la sesión
+                st.session_state['pdfs_list'] = pdfs_list
+                if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
+            
+            st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅")
+            st.cache_data.clear()
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"❌ Error guardando: {e}")

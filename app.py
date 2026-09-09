@@ -19,7 +19,7 @@ st.set_page_config(
     page_title="Dashboard PMR - Operación",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 st.markdown("""
@@ -687,6 +687,11 @@ elif vista_actual == "⚙️ Panel Operativo":
 # === [BLOQUE 6: VISTA 3 - PEDIDOS Y PROVEEDORES] ===
 if vista_actual == "🛒 Compras":
     st.markdown("### 🛒 Panel de Compras (Gestión y Pagos)")
+    
+    # --- CARGA TEMPRANA DE PROVEEDORES PARA AUTORRELLENO FINANCIERO ---
+    try: df_proveedores = cargar_datos.__wrapped__() if False else obtener_dataframe("BD_PROVEEDORES")
+    except Exception: df_proveedores = pd.DataFrame()
+    
     if not df_compras.empty:
         for c in ['Condición Pago', 'Días Crédito', 'Estatus Pago']:
             if c not in df_compras.columns: df_compras[c] = ""
@@ -696,6 +701,29 @@ if vista_actual == "🛒 Compras":
         
         if not df_compras_disp.empty:
             df_compras_disp = df_compras_disp.drop(columns=['Recibido_Bool'])
+            
+            # --- AUTORRELLENO INTELIGENTE ---
+            if not df_proveedores.empty and 'Condición Pago' in df_proveedores.columns:
+                dict_prov = df_proveedores.set_index('Proveedor').to_dict('index')
+                
+                def auto_cond(row):
+                    if str(row['Condición Pago']).strip() in ["", "nan", "None"] and row['Proveedor'] in dict_prov:
+                        return str(dict_prov[row['Proveedor']].get('Condición Pago', ''))
+                    return row['Condición Pago']
+                    
+                def auto_dias(row):
+                    val = str(row['Días Crédito']).strip()
+                    if val in ["", "0", "nan", "None"] and row['Proveedor'] in dict_prov:
+                        dias = dict_prov[row['Proveedor']].get('Días Crédito', '0')
+                        return dias if str(dias).isdigit() else 0
+                    return row['Días Crédito']
+
+                df_compras_disp['Condición Pago'] = df_compras_disp.apply(auto_cond, axis=1)
+                df_compras_disp['Días Crédito'] = df_compras_disp.apply(auto_dias, axis=1)
+            
+            # Estatus inicial predeterminado
+            df_compras_disp['Estatus Pago'] = df_compras_disp['Estatus Pago'].apply(lambda x: "Pendiente" if str(x).strip() in ["", "nan", "None"] else x)
+            # --------------------------------
             
             def parse_spanish_date(d_str):
                 if not isinstance(d_str, str): return pd.NaT
@@ -732,7 +760,6 @@ if vista_actual == "🛒 Compras":
                 return "⚪ Configurar Pago"
             
             df_compras_disp['Alerta Pago'] = df_compras_disp.apply(calc_alerta_pago, axis=1)
-            # Ordenamos todo por fecha de llegada para tener una "Línea de tiempo" natural
             df_compras_disp = df_compras_disp.sort_values(by='Llegada_Calculada', ascending=True)
 
             df_compras_disp['Filtro_Busqueda'] = df_compras_disp['Siniestro'].astype(str) + " | " + df_compras_disp['Descripción Pieza'].astype(str)
@@ -796,8 +823,6 @@ if vista_actual == "🛒 Compras":
     
     st.markdown("---")
     st.markdown("### 🏢 Directorio de Proveedores")
-    try: df_proveedores = cargar_datos.__wrapped__() if False else obtener_dataframe("BD_PROVEEDORES")
-    except Exception: df_proveedores = pd.DataFrame()
     
     if permiso_edicion:
         with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
@@ -806,6 +831,12 @@ if vista_actual == "🛒 Compras":
                 p_prov = c1.text_input("Proveedor * (Obligatorio)")
                 p_suc = c2.text_input("Sucursal")
                 p_tiempo = c3.text_input("Tiempo de Entrega (Ej. 5 a 7 días)")
+                
+                # Campos financieros en el registro
+                c_f1, c_f2 = st.columns(2)
+                p_cond = c_f1.selectbox("Condición de Pago por Defecto", options=["", "Crédito", "Previo", "Anticipo", "Contra Entrega"])
+                p_dias = c_f2.number_input("Días de Crédito (Si aplica)", min_value=0, step=1)
+                
                 c4, c5, c6 = st.columns(3)
                 p_contacto = c4.text_input("Nombre de Contacto")
                 p_tel = c5.text_input("Teléfono")
@@ -817,14 +848,16 @@ if vista_actual == "🛒 Compras":
                         try:
                             doc = init_connection()
                             ws_p = doc.worksheet("BD_PROVEEDORES")
-                            ws_p.append_row([p_prov.upper(), p_suc.upper(), p_dir.upper(), p_tiempo.upper(), p_contacto.upper(), p_tel, p_correo])
+                            ws_p.append_row([p_prov.upper(), p_suc.upper(), p_dir.upper(), p_tiempo.upper(), p_contacto.upper(), p_tel, p_correo, p_cond, str(p_dias)])
                             st.success(f"✅ Proveedor '{p_prov}' guardado exitosamente en la nube.")
                             st.cache_data.clear()
                             time.sleep(1)
                             st.rerun()
                         except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
                         
-    if not df_proveedores.empty: st.dataframe(df_proveedores.fillna(""), use_container_width=True, hide_index=True)
+    if not df_proveedores.empty: 
+        cols_mostrar_prov = [c for c in ['Proveedor', 'Sucursal', 'Tiempo de Entrega', 'Contacto', 'Condición Pago', 'Días Crédito'] if c in df_proveedores.columns]
+        st.dataframe(df_proveedores[cols_mostrar_prov].fillna(""), use_container_width=True, hide_index=True)
 
 # === [BLOQUE 7: VISTAS 4 Y 5 - TALLERES E INVENTARIO] ===
 if vista_actual == "🏢 Talleres":

@@ -108,7 +108,7 @@ usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
 rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 
 # ==============================================================================
-# === [BLOQUE 2: MENÚ UX COQUETO Y HEADER PRINCIPAL] ===
+# === [BLOQUE 2: MENÚ UX COQUETO, FIJO Y HEADER PRINCIPAL] ===
 # ==============================================================================
 rol_usuario = str(st.session_state.get('rol', st.session_state.get('rol_actual', 'Visor')))
 nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
@@ -116,10 +116,23 @@ nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
 if "VISOR" in nombre_usuario.upper() or "DEMO" in str(st.session_state.get('usuario', '')).upper():
     rol_usuario = "Visor"
 
+# MAGIA CSS: Congelar el menú (Sticky) y darle formato de pestañas
 st.markdown("""
     <style>
-    .block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
+    .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
     header { visibility: hidden; }
+    
+    /* HACK PARA CONGELAR EL ENCABEZADO */
+    div[data-testid="stVerticalBlock"] > div:has(div.stRadio) {
+        position: sticky;
+        top: 0px;
+        z-index: 999;
+        background-color: #0E1117; /* Fondo oscuro del dashboard */
+        padding-top: 15px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #333;
+    }
+    
     div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }
     div.row-widget.stRadio > div > label { 
         background-color: #1E1E24; 
@@ -153,7 +166,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# FILA 1: LOGO, NAVEGACIÓN Y CONTROLES
+# FILA 1: LOGO, NAVEGACIÓN Y CONTROLES (Esta fila es la que se queda congelada)
 col_logo, col_menu, col_chk, col_btn, col_out = st.columns([1.2, 5.8, 1.2, 1.2, 0.6], vertical_alignment="center")
 
 with col_logo:
@@ -177,10 +190,9 @@ with col_out:
         st.rerun()
 
 # FILA 2: HEADER COQUETO (Aseguradora grande y Vista)
-# Selector de aseguradora discreto arriba del banner
 aseguradora_sel = st.selectbox("Selecciona Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
     
-color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00AEEF" # Azul GNP para contraste
+color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00AEEF"
 border_color = color_aseg
 
 st.markdown(f"""
@@ -242,28 +254,37 @@ def cargar_datos():
     df_uni = obtener_dataframe("BD_UNIFICADA")
     df_comp = obtener_dataframe("BD_COMPRAS")
     
-    # 1. Carga de Talleres (Con red de seguridad por si tarda en actualizar el nombre)
+    # 1. Carga de Talleres (Con red de seguridad)
     df_cat = obtener_dataframe("BD_TALLERES")
     if df_cat.empty:
         df_cat = obtener_dataframe("Catálogo")
         
-    # 2. Traductor automático de Siniestros (Para GNP)
+    # 2. Carga de Inventario (¡La variable que faltaba!)
+    try: df_inv = obtener_dataframe("BD_INVENTARIO")
+    except: df_inv = pd.DataFrame()
+        
+    # 3. Traductor automático de Siniestros (Para GNP)
     if not df_uni.empty:
         if 'Siniestro Relacionado' in df_uni.columns:
             df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
             
-    return df_uni, df_comp, df_cat
+    return df_uni, df_comp, df_cat, df_inv
 
-df_completo, df_compras, df_catalogo = cargar_datos()
+# Ahora desempaquetamos las 4 variables correctamente
+df_completo, df_compras, df_catalogo, df_inventario = cargar_datos()
 
-# --- FILTRADO POR ASEGURADORA ---
-# Toma la variable 'aseguradora_sel' que se generó en el Bloque 2
+# --- FILTRADO POR ASEGURADORA (CON RED DE SEGURIDAD) ---
 aseguradora_filtro = aseguradora_sel.strip().upper()
 
 if not df_completo.empty:
     col_aseg_val = next((c for c in df_completo.columns if "ASEGURADORA" in str(c).upper()), None)
     if col_aseg_val:
         df_trabajo_completo = df_completo[df_completo[col_aseg_val].astype(str).str.upper().str.contains(aseguradora_filtro, na=False)].copy()
+        
+        # Paracaídas: Si el filtro es tan estricto que borró todo, regresamos la base completa para no romper gráficos
+        if df_trabajo_completo.empty:
+            df_trabajo_completo = df_completo.copy()
+            st.warning("⚠️ No se encontraron partidas que coincidan exactamente con la Aseguradora seleccionada. Mostrando base general.")
     else:
         df_trabajo_completo = df_completo.copy()
 else:
@@ -306,7 +327,9 @@ else:
     df_trabajo = df_proceso = df_recoleccion_total = pd.DataFrame()
 
 
+# ==============================================================================
 # === [BLOQUE 4: VISTAS] ===
+# ==============================================================================
 # Blindaje: Inicializamos variables vacías para evitar NameErrors si cambiamos de pestaña
 df_editado_conf = pd.DataFrame()
 df_editado_venc = pd.DataFrame()
@@ -573,9 +596,12 @@ elif vista_actual == "⚙️ Panel Operativo":
                 cols_cobro = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_comentarios] if c in df_por_cobrar.columns]
                 st.dataframe(df_por_cobrar[cols_cobro], column_config=base_config, hide_index=True, use_container_width=True)
 
-    # --- CAMBIO IMPORTANTE: Filtro estricto para "soltar" las piezas de Pedidos Asignados ---
-    mask_asignados = ~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO")
-    df_asignados = df_filtrado[mask_asignados].copy() if col_estatus else df_filtrado.copy()
+    # --- CAMBIO IMPORTANTE: Red de seguridad para evitar KeyErrors ---
+    if col_estatus and col_estatus in df_filtrado.columns:
+        mask_asignados = ~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO")
+        df_asignados = df_filtrado[mask_asignados].copy()
+    else:
+        df_asignados = df_filtrado.copy()
     
     with st.expander(f"📋 Pedidos Asignados (General) | {df_asignados['Siniestro'].nunique() if not df_asignados.empty else 0} Siniestros", expanded=False):
         dfs_editados = []

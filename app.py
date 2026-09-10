@@ -259,7 +259,7 @@ def cargar_datos():
     if df_cat.empty:
         df_cat = obtener_dataframe("Catálogo")
         
-    # 2. Carga de Inventario (¡La variable que faltaba!)
+    # 2. Carga de Inventario
     try: df_inv = obtener_dataframe("BD_INVENTARIO")
     except: df_inv = pd.DataFrame()
         
@@ -270,21 +270,22 @@ def cargar_datos():
             
     return df_uni, df_comp, df_cat, df_inv
 
-# Ahora desempaquetamos las 4 variables correctamente
+# Desempaquetamos las variables
 df_completo, df_compras, df_catalogo, df_inventario = cargar_datos()
 
-# --- FILTRADO POR ASEGURADORA (CON RED DE SEGURIDAD) ---
+# --- FILTRADO POR ASEGURADORA (Filtro Inteligente Flexible) ---
 aseguradora_filtro = aseguradora_sel.strip().upper()
+# Usamos una palabra clave más corta para evitar problemas de espacios
+palabra_clave_aseg = "MULTI" if "MULTI" in aseguradora_filtro else "GNP"
 
 if not df_completo.empty:
     col_aseg_val = next((c for c in df_completo.columns if "ASEGURADORA" in str(c).upper()), None)
     if col_aseg_val:
-        df_trabajo_completo = df_completo[df_completo[col_aseg_val].astype(str).str.upper().str.contains(aseguradora_filtro, na=False)].copy()
+        df_trabajo_completo = df_completo[df_completo[col_aseg_val].astype(str).str.upper().str.contains(palabra_clave_aseg, na=False)].copy()
         
-        # Paracaídas: Si el filtro es tan estricto que borró todo, regresamos la base completa para no romper gráficos
+        # Paracaídas silencioso
         if df_trabajo_completo.empty:
             df_trabajo_completo = df_completo.copy()
-            st.warning("⚠️ No se encontraron partidas que coincidan exactamente con la Aseguradora seleccionada. Mostrando base general.")
     else:
         df_trabajo_completo = df_completo.copy()
 else:
@@ -663,7 +664,9 @@ elif vista_actual == "⚙️ Panel Operativo":
             cols_rec = [c for c in [col_taller, 'Siniestro', 'Vehiculo_Info', col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_recoleccion.columns]
             st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
 
+# ==============================================================================
 # === [BLOQUE 6: VISTA 3 - PEDIDOS Y PROVEEDORES] ===
+# ==============================================================================
 if vista_actual == "🛒 Compras":
     st.markdown("### 🛒 Panel de Compras (Gestión y Pagos)")
     
@@ -718,6 +721,9 @@ if vista_actual == "🛒 Compras":
             df_compras_disp['Fecha_Compra_Dt'] = df_compras_disp['Fecha Compra'].apply(parse_spanish_date)
             df_compras_disp['ETA_Dias'] = pd.to_numeric(df_compras_disp['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
             df_compras_disp['Llegada_Calculada'] = df_compras_disp['Fecha_Compra_Dt'] + pd.to_timedelta(df_compras_disp['ETA_Dias'], unit='d')
+            
+            # --- RECUPERANDO LA FECHA DE LLEGADA ---
+            df_compras_disp['Fecha Llegada'] = df_compras_disp['Llegada_Calculada'].dt.strftime('%d/%b/%y').fillna('-')
             
             df_compras_disp['Días Crédito'] = pd.to_numeric(df_compras_disp['Días Crédito'], errors='coerce').fillna(0)
             df_compras_disp['Fecha Límite Pago'] = pd.NaT
@@ -811,7 +817,6 @@ if vista_actual == "🛒 Compras":
                 p_suc = c2.text_input("Sucursal")
                 p_tiempo = c3.text_input("Tiempo de Entrega (Ej. 5 a 7 días)")
                 
-                # Campos financieros en el registro
                 c_f1, c_f2 = st.columns(2)
                 p_cond = c_f1.selectbox("Condición de Pago por Defecto", options=["", "Crédito", "Previo", "Anticipo", "Contra Entrega"])
                 p_dias = c_f2.number_input("Días de Crédito (Si aplica)", min_value=0, step=1)
@@ -1033,41 +1038,184 @@ if vista_actual == "📦 Inventario":
         else:
             st.info("El inventario está vacío o todas las piezas están agotadas.")
 
-# === [BLOQUE 8: FACTURACIÓN] ===
-if vista_actual == "🧾 Facturación":
-    st.markdown("### 🧾 Pedidos Listos para Facturar")
-    df_fact = df_trabajo[df_trabajo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"].copy() if col_estatus else pd.DataFrame()
-    if not df_fact.empty:
-        df_fact['Siniestro'] = df_fact[col_id].apply(lambda x: str(x)[:-2] if str(x).endswith('.0') else str(x)) if col_id else ""
-        df_fact['Vehiculo_Info'] = df_fact.apply(lambda r: f"{r.get(col_marca, '')} {r.get(col_modelo, '')} {str(int(float(r[col_anio]))) if col_anio and pd.notnull(r.get(col_anio)) else ''}".strip(), axis=1)
+# ==============================================================================
+# === [BLOQUE 6: VISTA 3 - PEDIDOS Y PROVEEDORES] ===
+# ==============================================================================
+if vista_actual == "🛒 Compras":
+    st.markdown("### 🛒 Panel de Compras (Gestión y Pagos)")
+    
+    # --- CARGA TEMPRANA DE PROVEEDORES PARA AUTORRELLENO FINANCIERO ---
+    try: df_proveedores = cargar_datos.__wrapped__() if False else obtener_dataframe("BD_PROVEEDORES")
+    except Exception: df_proveedores = pd.DataFrame()
+    
+    if not df_compras.empty:
+        for c in ['Condición Pago', 'Días Crédito', 'Estatus Pago']:
+            if c not in df_compras.columns: df_compras[c] = ""
+            
+        df_compras['Recibido_Bool'] = df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
+        df_compras_disp = df_compras[(df_compras['Recibido_Bool'] == False) | (df_compras['Estatus Pago'].astype(str).str.upper() != 'PAGADO')].copy()
         
-        dict_placas = dict(zip(df_placas['Siniestro'].astype(str).str.strip().str.replace('.0', '', regex=False), df_placas['Placa'].astype(str))) if not df_placas.empty and 'Siniestro' in df_placas.columns else {}
-        
-        dfs_editados_fact = []
-        for taller, df_taller_fact in df_fact.groupby(col_taller):
-            with st.expander(f"🏢 {taller} | {df_taller_fact['Siniestro'].nunique()} Siniestro(s) para Facturar", expanded=False):
-                for siniestro_f, df_g in df_taller_fact.groupby('Siniestro'):
-                    placa_val = dict_placas.get(str(siniestro_f).strip(), "⚠️ PLACA PENDIENTE")
-                    sufijo_multi = f" // {siniestro_f} // {placa_val} // {df_g['Vehiculo_Info'].iloc[0]}"
-                    st.markdown(f"**🚗 {siniestro_f} | {df_g['Vehiculo_Info'].iloc[0]}**")
+        if not df_compras_disp.empty:
+            df_compras_disp = df_compras_disp.drop(columns=['Recibido_Bool'])
+            
+            # --- AUTORRELLENO INTELIGENTE ---
+            if not df_proveedores.empty and 'Condición Pago' in df_proveedores.columns:
+                dict_prov = df_proveedores.set_index('Proveedor').to_dict('index')
+                
+                def auto_cond(row):
+                    if str(row['Condición Pago']).strip() in ["", "nan", "None"] and row['Proveedor'] in dict_prov:
+                        return str(dict_prov[row['Proveedor']].get('Condición Pago', ''))
+                    return row['Condición Pago']
                     
-                    df_mostrar_f = df_g.copy()
-                    df_mostrar_f['Facturado'] = False
-                    df_mostrar_f['Concepto Factura'] = df_mostrar_f.apply(lambda r: f"{r.get(col_desc, '')}{sufijo_multi}" if aseguradora_sel == "Multiasistencias" else r.get(col_desc, ''), axis=1)
-                    
-                    if permiso_edicion:
-                        cols_mostrar = [c for c in ['Facturado', col_cant, 'Concepto Factura', col_precio, col_origen] if c in df_mostrar_f.columns or c == 'Facturado']
-                        config_fact = {'Facturado': st.column_config.CheckboxColumn("✅ Facturado", default=False), 'Concepto Factura': st.column_config.TextColumn("Descripción para Factura", width="large"), col_precio: st.column_config.NumberColumn("Precio", format="$ %.2f")}
-                        df_editado_parcial_f = st.data_editor(df_mostrar_f[cols_mostrar], column_config=config_fact, disabled=[c for c in cols_mostrar if c != 'Facturado'], hide_index=True, use_container_width=True, key=f"fact_{taller}_{siniestro_f}")
-                        for col_llave in [col_id, col_desc]:
-                            if col_llave in df_g.columns: df_editado_parcial_f[col_llave] = df_g[col_llave].values
-                        dfs_editados_fact.append(df_editado_parcial_f)
+                def auto_dias(row):
+                    val = str(row['Días Crédito']).strip()
+                    if val in ["", "0", "nan", "None"] and row['Proveedor'] in dict_prov:
+                        dias = dict_prov[row['Proveedor']].get('Días Crédito', '0')
+                        return dias if str(dias).isdigit() else 0
+                    return row['Días Crédito']
+
+                df_compras_disp['Condición Pago'] = df_compras_disp.apply(auto_cond, axis=1)
+                df_compras_disp['Días Crédito'] = df_compras_disp.apply(auto_dias, axis=1)
+            
+            # Estatus inicial predeterminado
+            df_compras_disp['Estatus Pago'] = df_compras_disp['Estatus Pago'].apply(lambda x: "Pendiente" if str(x).strip() in ["", "nan", "None"] else x)
+            # --------------------------------
+            
+            def parse_spanish_date(d_str):
+                if not isinstance(d_str, str): return pd.NaT
+                d_str = d_str.lower().replace('-', '/') 
+                meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+                for text, num in meses.items():
+                    if text in d_str:
+                        d_str = d_str.replace(text, num)
+                        break
+                try: return pd.to_datetime(d_str, format='%d/%m/%y', errors='coerce')
+                except: return pd.NaT
+
+            df_compras_disp['Fecha_Compra_Dt'] = df_compras_disp['Fecha Compra'].apply(parse_spanish_date)
+            df_compras_disp['ETA_Dias'] = pd.to_numeric(df_compras_disp['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
+            df_compras_disp['Llegada_Calculada'] = df_compras_disp['Fecha_Compra_Dt'] + pd.to_timedelta(df_compras_disp['ETA_Dias'], unit='d')
+            
+            # --- RECUPERANDO LA FECHA DE LLEGADA ---
+            df_compras_disp['Fecha Llegada'] = df_compras_disp['Llegada_Calculada'].dt.strftime('%d/%b/%y').fillna('-')
+            
+            df_compras_disp['Días Crédito'] = pd.to_numeric(df_compras_disp['Días Crédito'], errors='coerce').fillna(0)
+            df_compras_disp['Fecha Límite Pago'] = pd.NaT
+            mask_credito = df_compras_disp['Condición Pago'].astype(str).str.upper().str.contains('CREDITO|CRÉDITO')
+            df_compras_disp.loc[mask_credito, 'Fecha Límite Pago'] = df_compras_disp.loc[mask_credito, 'Fecha_Compra_Dt'] + pd.to_timedelta(df_compras_disp.loc[mask_credito, 'Días Crédito'], unit='d')
+            
+            hoy_dt = pd.to_datetime(datetime.datetime.now().date())
+            def calc_alerta_pago(row):
+                if str(row['Estatus Pago']).upper() == 'PAGADO': return "✅ Saldado"
+                cond = str(row['Condición Pago']).upper()
+                if 'CREDITO' in cond or 'CRÉDITO' in cond:
+                    if pd.notnull(row['Fecha Límite Pago']):
+                        dias_restantes = (row['Fecha Límite Pago'] - hoy_dt).days
+                        if dias_restantes < 0: return "🔴 Pago Vencido"
+                        elif dias_restantes <= 3: return f"🟡 Pagar en {dias_restantes} días"
+                        else: return f"🟢 {dias_restantes} días rest."
+                elif 'PREVIO' in cond or 'ANTICIPO' in cond: return "🔵 Requiere Pago/Anticipo"
+                elif 'CONTRA ENTREGA' in cond: return "🟠 Pagar al Recibir"
+                return "⚪ Configurar Pago"
+            
+            df_compras_disp['Alerta Pago'] = df_compras_disp.apply(calc_alerta_pago, axis=1)
+            df_compras_disp = df_compras_disp.sort_values(by='Llegada_Calculada', ascending=True)
+
+            df_compras_disp['Filtro_Busqueda'] = df_compras_disp['Siniestro'].astype(str) + " | " + df_compras_disp['Descripción Pieza'].astype(str)
+            
+            col_b1, col_b2, col_b3 = st.columns(3)
+            with col_b1:
+                lista_pedidos = sorted(list(df_compras_disp['Filtro_Busqueda'].unique()))
+                busqueda_pedido = st.multiselect("🔍 Buscar Siniestro/Pieza:", options=lista_pedidos)
+            with col_b2:
+                df_compras_disp['Taller_Filtro'] = df_compras_disp['Taller'].replace('', 'SIN ASIGNAR')
+                lista_talleres = sorted(list(df_compras_disp['Taller_Filtro'].unique()))
+                busqueda_taller = st.multiselect("🏢 Filtrar por Taller (CDR):", options=lista_talleres)
+            with col_b3:
+                df_compras_disp['Prov_Filtro'] = df_compras_disp['Proveedor'].replace('', 'SIN ASIGNAR')
+                lista_provs = sorted(list(df_compras_disp['Prov_Filtro'].unique()))
+                busqueda_prov = st.multiselect("🏭 Filtrar por Proveedor:", options=lista_provs)
+
+            if busqueda_pedido: df_compras_disp = df_compras_disp[df_compras_disp['Filtro_Busqueda'].isin(busqueda_pedido)].copy()
+            if busqueda_taller: df_compras_disp = df_compras_disp[df_compras_disp['Taller_Filtro'].isin(busqueda_taller)].copy()
+            if busqueda_prov: df_compras_disp = df_compras_disp[df_compras_disp['Prov_Filtro'].isin(busqueda_prov)].copy()
+            
+            st.markdown("#### 📦 Próximas Llegadas (Línea de Tiempo)")
+            
+            df_compras_disp['Imprimir Remisión'] = False
+            df_compras_disp['Cancelar Compra'] = False
+            df_compras_disp['Recibido'] = df_compras_disp['Recibido'].astype(str).str.upper().isin(['TRUE', 'SI', '1'])
+            
+            if not modo_consulta and permiso_edicion:
+                config_compras = {
+                    'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"),
+                    'Descripción Pieza': st.column_config.TextColumn("Pieza", disabled=True),
+                    'Proveedor': st.column_config.TextColumn("Proveedor"),
+                    'Costo Compra': st.column_config.NumberColumn("Costo", format="$ %.2f", width="small"), 
+                    'Tiempo Entrega (Días)': st.column_config.NumberColumn("ETA(Días)", step=1, width="small"),
+                    'Fecha Llegada': st.column_config.TextColumn("Llegada Est.", disabled=True, width="small"),
+                    'Condición Pago': st.column_config.SelectboxColumn("Cond. Pago", options=["Crédito", "Previo", "Anticipo", "Contra Entrega", ""], width="small"),
+                    'Días Crédito': st.column_config.NumberColumn("Días Cr.", step=1, width="small"),
+                    'Estatus Pago': st.column_config.SelectboxColumn("Pago", options=["Pendiente", "Pagado"], width="small"),
+                    'Alerta Pago': st.column_config.TextColumn("Alerta Financiera", disabled=True),
+                    'Recibido': st.column_config.CheckboxColumn("🏁 Recibido"), 
+                    'Imprimir Remisión': st.column_config.CheckboxColumn("🖨️ Remisión"),
+                    'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar")
+                }
+                
+                cols_ordenadas = ['Siniestro', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Tiempo Entrega (Días)', 'Fecha Llegada', 'Condición Pago', 'Días Crédito', 'Alerta Pago', 'Estatus Pago', 'Recibido', 'Imprimir Remisión', 'Cancelar Compra']
+                cols_mostrar = [c for c in cols_ordenadas if c in df_compras_disp.columns]
+                
+                columnas_editables = ['Proveedor', 'Costo Compra', 'Tiempo Entrega (Días)', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Recibido', 'Imprimir Remisión', 'Cancelar Compra']
+                
+                df_editado_compras = st.data_editor(df_compras_disp[cols_mostrar], column_config=config_compras, disabled=[c for c in cols_mostrar if c not in columnas_editables], hide_index=True, use_container_width=True, key="ed_compras_flat")
+                
+                df_editado_compras.index = df_compras_disp.index
+                st.session_state['df_editado_compras_temp'] = df_editado_compras
+            else:
+                cols_ordenadas = ['Siniestro', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Tiempo Entrega (Días)', 'Fecha Llegada', 'Condición Pago', 'Alerta Pago', 'Estatus Pago']
+                cols_mostrar = [c for c in cols_ordenadas if c in df_compras_disp.columns]
+                st.dataframe(df_compras_disp[cols_mostrar], hide_index=True, use_container_width=True)
+            
+        else: st.success("✅ Todos los pedidos han sido recibidos y pagados.")
+    else: st.warning("No hay órdenes de compra registradas actualmente.")
+    
+    st.markdown("---")
+    st.markdown("### 🏢 Directorio de Proveedores")
+    
+    if permiso_edicion:
+        with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
+            with st.form("form_proveedores", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                p_prov = c1.text_input("Proveedor * (Obligatorio)")
+                p_suc = c2.text_input("Sucursal")
+                p_tiempo = c3.text_input("Tiempo de Entrega (Ej. 5 a 7 días)")
+                
+                c_f1, c_f2 = st.columns(2)
+                p_cond = c_f1.selectbox("Condición de Pago por Defecto", options=["", "Crédito", "Previo", "Anticipo", "Contra Entrega"])
+                p_dias = c_f2.number_input("Días de Crédito (Si aplica)", min_value=0, step=1)
+                
+                c4, c5, c6 = st.columns(3)
+                p_contacto = c4.text_input("Nombre de Contacto")
+                p_tel = c5.text_input("Teléfono")
+                p_correo = c6.text_input("Correo")
+                p_dir = st.text_input("Dirección Completa")
+                if st.form_submit_button("💾 Guardar Proveedor"):
+                    if p_prov.strip() == "": st.error("❌ El nombre del Proveedor es obligatorio.")
                     else:
-                        cols_mostrar = [c for c in [col_cant, 'Concepto Factura', col_precio, col_origen] if c in df_mostrar_f.columns]
-                        st.dataframe(df_mostrar_f[cols_mostrar], hide_index=True, use_container_width=True)
-                    
-        if dfs_editados_fact: df_editado_fact = pd.concat(dfs_editados_fact, ignore_index=True)
-    else: st.success("✅ No hay pedidos pendientes de facturación.")
+                        try:
+                            doc = init_connection()
+                            ws_p = doc.worksheet("BD_PROVEEDORES")
+                            ws_p.append_row([p_prov.upper(), p_suc.upper(), p_dir.upper(), p_tiempo.upper(), p_contacto.upper(), p_tel, p_correo, p_cond, str(p_dias)])
+                            st.success(f"✅ Proveedor '{p_prov}' guardado exitosamente en la nube.")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+                        
+    if not df_proveedores.empty: 
+        cols_mostrar_prov = [c for c in ['Proveedor', 'Sucursal', 'Tiempo de Entrega', 'Contacto', 'Condición Pago', 'Días Crédito'] if c in df_proveedores.columns]
+        st.dataframe(df_proveedores[cols_mostrar_prov].fillna(""), use_container_width=True, hide_index=True)
 
 # ==============================================================================
 # === [BLOQUE 9: MOTOR DE GUARDADO Y PDF] ===

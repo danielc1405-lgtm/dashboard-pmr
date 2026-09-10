@@ -108,7 +108,7 @@ usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
 rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 
 # ==============================================================================
-# === [BLOQUE 2: MENÚ UX COMPACTO Y HEADER PRINCIPAL] ===
+# === [BLOQUE 2: MENÚ UX COQUETO Y HEADER PRINCIPAL] ===
 # ==============================================================================
 rol_usuario = str(st.session_state.get('rol', st.session_state.get('rol_actual', 'Visor')))
 nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
@@ -116,66 +116,90 @@ nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
 if "VISOR" in nombre_usuario.upper() or "DEMO" in str(st.session_state.get('usuario', '')).upper():
     rol_usuario = "Visor"
 
-# Magia CSS: Cortamos el espacio en blanco de arriba, ocultamos el header default
-# y hacemos los botones más compactos.
 st.markdown("""
     <style>
     .block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
     header { visibility: hidden; }
-    div.row-widget.stRadio > div { flex-direction: row; gap: 5px; flex-wrap: wrap; }
+    div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }
     div.row-widget.stRadio > div > label { 
-        background-color: #262730; 
-        padding: 5px 12px; 
-        border-radius: 4px; 
+        background-color: #1E1E24; 
+        padding: 6px 14px; 
+        border-radius: 6px; 
         cursor: pointer; 
-        border: 1px solid #444; 
-        font-size: 0.9rem;
+        border: 1px solid #333; 
+        font-size: 0.95rem;
+        transition: all 0.3s ease;
     }
-    div.row-widget.stRadio > div > label:hover { border-color: #F63366; }
+    div.row-widget.stRadio > div > label:hover { border-color: #F63366; background-color: #2A2A35;}
     div.row-widget.stRadio > div > label[data-checked="true"] { 
         background-color: #F63366; 
         color: white; 
         border-color: #F63366; 
     }
     div.row-widget.stRadio > div > label > div:first-child { display: none; }
-    hr { margin: 0.5em 0px; }
+    
+    .header-coqueto {
+        background: linear-gradient(90deg, #1A1A24 0%, #262730 100%);
+        padding: 12px 20px;
+        border-radius: 8px;
+        border-left: 6px solid;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    }
     </style>
 """, unsafe_allow_html=True)
 
-# Todo en una sola fila compacta
-col_logo, col_menu, col_aseg, col_chk, col_btn, col_out = st.columns([1.2, 5.5, 1.5, 1, 1.2, 0.6], gap="small")
+# FILA 1: LOGO, NAVEGACIÓN Y CONTROLES
+col_logo, col_menu, col_chk, col_btn, col_out = st.columns([1.2, 5.8, 1.2, 1.2, 0.6], vertical_alignment="center")
 
 with col_logo:
-    if os.path.exists("logo.png"): st.image("logo.png", width=90) # Logo reducido
-
-with col_aseg:
-    aseguradora_sel = st.selectbox("🛡️ Aseg.", ["Multiasistencias", "GNP"], label_visibility="collapsed")
+    if os.path.exists("logo.png"): st.image("logo.png", width=110)
 
 with col_menu:
     opciones_menu = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", "📦 Inventario", "🧾 Facturación"]
     vista_actual = st.radio("Nav:", opciones_menu, horizontal=True, label_visibility="collapsed")
-    
-    # Subtítulo súper compacto pegado abajo del menú
-    color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00529B"
-    st.markdown(f"<div style='font-size:0.85em; color:#aaa; margin-top:-5px;'><b>{vista_actual}</b> | <span style='color:{color_aseg}; font-weight:bold;'>{aseguradora_sel}</span> | 👤 {nombre_usuario}</div>", unsafe_allow_html=True)
 
 es_visor = "VISOR" in rol_usuario.upper()
 with col_chk:
-    st.markdown("<div style='margin-top:2px;'></div>", unsafe_allow_html=True) # Ligero ajuste de altura
-    modo_consulta = st.checkbox("Lectura", value=True if es_visor else False, disabled=es_visor)
+    modo_consulta = st.checkbox("Solo Lectura", value=True if es_visor else False, disabled=es_visor)
 permiso_edicion = not modo_consulta
 
 with col_btn:
     btn_guardar = st.button("💾 Guardar", use_container_width=True, type="primary", disabled=not permiso_edicion)
 
 with col_out:
-    if st.button("🚪"):
+    if st.button("🚪", help="Cerrar Sesión"):
         st.session_state.clear()
         st.rerun()
 
-st.markdown("---")
+# FILA 2: HEADER COQUETO (Aseguradora grande y Vista)
+# Selector de aseguradora discreto arriba del banner
+aseguradora_sel = st.selectbox("Selecciona Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
+    
+color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00AEEF" # Azul GNP para contraste
+border_color = color_aseg
 
-# --- SISTEMA NATIVO DE DESCARGA DE PDFS (Más discreto) ---
+st.markdown(f"""
+    <div class="header-coqueto" style="border-left-color: {border_color};">
+        <div>
+            <h3 style="margin:0; padding:0; color:white; font-size: 1.6rem;">
+                {vista_actual}
+            </h3>
+            <span style="color:#aaa; font-size:0.85rem;">👤 {nombre_usuario} | 🛡️ {rol_usuario}</span>
+        </div>
+        <div style="text-align: right;">
+            <h2 style="margin:0; padding:0; color:{color_aseg}; font-size: 2rem; letter-spacing: 1px;">
+                {aseguradora_sel.upper()}
+            </h2>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
+
+# --- SISTEMA NATIVO DE DESCARGA DE PDFS ---
 if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
     for aviso in st.session_state.get('avisos_remision', []):
         st.warning(aviso)
@@ -192,14 +216,14 @@ if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
                     key=f"btn_pdf_dl_{i}"
                 )
         with cols_pdf[-1]:
-            if st.button("✅ Limpiar", type="primary"):
+            if st.button("✅ Limpiar Bandeja", type="primary"):
                 st.session_state['pdfs_list'] = []
                 st.session_state['avisos_remision'] = []
                 st.rerun()
-    st.markdown("---")
 
-# =====================================================================
+# ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
+# ==============================================================================
 def obtener_dataframe(nombre_hoja):
     try:
         doc = init_connection()
@@ -207,174 +231,79 @@ def obtener_dataframe(nombre_hoja):
         datos = ws.get_all_values()
         if not datos: return pd.DataFrame()
         headers = [str(h).strip() for h in datos[0]]
-        for i in range(len(headers)):
-            if headers[i] == "": headers[i] = f"Unnamed_{i}"
-        return pd.DataFrame(datos[1:], columns=headers)
+        df = pd.DataFrame(datos[1:], columns=headers)
+        return df
     except Exception as e:
         st.error(f"Error cargando hoja {nombre_hoja}: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=60)
-def cargar_datos(): return obtener_dataframe("BD_UNIFICADA")
-@st.cache_data(ttl=60)
-def cargar_catalogo(): return obtener_dataframe("Catálogo")
-@st.cache_data(ttl=60)
-def cargar_compras(): return obtener_dataframe("BD_COMPRAS")
-@st.cache_data(ttl=60)
-def cargar_inventario():
-    df_inv = obtener_dataframe("BD_INVENTARIO")
-    if not df_inv.empty: df_inv = df_inv.dropna(how='all')
-    return df_inv
-@st.cache_data(ttl=60)
-def cargar_placas(): return obtener_dataframe("BD_PLACAS")
+@st.cache_data(ttl=10)
+def cargar_datos():
+    df_uni = obtener_dataframe("BD_UNIFICADA")
+    df_comp = obtener_dataframe("BD_COMPRAS")
+    
+    # 1. Carga de Talleres (Con red de seguridad por si tarda en actualizar el nombre)
+    df_cat = obtener_dataframe("BD_TALLERES")
+    if df_cat.empty:
+        df_cat = obtener_dataframe("Catálogo")
+        
+    # 2. Traductor automático de Siniestros (Para GNP)
+    if not df_uni.empty:
+        if 'Siniestro Relacionado' in df_uni.columns:
+            df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
+            
+    return df_uni, df_comp, df_cat
 
-df_completo = cargar_datos()
-df_catalogo = cargar_catalogo()
-df_compras = cargar_compras()
-df_inventario = cargar_inventario()
-df_placas = cargar_placas() 
+df_completo, df_compras, df_catalogo = cargar_datos()
 
-df_proceso = pd.DataFrame()
-df_trabajo = pd.DataFrame()
-df_trabajo_completo = pd.DataFrame()
-df_recoleccion_total = pd.DataFrame()
-df_vista = pd.DataFrame()
-
-df_editado_conf = pd.DataFrame()
-df_editado_venc = pd.DataFrame()
-df_editado_atrasadas = pd.DataFrame()
-df_editado_cobro = pd.DataFrame()
-df_editado = pd.DataFrame()
-df_editado_compras = pd.DataFrame()
-df_editado_catalogo = pd.DataFrame()
-df_editado_inventario = pd.DataFrame()
-df_editado_fact = pd.DataFrame() 
-
-col_id = col_taller = col_marca = col_modelo = col_anio = col_serie = col_desc = col_estatus = col_precio = col_cant = col_asignacion = col_vencimiento = col_fecha_confi = col_remision = col_comentarios = col_guia = col_origen = col_aseg = None
+# --- FILTRADO POR ASEGURADORA ---
+# Toma la variable 'aseguradora_sel' que se generó en el Bloque 2
+aseguradora_filtro = aseguradora_sel.strip().upper()
 
 if not df_completo.empty:
-    col_aseg = next((c for c in df_completo.columns if "ASEGURADORA" in str(c).upper()), None)
-    if col_aseg:
-        if aseguradora_sel == "GNP":
-            df_vista = df_completo[df_completo[col_aseg].astype(str).str.upper().str.contains("GNP")].copy()
-        else:
-            df_vista = df_completo[df_completo[col_aseg].astype(str).str.upper().str.contains("MULTI")].copy()
+    col_aseg_val = next((c for c in df_completo.columns if "ASEGURADORA" in str(c).upper()), None)
+    if col_aseg_val:
+        df_trabajo_completo = df_completo[df_completo[col_aseg_val].astype(str).str.upper().str.contains(aseguradora_filtro, na=False)].copy()
     else:
-        df_vista = df_completo.copy()
+        df_trabajo_completo = df_completo.copy()
+else:
+    df_trabajo_completo = pd.DataFrame()
 
-if not df_vista.empty:
-    cols = df_vista.columns.tolist()
-    def obtener_col(substrings):
-        for c in cols:
-            c_upper = str(c).upper()
-            if any(s in c_upper for s in substrings) and "DÍAS" not in c_upper and "DIAS" not in c_upper: return c
-        return None
-        
-    col_id = obtener_col(["PEDIDO", "SINIESTRO", "ID PRINCIPAL"]) 
-    col_taller = obtener_col(["TALLER"])
-    col_marca = obtener_col(["MARCA"])
-    col_modelo = obtener_col(["MODELO"])
-    col_anio = obtener_col(["AÑO", "ANO", "YEAR"])
-    col_serie = obtener_col(["SERIE", "VIN"])
-    col_desc = obtener_col(["DESCRIPCI"])
-    col_estatus = obtener_col(["ESTATUS"])
-    col_precio = obtener_col(["PRECIO"])
-    col_cant = obtener_col(["CANT"])
-    col_asignacion = obtener_col(["ASIGNA"])
-    col_vencimiento = obtener_col(["VENCIMIENTO"])
-    col_fecha_confi = obtener_col(["CONFI"])
-    col_remision = obtener_col(["REMISI"]) 
-    col_comentarios = obtener_col(["COMENTARIO", "OBSERVACION"])
-    col_guia = obtener_col(["GUIA", "GUÍA", "RASTREO"])
-    col_origen = obtener_col(["ORIGEN", "TIPO PIEZA", "NUEVO"])
+# --- IDENTIFICACIÓN DE COLUMNAS DINÁMICAS ---
+if not df_trabajo_completo.empty:
+    # Escáner inteligente de columnas
+    col_id = next((c for c in df_trabajo_completo.columns if "SINIESTRO" in str(c).upper()), None)
+    col_taller = next((c for c in df_trabajo_completo.columns if "TALLER" in str(c).upper()), None)
+    col_marca = next((c for c in df_trabajo_completo.columns if "MARCA" in str(c).upper()), None)
+    col_modelo = next((c for c in df_trabajo_completo.columns if "MODELO" in str(c).upper()), None)
+    col_desc = next((c for c in df_trabajo_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+    col_cant = next((c for c in df_trabajo_completo.columns if "CANTIDAD" in str(c).upper() or "CANT" == str(c).upper()), None)
+    col_precio = next((c for c in df_trabajo_completo.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
+    col_estatus = next((c for c in df_trabajo_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
+    col_vencimiento = next((c for c in df_trabajo_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), None)
+    col_asignacion = next((c for c in df_trabajo_completo.columns if "ASIGNACI" in str(c).upper()), None)
+    col_fecha_confi = next((c for c in df_trabajo_completo.columns if "FECHA CONFI" in str(c).upper()), None)
+    col_guia = next((c for c in df_trabajo_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), None)
+    col_remision = next((c for c in df_trabajo_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
+    col_comentarios = next((c for c in df_trabajo_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
+    col_aseg = col_aseg_val
+
+    # Preparación de datos útiles para filtros y vistas
+    df_trabajo_completo['Filtro_Siniestro'] = df_trabajo_completo[col_id].astype(str) + " - " + df_trabajo_completo[col_marca].astype(str) + " " + df_trabajo_completo[col_modelo].astype(str)
+    df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo[col_marca].astype(str) + " " + df_trabajo_completo[col_modelo].astype(str)
     
-    columnas_base = [c for c in [col_id, col_taller, col_marca, col_modelo, col_anio, col_serie, col_desc, col_precio, col_cant, col_remision, col_asignacion, col_vencimiento, col_fecha_confi, col_estatus, col_comentarios, col_guia, col_aseg, col_origen] if c is not None]
+    # Filtros base para los paneles
+    df_trabajo = df_trabajo_completo.copy()
     
-    if columnas_base:
-        df_trabajo_completo = df_completo[columnas_base].copy()
-        df_trabajo = df_vista[columnas_base].copy()             
-        df_trabajo = df_trabajo[df_trabajo[col_id].notna() & (df_trabajo[col_id].astype(str).str.strip() != '') & (df_trabajo[col_id].astype(str).str.lower() != 'nan')]
-        
-        if col_precio and col_precio in df_trabajo.columns:
-            df_trabajo[col_precio] = pd.to_numeric(df_trabajo[col_precio].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
-            df_trabajo_completo[col_precio] = pd.to_numeric(df_trabajo_completo[col_precio].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
-
-        def parse_fecha_segura(val):
-            if pd.isna(val) or str(val).strip() == '': return ''
-            v_str = str(val).strip()
-            if v_str.startswith("'"): v_str = v_str[1:] 
-            try: return pd.to_datetime(v_str, dayfirst=True).strftime('%d/%b/%y')
-            except:
-                try: return pd.to_datetime(v_str).strftime('%d/%b/%y')
-                except: return v_str 
-
-        for c_fecha in [col_asignacion, col_vencimiento, col_fecha_confi]:
-            if c_fecha and c_fecha in df_trabajo.columns:
-                df_trabajo[c_fecha] = df_trabajo[c_fecha].apply(parse_fecha_segura)
-                
-        for c_txt in [col_remision, col_comentarios, col_estatus, col_guia, col_origen]:
-            if c_txt and c_txt in df_trabajo.columns:
-                df_trabajo[c_txt] = df_trabajo[c_txt].fillna('').astype(str).replace(['nan', 'None'], '')
-                
-        if col_guia not in df_trabajo.columns:
-            df_trabajo['Guía'] = ""
-            col_guia = 'Guía'
-            
-        def limpiar_guia_display(g):
-            g = str(g).strip()
-            if g.startswith('=HYPERLINK'): g = g.split(',')[-1].replace('"', '').replace(')', '').strip()
-            if g.endswith('.0'): g = g[:-2]
-            return '' if g.lower() in ['nan', 'none'] else g
-
-        if col_guia and col_guia in df_trabajo.columns:
-            df_trabajo[col_guia] = df_trabajo[col_guia].apply(limpiar_guia_display)
-        
-        if col_estatus:
-            if modo_consulta:
-                df_proceso = df_trabajo.copy()
-            else:
-                estatus_excluidos = ['RECIBIDO', 'FACTURADO', 'CANCELADO', 'CANCELO KARLA', 'RECOLECCION', 'REASIGNAR']
-                df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.strip().str.upper().isin(estatus_excluidos)].copy()
-        else:
-            df_proceso = df_trabajo.copy()
-            
-        def limpiar_siniestro(val):
-            val_str = str(val).strip()
-            return val_str[:-2] if val_str.endswith('.0') else val_str
-
-        if col_id:
-            df_proceso['Siniestro'] = df_proceso[col_id].apply(limpiar_siniestro)
-            df_trabajo_completo['Siniestro'] = df_trabajo_completo[col_id].apply(limpiar_siniestro)
-        else: df_proceso['Siniestro'] = ""
-
-        def formatear_vehiculo(row):
-            vehiculo = f"{row.get(col_marca, '')} {row.get(col_modelo, '')}".strip()
-            anio = ""
-            if col_anio and pd.notnull(row.get(col_anio)):
-                try: anio = str(int(float(row[col_anio])))
-                except ValueError: anio = str(row[col_anio]).strip()
-            if anio and anio.lower() not in ['nan', 'none', '']: vehiculo += f" {anio}"
-            serie = str(row.get(col_serie, '')).strip() if col_serie else ""
-            if serie and serie.lower() not in ['nan', 'none', '']: vehiculo += f" - {serie}"
-            return vehiculo
-
-        df_proceso['Vehiculo_Info'] = df_proceso.apply(formatear_vehiculo, axis=1)
-        df_proceso['Filtro_Siniestro'] = df_proceso.apply(lambda row: f"{row['Siniestro']} - {row['Vehiculo_Info']}", axis=1)
-        df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo.apply(formatear_vehiculo, axis=1)
-
-        df_recoleccion_total = df_trabajo[df_trabajo[col_estatus].str.contains('RECOLECCI', case=False, na=False)] if col_estatus else pd.DataFrame()
-        if 'Siniestro' not in df_recoleccion_total.columns and col_id in df_recoleccion_total.columns:
-             df_recoleccion_total['Siniestro'] = df_recoleccion_total[col_id].apply(limpiar_siniestro)
-        if 'Vehiculo_Info' not in df_recoleccion_total.columns:
-             df_recoleccion_total['Vehiculo_Info'] = df_recoleccion_total.apply(formatear_vehiculo, axis=1)
-
-if not df_compras.empty:
-    if 'Recibido' not in df_compras.columns: df_compras['Recibido'] = False
-    else: df_compras['Recibido'] = df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
-
-if not df_inventario.empty:
-    if 'Sin Existencia' not in df_inventario.columns: df_inventario['Sin Existencia'] = False
-    else: df_inventario['Sin Existencia'] = df_inventario['Sin Existencia'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
+    # Excluir estatus terminados del panel de proceso
+    df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|ENTREGADO|RECIBIDO|FACTURADO|REASIGNAR")].copy() if col_estatus else df_trabajo.copy()
+    
+    # DataFrame exclusivo para Recolecciones
+    df_recoleccion_total = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("REASIGNAR")].copy() if col_estatus else pd.DataFrame()
+else:
+    # Variables nulas si no hay datos para evitar errores
+    col_id = col_taller = col_marca = col_modelo = col_desc = col_cant = col_precio = col_estatus = col_vencimiento = col_asignacion = col_fecha_confi = col_guia = col_remision = col_comentarios = col_aseg = None
+    df_trabajo = df_proceso = df_recoleccion_total = pd.DataFrame()
 
 
 # === [BLOQUE 4: VISTAS] ===

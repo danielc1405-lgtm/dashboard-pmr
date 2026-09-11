@@ -1243,8 +1243,8 @@ if btn_guardar and permiso_edicion:
                     if v.get('generar_nuevo_folio'):
                         siniestro_id = k[0] 
                         if siniestro_id not in folios_asignados_en_sesion:
-                            aseguradora_base = originales.get(k, {}).get('aseg', 'GNP')
-                            pref = "MULTI" if "MULTI" in aseguradora_base else "GNP"
+                            # --- LA NUEVA LÓGICA SENIOR DE IDENTIFICACIÓN ---
+                            pref = "MULTI" if str(siniestro_id).upper().startswith('B') else "GNP"
                             max_folios[pref] += 1
                             folios_asignados_en_sesion[siniestro_id] = f"{pref} - {max_folios[pref]:03d}"
                             

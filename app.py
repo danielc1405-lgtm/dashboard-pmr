@@ -300,21 +300,20 @@ df_editado_fact = pd.DataFrame()
 df_editado = pd.DataFrame()
 
 # --- SISTEMA DE NOTIFICACIONES GLOBALES ---
-if not modo_consulta:
-    # 1. Alerta de Pedidos Nuevos (Para todo el equipo)
+# 1. Alerta de Pedidos Nuevos (Visible para todos)
+if col_estatus and not df_trabajo_completo.empty:
+    pendientes_bot = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")])
+    if pendientes_bot > 0:
+        st.warning(f"🚨 **¡ATENCIÓN!** Han ingresado **{pendientes_bot}** pedido(s) nuevo(s) por confirmar. Revisa el Panel Operativo.", icon="🚨")
+
+# 2. ALERTA DE FRANCOTIRADOR (Exclusiva para Marco)
+if "MARCO" in usuario_activo:
     if col_estatus and not df_trabajo_completo.empty:
-        pendientes_bot = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")])
-        if pendientes_bot > 0:
-            st.warning(f"🚨 **¡ATENCIÓN!** Han ingresado **{pendientes_bot}** pedido(s) nuevo(s) por confirmar. Revisa el Panel Operativo.", icon="🚨")
+        pendientes_surtido = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"])
+        if pendientes_surtido > 0:
+            st.warning(f"🎯 **¡Hola Marco!** Tienes **{pendientes_surtido}** pedido(s) confirmado(s) esperando a ser comprados/surtidos.", icon="🎯")
 
-    # 2. ALERTA DE FRANCOTIRADOR (Exclusiva para Marco)
-    if "MARCO" in usuario_activo:
-        if col_estatus and not df_trabajo_completo.empty:
-            pendientes_surtido = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"])
-            if pendientes_surtido > 0:
-                st.warning(f"🎯 **¡Hola Marco!** Tienes **{pendientes_surtido}** pedido(s) confirmado(s) esperando a ser comprados/surtidos.", icon="🎯")
-
-st.markdown("---") # Separador visual antes de cargar las vistas
+# (Se eliminaron los separadores st.markdown("---") para reducir el espacio muerto)
 
 if vista_actual == "📊 Analítico":
     st.markdown("## 📊 Rendimiento de Operación")
@@ -522,7 +521,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_conf], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
 
-    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR"))].copy() if col_vencimiento else pd.DataFrame()
+    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REASIGNAR"))].copy() if col_vencimiento else pd.DataFrame()
     with st.expander(f"🚨 Vencimientos de Hoy | {len(df_vencimientos)} Partida(s) en {df_vencimientos[col_id].nunique() if (not df_vencimientos.empty and col_id) else 0} Siniestro(s)", expanded=False):
         if not df_vencimientos.empty:
             if not modo_consulta and permiso_edicion:
@@ -539,7 +538,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 
     if col_vencimiento and not df_filtrado.empty:
         fechas_venc_filtro = df_filtrado[col_vencimiento].apply(parse_dt_safe)
-        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR"))].copy()
+        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REASIGNAR"))].copy()
     else:
         df_atrasadas = pd.DataFrame()
     with st.expander(f"❌ Vencimientos Atrasados | {len(df_atrasadas)} Partida(s) en {df_atrasadas[col_id].nunique() if (not df_atrasadas.empty and col_id) else 0} Siniestro(s)", expanded=False):
@@ -656,8 +655,10 @@ if vista_actual == "🛒 Compras":
         if not df_compras_disp.empty:
             df_compras_disp = df_compras_disp.drop(columns=['Recibido_Bool'])
             
+            # --- BLINDAJE: Eliminar proveedores duplicados antes de usar el diccionario ---
             if not df_proveedores.empty and 'Condición Pago' in df_proveedores.columns:
-                dict_prov = df_proveedores.set_index('Proveedor').to_dict('index')
+                df_prov_limpio = df_proveedores.drop_duplicates(subset=['Proveedor'], keep='last')
+                dict_prov = df_prov_limpio.set_index('Proveedor').to_dict('index')
                 
                 def auto_cond(row):
                     if str(row['Condición Pago']).strip() in ["", "nan", "None"] and row['Proveedor'] in dict_prov:
@@ -1212,7 +1213,7 @@ if btn_guardar or trigger_rem or permiso_edicion:
                     cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                     if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
                 elif row.get('Reasignar') and not nuevo_estatus:
-                    nuevo_estatus = "EN PROCESAMIENTO"
+                    nuevo_estatus = "REASIGNAR" # <--- ¡EL BUG CORREGIDO!
                 
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
@@ -1232,7 +1233,7 @@ if btn_guardar or trigger_rem or permiso_edicion:
                     cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                     if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
                 elif row.get('Reasignar') and not nuevo_estatus:
-                    nuevo_estatus = "EN PROCESAMIENTO"
+                    nuevo_estatus = "REASIGNAR" # <--- ¡EL BUG CORREGIDO!
                 
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
@@ -1325,7 +1326,6 @@ if btn_guardar or trigger_rem or permiso_edicion:
             try:
                 doc = init_connection()
                 
-                # --- 1. SINCRONIZAR BD_UNIFICADA ---
                 if cambios_a_guardar:
                     ws_uni = doc.worksheet("BD_UNIFICADA")
                     datos_uni = ws_uni.get_all_values()
@@ -1342,7 +1342,6 @@ if btn_guardar or trigger_rem or permiso_edicion:
                     idx_recibido = headers.index("Fecha Recibido") if "Fecha Recibido" in headers else -1
                     idx_facturacion = headers.index("Fecha Facturación") if "Fecha Facturación" in headers else -1
                     
-                    # --- LÓGICA DE FOLIO ÚNICO (PMR - ###) ---
                     max_folio_pmr = 0
                     numeros = df_completo[col_remision].astype(str).str.extract(r'(?i)PMR\s*-\s*0*(\d+)', expand=False)
                     if not numeros.empty:
@@ -1377,7 +1376,6 @@ if btn_guardar or trigger_rem or permiso_edicion:
                     
                     ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-                # --- 2. PUENTE A BD_COMPRAS ---
                 if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
                     try:
                         ws_comp = doc.worksheet("BD_COMPRAS")
@@ -1465,7 +1463,6 @@ if btn_guardar or trigger_rem or permiso_edicion:
                     except Exception as e_comp:
                         st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
 
-                # --- GENERACIÓN DE PDF ---
                 llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
                 if llaves_a_imprimir:
                     marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
@@ -1526,7 +1523,6 @@ if btn_guardar or trigger_rem or permiso_edicion:
                             pdf.set_xy(x_offset + 32, y_offset + 12)
                             pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"))
 
-                            # --- HEADER DEL FOLIO Y FECHA ---
                             pdf.set_text_color(0, 0, 0); pdf.set_xy(x_offset + 105, y_offset); pdf.set_font("Arial", 'B', 9)
                             pdf.cell(30, 5, "REMISION", border=1, align='C')
                             pdf.set_text_color(200, 0, 0); pdf.set_font("Arial", 'B', 10)
@@ -1568,7 +1564,6 @@ if btn_guardar or trigger_rem or permiso_edicion:
                                 pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
                                 y_item += 5
                                 
-                            # --- FIRMA LIMPIA ---
                             pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)
                             pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
 

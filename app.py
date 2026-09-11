@@ -1011,56 +1011,69 @@ if vista_actual == "📦 Inventario":
 # ==============================================================================
 if vista_actual == "📝 Remisiones":
     st.markdown("### 📝 Centro de Emisión de Remisiones")
-    st.info("Ingresa un número de siniestro para visualizar las piezas y generar una remisión oficial (Serie PMR).")
+    st.info("Busca por número de siniestro, nombre del taller o modelo del vehículo para visualizar las piezas y generar una remisión oficial (Serie PMR).")
     
-    col_busqueda, _ = st.columns([1, 2])
-    with col_busqueda:
-        siniestro_buscar = st.text_input("🔍 Buscar Siniestro:", placeholder="Ej. B79485869").strip().upper()
+    if not df_trabajo_completo.empty:
+        # Creamos una columna combinada para el buscador omnidireccional
+        df_busqueda = df_trabajo_completo.copy()
+        df_busqueda['Busqueda_Global'] = df_busqueda[col_id].astype(str) + " | " + df_busqueda[col_taller].astype(str) + " | " + df_busqueda['Vehiculo_Info'].astype(str)
         
-    if siniestro_buscar and not df_trabajo_completo.empty:
-        df_siniestro = df_trabajo_completo[df_trabajo_completo[col_id].astype(str).str.upper() == siniestro_buscar].copy()
+        # Generamos la lista de opciones únicas y la ordenamos
+        lista_opciones = [""] + sorted(list(df_busqueda['Busqueda_Global'].dropna().unique()))
         
-        if not df_siniestro.empty:
-            st.markdown(f"**🚗 Vehículo:** {df_siniestro['Vehiculo_Info'].iloc[0]} | **🏢 Taller:** {df_siniestro[col_taller].iloc[0]}")
+        col_busqueda, _ = st.columns([2, 1])
+        with col_busqueda:
+            siniestro_seleccionado = st.selectbox("🔍 Buscar Siniestro, Taller o Vehículo:", options=lista_opciones)
             
-            # Excluimos piezas canceladas
-            df_remisionar = df_siniestro[~df_siniestro[col_estatus].astype(str).str.upper().str.contains("CANCELADO")].copy()
+        if siniestro_seleccionado:
+            # Extraemos el Siniestro real de la cadena combinada (es la primera parte antes del " | ")
+            siniestro_buscar = siniestro_seleccionado.split(" | ")[0].strip()
             
-            if not df_remisionar.empty:
-                df_remisionar['Seleccionar'] = False
+            df_siniestro = df_trabajo_completo[df_trabajo_completo[col_id].astype(str) == siniestro_buscar].copy()
+            
+            if not df_siniestro.empty:
+                st.markdown(f"**🚗 Vehículo:** {df_siniestro['Vehiculo_Info'].iloc[0]} | **🏢 Taller:** {df_siniestro[col_taller].iloc[0]}")
                 
-                cols_mostrar = [c for c in [col_cant, col_desc, col_estatus, col_remision, 'Seleccionar'] if c in df_remisionar.columns]
+                # Excluimos piezas canceladas
+                df_remisionar = df_siniestro[~df_siniestro[col_estatus].astype(str).str.upper().str.contains("CANCELADO")].copy()
                 
-                config_rem = {
-                    col_cant: st.column_config.TextColumn("Cant", disabled=True),
-                    col_desc: st.column_config.TextColumn("Descripción", disabled=True),
-                    col_estatus: st.column_config.TextColumn("Estatus", disabled=True),
-                    col_remision: st.column_config.TextColumn("Folio Actual", disabled=True),
-                    'Seleccionar': st.column_config.CheckboxColumn("📦 Incluir en Remisión", default=False)
-                }
-                
-                df_editado_rem = st.data_editor(
-                    df_remisionar[cols_mostrar], 
-                    column_config=config_rem, 
-                    hide_index=True, 
-                    use_container_width=True, 
-                    key=f"ed_rem_tab_{siniestro_buscar}"
-                )
-                
-                piezas_seleccionadas = df_editado_rem[df_editado_rem['Seleccionar'] == True]
-                
-                if not piezas_seleccionadas.empty:
-                    if st.button("🖨️ Generar Remisión PMR", type="primary", use_container_width=True):
-                        # Pasamos la orden a la variable de sesión para que el Motor de Guardado (Bloque 9) la atrape
-                        st.session_state['trigger_remision_manual'] = {
-                            'siniestro': siniestro_buscar,
-                            'descripciones': piezas_seleccionadas[col_desc].tolist()
-                        }
-                        st.rerun()
-            else:
-                st.warning("Todas las piezas de este siniestro están canceladas.")
+                if not df_remisionar.empty:
+                    df_remisionar['Seleccionar'] = False
+                    
+                    cols_mostrar = [c for c in [col_cant, col_desc, col_estatus, col_remision, 'Seleccionar'] if c in df_remisionar.columns]
+                    
+                    config_rem = {
+                        col_cant: st.column_config.TextColumn("Cant", disabled=True),
+                        col_desc: st.column_config.TextColumn("Descripción", disabled=True),
+                        col_estatus: st.column_config.TextColumn("Estatus", disabled=True),
+                        col_remision: st.column_config.TextColumn("Folio Actual", disabled=True),
+                        'Seleccionar': st.column_config.CheckboxColumn("📦 Incluir en Remisión", default=False)
+                    }
+                    
+                    df_editado_rem = st.data_editor(
+                        df_remisionar[cols_mostrar], 
+                        column_config=config_rem, 
+                        hide_index=True, 
+                        use_container_width=True, 
+                        key=f"ed_rem_tab_{siniestro_buscar}"
+                    )
+                    
+                    piezas_seleccionadas = df_editado_rem[df_editado_rem['Seleccionar'] == True]
+                    
+                    if not piezas_seleccionadas.empty:
+                        if st.button("🖨️ Generar Remisión PMR", type="primary", use_container_width=True):
+                            # Pasamos la orden a la variable de sesión para que el Motor de Guardado (Bloque 9) la atrape
+                            st.session_state['trigger_remision_manual'] = {
+                                'siniestro': siniestro_buscar,
+                                'descripciones': piezas_seleccionadas[col_desc].tolist()
+                            }
+                            st.rerun()
+                else:
+                    st.warning("Todas las piezas de este siniestro están canceladas.")
         else:
-            st.error("No se encontró ningún siniestro con ese número en la base de datos.")
+            st.write("") # Espacio en blanco si no hay selección
+    else:
+        st.warning("La base de datos está vacía o no hay registros para esta aseguradora.")
             
 
 # ==============================================================================

@@ -152,7 +152,8 @@ with col_menu:
 
 es_visor = "VISOR" in rol_usuario.upper()
 with col_chk:
-    modo_consulta = st.checkbox("Solo Lectura", value=True if es_visor else False, disabled=es_visor)
+    # --- CORRECCIÓN: Etiqueta Modo Consulta ---
+    modo_consulta = st.checkbox("Modo Consulta", value=True if es_visor else False, disabled=es_visor)
 permiso_edicion = not modo_consulta
 
 with col_btn:
@@ -282,8 +283,10 @@ if not df_trabajo_completo.empty:
     df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo[col_marca].astype(str) + " " + df_trabajo_completo[col_modelo].astype(str)
     
     df_trabajo = df_trabajo_completo.copy()
-    df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|ENTREGADO|RECIBIDO|FACTURADO|REASIGNAR")].copy() if col_estatus else df_trabajo.copy()
-    df_recoleccion_total = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("REASIGNAR")].copy() if col_estatus else pd.DataFrame()
+    
+    # --- CORRECCIÓN: Filtrar "RECOLEC" adecuadamente ---
+    df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|ENTREGADO|RECIBIDO|FACTURADO|REASIGNAR|RECOLEC")].copy() if col_estatus else df_trabajo.copy()
+    df_recoleccion_total = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("REASIGNAR|RECOLEC")].copy() if col_estatus else pd.DataFrame()
 else:
     col_id = col_taller = col_marca = col_modelo = col_desc = col_cant = col_precio = col_estatus = col_vencimiento = col_asignacion = col_fecha_confi = col_guia = col_remision = col_comentarios = col_aseg = None
     df_trabajo = df_proceso = df_recoleccion_total = pd.DataFrame()
@@ -299,21 +302,17 @@ df_editado_cobro = pd.DataFrame()
 df_editado_fact = pd.DataFrame()
 df_editado = pd.DataFrame()
 
-# --- SISTEMA DE NOTIFICACIONES GLOBALES ---
-# 1. Alerta de Pedidos Nuevos (Visible para todos)
-if col_estatus and not df_trabajo_completo.empty:
-    pendientes_bot = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")])
-    if pendientes_bot > 0:
-        st.warning(f"🚨 **¡ATENCIÓN!** Han ingresado **{pendientes_bot}** pedido(s) nuevo(s) por confirmar. Revisa el Panel Operativo.", icon="🚨")
-
-# 2. ALERTA DE FRANCOTIRADOR (Exclusiva para Marco)
-if "MARCO" in usuario_activo:
+if not modo_consulta:
     if col_estatus and not df_trabajo_completo.empty:
-        pendientes_surtido = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"])
-        if pendientes_surtido > 0:
-            st.warning(f"🎯 **¡Hola Marco!** Tienes **{pendientes_surtido}** pedido(s) confirmado(s) esperando a ser comprados/surtidos.", icon="🎯")
+        pendientes_bot = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")])
+        if pendientes_bot > 0:
+            st.warning(f"🚨 **¡ATENCIÓN!** Han ingresado **{pendientes_bot}** pedido(s) nuevo(s) por confirmar. Revisa el Panel Operativo.", icon="🚨")
 
-# (Se eliminaron los separadores st.markdown("---") para reducir el espacio muerto)
+    if "MARCO" in usuario_activo:
+        if col_estatus and not df_trabajo_completo.empty:
+            pendientes_surtido = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"])
+            if pendientes_surtido > 0:
+                st.warning(f"🎯 **¡Hola Marco!** Tienes **{pendientes_surtido}** pedido(s) confirmado(s) esperando a ser comprados/surtidos.", icon="🎯")
 
 if vista_actual == "📊 Analítico":
     st.markdown("## 📊 Rendimiento de Operación")
@@ -521,7 +520,8 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_conf], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
 
-    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REASIGNAR"))].copy() if col_vencimiento else pd.DataFrame()
+    # --- CORRECCIÓN: Agregado "RECOLEC" al filtro para que no mezcle Vencidas con Recolección ---
+    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REASIGNAR|RECOLEC"))].copy() if col_vencimiento else pd.DataFrame()
     with st.expander(f"🚨 Vencimientos de Hoy | {len(df_vencimientos)} Partida(s) en {df_vencimientos[col_id].nunique() if (not df_vencimientos.empty and col_id) else 0} Siniestro(s)", expanded=False):
         if not df_vencimientos.empty:
             if not modo_consulta and permiso_edicion:
@@ -538,7 +538,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 
     if col_vencimiento and not df_filtrado.empty:
         fechas_venc_filtro = df_filtrado[col_vencimiento].apply(parse_dt_safe)
-        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REASIGNAR"))].copy()
+        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REASIGNAR|RECOLEC"))].copy()
     else:
         df_atrasadas = pd.DataFrame()
     with st.expander(f"❌ Vencimientos Atrasados | {len(df_atrasadas)} Partida(s) en {df_atrasadas[col_id].nunique() if (not df_atrasadas.empty and col_id) else 0} Siniestro(s)", expanded=False):
@@ -655,10 +655,14 @@ if vista_actual == "🛒 Compras":
         if not df_compras_disp.empty:
             df_compras_disp = df_compras_disp.drop(columns=['Recibido_Bool'])
             
-            # --- BLINDAJE: Eliminar proveedores duplicados antes de usar el diccionario ---
+            # --- BLINDAJE ANTI-CRASH PARA PROVEEDORES DUPLICADOS ---
             if not df_proveedores.empty and 'Condición Pago' in df_proveedores.columns:
-                df_prov_limpio = df_proveedores.drop_duplicates(subset=['Proveedor'], keep='last')
-                dict_prov = df_prov_limpio.set_index('Proveedor').to_dict('index')
+                # En lugar de usar set_index que crashea con duplicados, armamos el diccionario iterativo y seguro:
+                dict_prov = {}
+                for _, r_prov in df_proveedores.iterrows():
+                    p_name = str(r_prov['Proveedor']).strip()
+                    if p_name and p_name not in dict_prov:
+                        dict_prov[p_name] = {'Condición Pago': r_prov.get('Condición Pago', ''), 'Días Crédito': r_prov.get('Días Crédito', '0')}
                 
                 def auto_cond(row):
                     if str(row['Condición Pago']).strip() in ["", "nan", "None"] and row['Proveedor'] in dict_prov:
@@ -810,7 +814,7 @@ if vista_actual == "🛒 Compras":
                         
     if not df_proveedores.empty: 
         cols_mostrar_prov = [c for c in ['Proveedor', 'Sucursal', 'Tiempo de Entrega', 'Contacto', 'Condición Pago', 'Días Crédito'] if c in df_proveedores.columns]
-        st.dataframe(df_proveedores[cols_mostrar_prov].fillna(""), use_container_width=True, hide_index=True)
+        st.dataframe(df_proveedores[cols_mostrar_prov].fillna(""), use_container_width=True, hide_index=True)   
 
 # ==============================================================================
 # === [BLOQUE 7: VISTAS 4 Y 5 - TALLERES E INVENTARIO] ===

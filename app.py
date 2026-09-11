@@ -290,7 +290,7 @@ else:
 
 
 # ==============================================================================
-# === [BLOQUE 4: VISTAS (ANALÍTICO Y PANEL OPERATIVO)] ===
+# === [BLOQUE 4: VISTAS Y NOTIFICACIONES] ===
 # ==============================================================================
 df_editado_conf = pd.DataFrame()
 df_editado_venc = pd.DataFrame()
@@ -298,6 +298,28 @@ df_editado_atrasadas = pd.DataFrame()
 df_editado_cobro = pd.DataFrame()
 df_editado_fact = pd.DataFrame()
 df_editado = pd.DataFrame()
+
+# --- SISTEMA DE NOTIFICACIONES GLOBALES (FRANJAS AMARILLAS) ---
+if not modo_consulta:
+    # 1. Alerta de Pedidos Nuevos (Provenientes de los Bots)
+    if col_estatus and not df_trabajo_completo.empty:
+        pendientes_bot = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")])
+        if pendientes_bot > 0:
+            st.warning(f"🚨 **¡ATENCIÓN!** Han ingresado **{pendientes_bot}** pedido(s) nuevo(s) por confirmar. Revisa el Panel Operativo.", icon="🚨")
+
+    # 2. Alerta de Pedidos Recién Confirmados (Para proceder con surtido)
+    if 'avisos_amarillos' in st.session_state and st.session_state['avisos_amarillos']:
+        for aviso in st.session_state['avisos_amarillos']:
+            st.warning(aviso, icon="🔔")
+        
+        # Botón para limpiar los avisos de surtido
+        col_btn_aviso, _ = st.columns([2, 8])
+        with col_btn_aviso:
+            if st.button("✅ Enterado (Ocultar avisos)", use_container_width=True):
+                st.session_state['avisos_amarillos'] = []
+                st.rerun()
+
+st.markdown("---") # Separador visual antes de cargar las vistas
 
 if vista_actual == "📊 Analítico":
     st.markdown("## 📊 Rendimiento de Operación")
@@ -1085,6 +1107,13 @@ if btn_guardar and permiso_edicion:
                 if nuevo_estatus == "EN PROCESAMIENTO":
                     cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
                     
+                    # --- NUEVO: REGISTRAR AVISO AMARILLO DE SURTIDO ---
+                    if 'avisos_amarillos' not in st.session_state:
+                        st.session_state['avisos_amarillos'] = []
+                    mensaje_exito = f"Pedido **{k[0]}** confirmado. Proceder con surtido."
+                    if mensaje_exito not in st.session_state['avisos_amarillos']:
+                        st.session_state['avisos_amarillos'].append(mensaje_exito)
+                    
             if comentario_actual != orig['comentario']: 
                 cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
@@ -1215,7 +1244,6 @@ if btn_guardar and permiso_edicion:
         try:
             doc = init_connection()
             
-            # --- 1. SINCRONIZAR BD_UNIFICADA ---
             if cambios_a_guardar:
                 ws_uni = doc.worksheet("BD_UNIFICADA")
                 datos_uni = ws_uni.get_all_values()
@@ -1243,7 +1271,7 @@ if btn_guardar and permiso_edicion:
                     if v.get('generar_nuevo_folio'):
                         siniestro_id = k[0] 
                         if siniestro_id not in folios_asignados_en_sesion:
-                            # --- LA NUEVA LÓGICA SENIOR DE IDENTIFICACIÓN ---
+                            # --- LA NUEVA LÓGICA SENIOR INFALIBLE ---
                             pref = "MULTI" if str(siniestro_id).upper().startswith('B') else "GNP"
                             max_folios[pref] += 1
                             folios_asignados_en_sesion[siniestro_id] = f"{pref} - {max_folios[pref]:03d}"
@@ -1268,7 +1296,6 @@ if btn_guardar and permiso_edicion:
                 
                 ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
 
-            # --- 2. PUENTE A BD_COMPRAS ---
             if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
                 try:
                     ws_comp = doc.worksheet("BD_COMPRAS")
@@ -1356,7 +1383,6 @@ if btn_guardar and permiso_edicion:
                 except Exception as e_comp:
                     st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
 
-            # --- GENERACIÓN DE PDF ---
             llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
             if llaves_a_imprimir:
                 marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]

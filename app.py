@@ -279,12 +279,12 @@ if not df_trabajo_completo.empty:
     # --- ESCUDO ANTI-BASURA MASIVO ---
     if col_id and col_taller:
         df_trabajo_completo = df_trabajo_completo[df_trabajo_completo[col_id].astype(str).str.strip() != '']
-        # Destruye cualquier fila donde el Siniestro o Taller contenga guiones o rayas (---)
         df_trabajo_completo = df_trabajo_completo[~df_trabajo_completo[col_id].astype(str).str.contains(r'[-_]{2,}')]
         df_trabajo_completo = df_trabajo_completo[~df_trabajo_completo[col_taller].astype(str).str.contains(r'[-_]{2,}')]
         
     col_marca = next((c for c in df_trabajo_completo.columns if "MARCA" in str(c).upper()), None)
     col_modelo = next((c for c in df_trabajo_completo.columns if "MODELO" in str(c).upper()), None)
+    col_ano = next((c for c in df_trabajo_completo.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
     col_desc = next((c for c in df_trabajo_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
     col_cant = next((c for c in df_trabajo_completo.columns if "CANTIDAD" in str(c).upper() or "CANT" == str(c).upper()), None)
     col_precio = next((c for c in df_trabajo_completo.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
@@ -297,8 +297,47 @@ if not df_trabajo_completo.empty:
     col_comentarios = next((c for c in df_trabajo_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
     col_aseg = col_aseg_val
 
-    df_trabajo_completo['Filtro_Siniestro'] = df_trabajo_completo[col_id].astype(str).str.strip() + " - " + df_trabajo_completo[col_marca].astype(str).str.strip() + " " + df_trabajo_completo[col_modelo].astype(str).str.strip()
-    df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo[col_marca].astype(str).str.strip() + " " + df_trabajo_completo[col_modelo].astype(str).str.strip()
+    # --- ESTANDARIZADOR DE FECHAS UNIVERSAL (11/sep/26) ---
+    def estandarizar_fechas_mx(fecha_val):
+        if pd.isna(fecha_val) or str(fecha_val).strip() in ['', 'None', 'nan', 'NaT']: return ""
+        d_str = str(fecha_val).strip().lower().replace('-', '/')
+        if re.match(r'^\d{2}/[a-z]{3}/\d{2}$', d_str): return d_str 
+        if d_str.replace('.','',1).isdigit():
+            val = float(d_str)
+            if val > 30000:
+                dt = pd.to_datetime('1899-12-30') + pd.to_timedelta(val, unit='D')
+                meses = {1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep', 10:'oct', 11:'nov', 12:'dic'}
+                return f"{dt.day:02d}/{meses[dt.month]}/{dt.strftime('%y')}"
+        meses_map = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+        for text, num in meses_map.items():
+            if text in d_str: 
+                d_str = d_str.replace(text, num)
+                break
+        try:
+            dt = pd.to_datetime(d_str, dayfirst=True)
+            meses = {1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep', 10:'oct', 11:'nov', 12:'dic'}
+            return f"{dt.day:02d}/{meses[dt.month]}/{dt.strftime('%y')}"
+        except: return str(fecha_val) 
+
+    for c in [col_asignacion, col_vencimiento, col_fecha_confi]:
+        if c and c in df_trabajo_completo.columns:
+            df_trabajo_completo[c] = df_trabajo_completo[c].apply(estandarizar_fechas_mx)
+
+    # --- FORMATO DE VEHÍCULO LIMPIO (SINIESTRO | MARCA MODELO | AÑO) ---
+    def armar_vehiculo(row):
+        m = str(row.get(col_marca, '')).strip().upper()
+        mod = str(row.get(col_modelo, '')).strip().upper()
+        if mod.startswith(m) and m != "": vehiculo = mod
+        else: vehiculo = f"{m} {mod}".strip()
+            
+        if col_ano:
+            ano = str(row.get(col_ano, '')).strip()
+            if ano.endswith('.0'): ano = ano[:-2]
+            if ano not in ['', 'NAN', 'NONE']: return f"{vehiculo} | {ano}"
+        return vehiculo
+
+    df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo.apply(armar_vehiculo, axis=1)
+    df_trabajo_completo['Filtro_Siniestro'] = df_trabajo_completo[col_id].astype(str).str.strip() + " | " + df_trabajo_completo['Vehiculo_Info']
     
     df_trabajo = df_trabajo_completo.copy()
     
@@ -456,11 +495,23 @@ if vista_actual == "📊 Analítico":
 
 elif vista_actual == "⚙️ Panel Operativo":
     st.markdown("### 📈 Indicadores Diarios")
-    hoy_str = datetime.datetime.now().strftime('%d/%b/%y')
-    hoy_dt = pd.to_datetime(datetime.datetime.now().date())
+    
+    # --- AJUSTE DE FECHA PARA KPIs AL FORMATO ESPAÑOL HOMOLOGADO ---
+    tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+    hoy_dt_full = datetime.datetime.now(tz_mx)
+    meses_es = {1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep', 10:'oct', 11:'nov', 12:'dic'}
+    hoy_str = f"{hoy_dt_full.day:02d}/{meses_es[hoy_dt_full.month]}/{hoy_dt_full.strftime('%y')}"
+    hoy_dt = pd.to_datetime(hoy_dt_full.date())
     
     def parse_dt_safe(val):
-        try: return pd.to_datetime(val, dayfirst=True)
+        if pd.isna(val) or str(val).strip() == '': return pd.NaT
+        val_str = str(val).lower()
+        meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+        for m_es, m_num in meses.items():
+            if m_es in val_str:
+                val_str = val_str.replace(m_es, m_num)
+                break
+        try: return pd.to_datetime(val_str, dayfirst=True)
         except: return pd.NaT
 
     if col_vencimiento:
@@ -663,7 +714,6 @@ elif vista_actual == "⚙️ Panel Operativo":
             cols_rec = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_recoleccion.columns]
             st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
 
-    # --- ARCHIVO HISTÓRICO (MODO CONSULTA) ---
     if modo_consulta:
         df_archivo = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("FACTURADO|CANCELADO")].copy() if col_estatus else pd.DataFrame()
         with st.expander(f"🗄️ Archivo Histórico (Facturados y Cancelados) | {len(df_archivo)} Partida(s)", expanded=False):

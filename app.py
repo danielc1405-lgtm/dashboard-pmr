@@ -148,8 +148,6 @@ with col_logo:
 
 with col_menu:
     opciones_menu = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", "📦 Inventario", "📝 Remisiones", "🧾 Facturación"]
-    
-    # --- CUARTEL GENERAL (Solo visible para Daniel / Administrador) ---
     if "DANIEL" in nombre_usuario.upper() or "ADMIN" in rol_usuario.upper():
         opciones_menu.append("🛠️ Cuartel General")
         
@@ -185,7 +183,7 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-# --- SISTEMA NATIVO DE DESCARGA DE PDFS (BOTONES COMPACTOS) ---
+# --- SISTEMA DE DESCARGA DE PDFS (BOTONES COMPACTOS RESTAURADOS) ---
 if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
     for aviso in st.session_state.get('avisos_remision', []):
         st.warning(aviso)
@@ -203,7 +201,7 @@ if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
                     key=f"btn_pdf_dl_{i}"
                 )
         with cols_pdf[-1]:
-            if st.button("✅ Limpiar Bandeja", type="primary"):
+            if st.button("✅ Limpiar", type="primary"):
                 st.session_state['pdfs_list'] = []
                 st.session_state['avisos_remision'] = []
                 st.rerun()
@@ -248,19 +246,16 @@ def cargar_datos():
     df_comp = obtener_dataframe("BD_COMPRAS", silent=True)
     
     df_cat = obtener_dataframe("BD_TALLERES", silent=True)
-    if df_cat.empty:
-        df_cat = obtener_dataframe("Catálogo", silent=True)
+    if df_cat.empty: df_cat = obtener_dataframe("Catálogo", silent=True)
         
     try: 
         df_inv = obtener_dataframe("BD_INVENTARIO", silent=True)
         if not df_inv.empty and 'Sin Existencia' in df_inv.columns:
             df_inv['Sin Existencia'] = df_inv['Sin Existencia'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'X', 'V', 'VERDADERO'])
-    except: 
-        df_inv = pd.DataFrame()
+    except: df_inv = pd.DataFrame()
         
     if not df_uni.empty:
-        if 'Siniestro Relacionado' in df_uni.columns:
-            df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
+        if 'Siniestro Relacionado' in df_uni.columns: df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
             
     return df_uni, df_comp, df_cat, df_inv
 
@@ -273,22 +268,21 @@ if not df_completo.empty:
     col_aseg_val = next((c for c in df_completo.columns if "ASEGURADORA" in str(c).upper()), None)
     if col_aseg_val:
         df_trabajo_completo = df_completo[df_completo[col_aseg_val].astype(str).str.upper().str.contains(palabra_clave_aseg, na=False)].copy()
-        if df_trabajo_completo.empty:
-            df_trabajo_completo = df_completo.copy()
-    else:
-        df_trabajo_completo = df_completo.copy()
-else:
-    df_trabajo_completo = pd.DataFrame()
+        if df_trabajo_completo.empty: df_trabajo_completo = df_completo.copy()
+    else: df_trabajo_completo = df_completo.copy()
+else: df_trabajo_completo = pd.DataFrame()
 
 if not df_trabajo_completo.empty:
     col_id = next((c for c in df_trabajo_completo.columns if "SINIESTRO" in str(c).upper()), None)
-    
-    # --- ESCUDO ANTI-BASURA: Eliminar filas vacías o con líneas divisorias (---) ---
-    if col_id:
-        df_trabajo_completo = df_trabajo_completo[df_trabajo_completo[col_id].astype(str).str.strip() != '']
-        df_trabajo_completo = df_trabajo_completo[~df_trabajo_completo[col_id].astype(str).str.contains(r'^[-_]+$')]
-        
     col_taller = next((c for c in df_trabajo_completo.columns if "TALLER" in str(c).upper()), None)
+    
+    # --- ESCUDO ANTI-BASURA MASIVO ---
+    if col_id and col_taller:
+        df_trabajo_completo = df_trabajo_completo[df_trabajo_completo[col_id].astype(str).str.strip() != '']
+        # Destruye cualquier fila donde el Siniestro o Taller contenga guiones o rayas (---)
+        df_trabajo_completo = df_trabajo_completo[~df_trabajo_completo[col_id].astype(str).str.contains(r'[-_]{2,}')]
+        df_trabajo_completo = df_trabajo_completo[~df_trabajo_completo[col_taller].astype(str).str.contains(r'[-_]{2,}')]
+        
     col_marca = next((c for c in df_trabajo_completo.columns if "MARCA" in str(c).upper()), None)
     col_modelo = next((c for c in df_trabajo_completo.columns if "MODELO" in str(c).upper()), None)
     col_desc = next((c for c in df_trabajo_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
@@ -303,13 +297,12 @@ if not df_trabajo_completo.empty:
     col_comentarios = next((c for c in df_trabajo_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
     col_aseg = col_aseg_val
 
-    # --- LIMPIEZA DE ESPACIOS EN BLANCO PARA EVITAR DUPLICIDAD EN FILTROS ---
     df_trabajo_completo['Filtro_Siniestro'] = df_trabajo_completo[col_id].astype(str).str.strip() + " - " + df_trabajo_completo[col_marca].astype(str).str.strip() + " " + df_trabajo_completo[col_modelo].astype(str).str.strip()
     df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo[col_marca].astype(str).str.strip() + " " + df_trabajo_completo[col_modelo].astype(str).str.strip()
     
     df_trabajo = df_trabajo_completo.copy()
     
-    # --- MODO CONSULTA HISTÓRICA: Si está activo, jala todo el archivo ---
+    # --- MODO CONSULTA HISTÓRICA ---
     if modo_consulta:
         df_proceso = df_trabajo.copy()
     else:
@@ -629,7 +622,6 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby(col_id):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion:
-                            # --- SE ELIMINÓ LA CASILLA DE REASIGNAR Y REMISIÓN ---
                             columnas_checkbox = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Cancelar']
                             orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_checkbox
                             
@@ -671,7 +663,7 @@ elif vista_actual == "⚙️ Panel Operativo":
             cols_rec = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_recoleccion.columns]
             st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
 
-    # --- NUEVA VISTA PARA MODO CONSULTA: ARCHIVO HISTÓRICO ---
+    # --- ARCHIVO HISTÓRICO (MODO CONSULTA) ---
     if modo_consulta:
         df_archivo = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("FACTURADO|CANCELADO")].copy() if col_estatus else pd.DataFrame()
         with st.expander(f"🗄️ Archivo Histórico (Facturados y Cancelados) | {len(df_archivo)} Partida(s)", expanded=False):

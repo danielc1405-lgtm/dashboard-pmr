@@ -229,7 +229,7 @@ if vista_actual == "🛠️ Cuartel General":
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
 # ==============================================================================
-def obtener_dataframe(nombre_hoja):
+def obtener_dataframe(nombre_hoja, silent=False):
     try:
         doc = init_connection()
         ws = doc.worksheet(nombre_hoja)
@@ -239,20 +239,20 @@ def obtener_dataframe(nombre_hoja):
         df = pd.DataFrame(datos[1:], columns=headers)
         return df
     except Exception as e:
-        st.error(f"Error cargando hoja {nombre_hoja}: {e}")
+        if not silent: st.error(f"Error cargando hoja {nombre_hoja}: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=10)
 def cargar_datos():
     df_uni = obtener_dataframe("BD_UNIFICADA")
-    df_comp = obtener_dataframe("BD_COMPRAS")
+    df_comp = obtener_dataframe("BD_COMPRAS", silent=True)
     
-    df_cat = obtener_dataframe("BD_TALLERES")
+    df_cat = obtener_dataframe("BD_TALLERES", silent=True)
     if df_cat.empty:
-        df_cat = obtener_dataframe("Catálogo")
+        df_cat = obtener_dataframe("Catálogo", silent=True)
         
     try: 
-        df_inv = obtener_dataframe("BD_INVENTARIO")
+        df_inv = obtener_dataframe("BD_INVENTARIO", silent=True)
         if not df_inv.empty and 'Sin Existencia' in df_inv.columns:
             df_inv['Sin Existencia'] = df_inv['Sin Existencia'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'X', 'V', 'VERDADERO'])
     except: 
@@ -282,6 +282,12 @@ else:
 
 if not df_trabajo_completo.empty:
     col_id = next((c for c in df_trabajo_completo.columns if "SINIESTRO" in str(c).upper()), None)
+    
+    # --- ESCUDO ANTI-BASURA: Eliminar filas vacías o con líneas divisorias (---) ---
+    if col_id:
+        df_trabajo_completo = df_trabajo_completo[df_trabajo_completo[col_id].astype(str).str.strip() != '']
+        df_trabajo_completo = df_trabajo_completo[~df_trabajo_completo[col_id].astype(str).str.contains(r'^[-_]+$')]
+        
     col_taller = next((c for c in df_trabajo_completo.columns if "TALLER" in str(c).upper()), None)
     col_marca = next((c for c in df_trabajo_completo.columns if "MARCA" in str(c).upper()), None)
     col_modelo = next((c for c in df_trabajo_completo.columns if "MODELO" in str(c).upper()), None)
@@ -297,13 +303,18 @@ if not df_trabajo_completo.empty:
     col_comentarios = next((c for c in df_trabajo_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
     col_aseg = col_aseg_val
 
-    df_trabajo_completo['Filtro_Siniestro'] = df_trabajo_completo[col_id].astype(str) + " - " + df_trabajo_completo[col_marca].astype(str) + " " + df_trabajo_completo[col_modelo].astype(str)
-    df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo[col_marca].astype(str) + " " + df_trabajo_completo[col_modelo].astype(str)
+    # --- LIMPIEZA DE ESPACIOS EN BLANCO PARA EVITAR DUPLICIDAD EN FILTROS ---
+    df_trabajo_completo['Filtro_Siniestro'] = df_trabajo_completo[col_id].astype(str).str.strip() + " - " + df_trabajo_completo[col_marca].astype(str).str.strip() + " " + df_trabajo_completo[col_modelo].astype(str).str.strip()
+    df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo[col_marca].astype(str).str.strip() + " " + df_trabajo_completo[col_modelo].astype(str).str.strip()
     
     df_trabajo = df_trabajo_completo.copy()
     
-    # --- CORRECCIÓN: Filtrar "RECOLEC" adecuadamente ---
-    df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|ENTREGADO|RECIBIDO|FACTURADO|REASIGNAR|RECOLEC")].copy() if col_estatus else df_trabajo.copy()
+    # --- MODO CONSULTA HISTÓRICA: Si está activo, jala todo el archivo ---
+    if modo_consulta:
+        df_proceso = df_trabajo.copy()
+    else:
+        df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|ENTREGADO|RECIBIDO|FACTURADO|REASIGNAR|RECOLEC")].copy() if col_estatus else df_trabajo.copy()
+        
     df_recoleccion_total = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("REASIGNAR|RECOLEC")].copy() if col_estatus else pd.DataFrame()
 else:
     col_id = col_taller = col_marca = col_modelo = col_desc = col_cant = col_precio = col_estatus = col_vencimiento = col_asignacion = col_fecha_confi = col_guia = col_remision = col_comentarios = col_aseg = None
@@ -587,7 +598,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 config_cobro.update({"Marcar Recibido": st.column_config.CheckboxColumn("🏁 Marcar Recibido", default=False)})
                 df_editado_cobro = st.data_editor(df_por_cobrar[cols_cobro], column_config=config_cobro, disabled=[c for c in cols_cobro if c not in ['Marcar Recibido', col_comentarios]], hide_index=True, use_container_width=True, key="ed_cobro")
                 
-                for col in [col_id]: 
+                for col in [col_id, col_desc]: 
                     if col in df_por_cobrar.columns and col not in df_editado_cobro.columns: 
                         df_editado_cobro[col] = df_por_cobrar[col].values
             else:
@@ -608,9 +619,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 df_asignados['Pedido'] = estatus_upper.str.contains("EN PROCESAMIENTO")
                 df_asignados['Entregado'] = estatus_upper.str.contains("ENTREGADO")
                 df_asignados['Recibido'] = estatus_upper.str.contains("RECIBIDO")
-                df_asignados['Reasignacion'] = estatus_upper.str.contains("REASIGNAR")
                 df_asignados['Cancelar'] = estatus_upper.str.contains("CANCELADO")
-            # --- ELIMINADA LA CASILLA DE REMISIÓN COMPLETAMENTE DEL PANEL OPERATIVO ---
             df_asignados['Proveedor'] = "" 
             df_asignados['Costo Compra'] = 0.0 
             df_asignados['ETA (Días)'] = 0     
@@ -620,8 +629,8 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby(col_id):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion:
-                            # Se quitó 'Remision' de la lista
-                            columnas_checkbox = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Reasignacion', 'Cancelar']
+                            # --- SE ELIMINÓ LA CASILLA DE REASIGNAR Y REMISIÓN ---
+                            columnas_checkbox = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Cancelar']
                             orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_checkbox
                             
                             config_pedidos = base_config.copy()
@@ -634,11 +643,10 @@ elif vista_actual == "⚙️ Panel Operativo":
                                 "ETA (Días)": st.column_config.NumberColumn("⏳ Días", step=1),
                                 "Entregado": st.column_config.CheckboxColumn("🚚 Ent"), 
                                 "Recibido": st.column_config.CheckboxColumn("🏁 Rec"), 
-                                "Reasignacion": st.column_config.CheckboxColumn("🔄 Reasig"), 
                                 "Cancelar": st.column_config.CheckboxColumn("🚫 Can") 
                             })
                             
-                            columnas_editables = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Reasignacion', 'Cancelar', col_comentarios, col_guia, col_asignacion, col_vencimiento]
+                            columnas_editables = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Cancelar', col_comentarios, col_guia, col_asignacion, col_vencimiento]
                             
                             df_editado_parcial = st.data_editor(df_grupo[orden_deseado], column_config=config_pedidos, disabled=[c for c in orden_deseado if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                             
@@ -662,6 +670,16 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_recoleccion.empty:
             cols_rec = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_recoleccion.columns]
             st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
+
+    # --- NUEVA VISTA PARA MODO CONSULTA: ARCHIVO HISTÓRICO ---
+    if modo_consulta:
+        df_archivo = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("FACTURADO|CANCELADO")].copy() if col_estatus else pd.DataFrame()
+        with st.expander(f"🗄️ Archivo Histórico (Facturados y Cancelados) | {len(df_archivo)} Partida(s)", expanded=False):
+            if not df_archivo.empty:
+                cols_hist = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios, col_remision, col_guia] if c in df_archivo.columns]
+                st.dataframe(df_archivo[cols_hist], column_config=base_config, hide_index=True, use_container_width=True)
+            else:
+                st.info("No hay registros facturados ni cancelados en esta aseguradora.")
 
 # ==============================================================================
 # === [BLOQUE 6: VISTA 3 - PEDIDOS Y PROVEEDORES] ===

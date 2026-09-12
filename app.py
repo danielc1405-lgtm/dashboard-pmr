@@ -227,6 +227,8 @@ if vista_actual == "🛠️ Cuartel General":
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
 # ==============================================================================
+import re # <--- LIBRERÍA INYECTADA PARA QUE FUNCIONEN LAS FECHAS
+
 def obtener_dataframe(nombre_hoja, silent=False):
     try:
         doc = init_connection()

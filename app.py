@@ -148,6 +148,7 @@ with col_logo:
 
 with col_menu:
     opciones_menu = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", "📦 Inventario", "📝 Remisiones", "🧾 Facturación"]
+    
     # --- CUARTEL GENERAL (Solo visible para Daniel / Administrador) ---
     if "DANIEL" in nombre_usuario.upper() or "ADMIN" in rol_usuario.upper():
         opciones_menu.append("🛠️ Cuartel General")
@@ -184,7 +185,7 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-# --- SISTEMA NATIVO DE DESCARGA DE PDFS (SIN CUADRO GRIS) ---
+# --- SISTEMA NATIVO DE DESCARGA DE PDFS (BOTONES COMPACTOS) ---
 if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
     for aviso in st.session_state.get('avisos_remision', []):
         st.warning(aviso)
@@ -195,15 +196,14 @@ if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
         for i, pdf_obj in enumerate(st.session_state['pdfs_list']):
             with cols_pdf[i]:
                 st.download_button(
-                    label=f"🖨️ Descargar {pdf_obj['folio']}",
+                    label=f"📥 Descargar {pdf_obj['folio']}",
                     data=pdf_obj['bytes'],
                     file_name=pdf_obj['nombre'],
                     mime="application/pdf",
-                    key=f"btn_pdf_dl_{i}",
-                    use_container_width=True
+                    key=f"btn_pdf_dl_{i}"
                 )
         with cols_pdf[-1]:
-            if st.button("✅ Limpiar Bandeja", type="primary", use_container_width=True):
+            if st.button("✅ Limpiar Bandeja", type="primary"):
                 st.session_state['pdfs_list'] = []
                 st.session_state['avisos_remision'] = []
                 st.rerun()
@@ -224,7 +224,7 @@ if vista_actual == "🛠️ Cuartel General":
         txt_bug = st.text_area("Anota aquí fallos o ideas urgentes para no perderlas de radar:")
         if st.button("Guardar Nota"):
             st.toast("Nota guardada en bitácora de desarrollo.")
-    st.stop() # Detiene la ejecución del resto del código para que sea una vista exclusiva
+    st.stop()
 
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -1037,16 +1037,69 @@ if vista_actual == "📦 Inventario":
                 st.dataframe(df_inv_disp, use_container_width=True, hide_index=True)
         else:
             st.info("El inventario está vacío o todas las piezas están agotadas.")
+          
 
 # ==============================================================================
-# === [BLOQUE 8.5: VISTA REMISIONES (NUEVA UNIVERSAL)] ===
+# === [BLOQUE 8: VISTA 5 - FACTURACIÓN] ===
+# ==============================================================================
+if vista_actual == "🧾 Facturación":
+    st.markdown("### 🧾 Pedidos Listos para Facturar")
+    
+    if col_estatus and not df_trabajo_completo.empty:
+        df_fact = df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"].copy()
+        
+        if not df_fact.empty:
+            df_fact['Facturado'] = False
+            dfs_editados_fact = []
+            
+            for taller, df_taller in df_fact.groupby(col_taller):
+                with st.expander(f"🏢 {taller} | {len(df_taller)} Partida(s) pendiente(s)", expanded=True):
+                    if not modo_consulta and permiso_edicion:
+                        cols_fact = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_comentarios, 'Facturado'] if c in df_taller.columns]
+                        
+                        config_fact = {
+                            col_id: st.column_config.TextColumn("Siniestro", disabled=True),
+                            'Vehiculo_Info': st.column_config.TextColumn("Vehículo", disabled=True),
+                            col_desc: st.column_config.TextColumn("Descripción", disabled=True),
+                            col_cant: st.column_config.TextColumn("Cant", disabled=True),
+                            col_precio: st.column_config.TextColumn("Precio", disabled=True),
+                            col_comentarios: st.column_config.TextColumn("Observaciones", disabled=True),
+                            'Facturado': st.column_config.CheckboxColumn("🧾 Facturar")
+                        }
+                        
+                        df_ed_fact = st.data_editor(
+                            df_taller[cols_fact], 
+                            column_config=config_fact, 
+                            disabled=[c for c in cols_fact if c != 'Facturado'], 
+                            hide_index=True, 
+                            use_container_width=True, 
+                            key=f"ed_fact_{taller}"
+                        )
+                        
+                        for col in [col_id, col_desc]:
+                            if col in df_taller.columns and col not in df_ed_fact.columns:
+                                df_ed_fact[col] = df_taller[col].values
+                                
+                        dfs_editados_fact.append(df_ed_fact)
+                    else:
+                        cols_mostrar = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_comentarios] if c in df_taller.columns]
+                        st.dataframe(df_taller[cols_mostrar], hide_index=True, use_container_width=True)
+            
+            if dfs_editados_fact:
+                df_editado_fact = pd.concat(dfs_editados_fact, ignore_index=True)
+        else:
+            st.success("✅ No hay pedidos pendientes de facturación en este momento.")
+    else:
+        st.warning("No hay datos cargados para facturación.")
+
+# ==============================================================================
+# === [BLOQUE 8.5: VISTA REMISIONES (UNIVERSAL)] ===
 # ==============================================================================
 if vista_actual == "📝 Remisiones":
     st.markdown("### 📝 Centro de Emisión de Remisiones")
     st.info("Busca por número de siniestro, nombre del taller o modelo del vehículo en TODA la base de datos.")
     
     if not df_completo.empty:
-        # Detectar las columnas en la base completa
         col_estatus_univ = next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
         col_rem_univ = next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
         col_id_univ = next((c for c in df_completo.columns if "SINIESTRO" in str(c).upper()), None)
@@ -1059,7 +1112,6 @@ if vista_actual == "📝 Remisiones":
         df_base = df_completo.copy()
         df_base['Vehiculo_Info_Univ'] = df_base[col_marca_univ].astype(str) + " " + df_base[col_modelo_univ].astype(str)
 
-        # Filtro: Solo las que NO están canceladas/facturadas y NO tienen folio
         mask_pendientes = (
             (~df_base[col_estatus_univ].astype(str).str.upper().str.contains("CANCELADO|FACTURADO|ENTREGADO|RECIBIDO|CONFIRMAR")) &
             (df_base[col_rem_univ].astype(str).str.strip() == "")
@@ -1121,60 +1173,7 @@ if vista_actual == "📝 Remisiones":
             st.success("✅ ¡Felicidades! No hay pedidos pendientes de remisionar en toda la base.")
     else:
         st.warning("La base de datos está vacía.")
-            
 
-# ==============================================================================
-# === [BLOQUE 8: VISTA 5 - FACTURACIÓN] ===
-# ==============================================================================
-if vista_actual == "🧾 Facturación":
-    st.markdown("### 🧾 Pedidos Listos para Facturar")
-    
-    if col_estatus and not df_trabajo_completo.empty:
-        df_fact = df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"].copy()
-        
-        if not df_fact.empty:
-            df_fact['Facturado'] = False
-            dfs_editados_fact = []
-            
-            for taller, df_taller in df_fact.groupby(col_taller):
-                with st.expander(f"🏢 {taller} | {len(df_taller)} Partida(s) pendiente(s)", expanded=True):
-                    if not modo_consulta and permiso_edicion:
-                        cols_fact = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_comentarios, 'Facturado'] if c in df_taller.columns]
-                        
-                        config_fact = {
-                            col_id: st.column_config.TextColumn("Siniestro", disabled=True),
-                            'Vehiculo_Info': st.column_config.TextColumn("Vehículo", disabled=True),
-                            col_desc: st.column_config.TextColumn("Descripción", disabled=True),
-                            col_cant: st.column_config.TextColumn("Cant", disabled=True),
-                            col_precio: st.column_config.TextColumn("Precio", disabled=True),
-                            col_comentarios: st.column_config.TextColumn("Observaciones", disabled=True),
-                            'Facturado': st.column_config.CheckboxColumn("🧾 Facturar")
-                        }
-                        
-                        df_ed_fact = st.data_editor(
-                            df_taller[cols_fact], 
-                            column_config=config_fact, 
-                            disabled=[c for c in cols_fact if c != 'Facturado'], 
-                            hide_index=True, 
-                            use_container_width=True, 
-                            key=f"ed_fact_{taller}"
-                        )
-                        
-                        for col in [col_id, col_desc]:
-                            if col in df_taller.columns and col not in df_ed_fact.columns:
-                                df_ed_fact[col] = df_taller[col].values
-                                
-                        dfs_editados_fact.append(df_ed_fact)
-                    else:
-                        cols_mostrar = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_comentarios] if c in df_taller.columns]
-                        st.dataframe(df_taller[cols_mostrar], hide_index=True, use_container_width=True)
-            
-            if dfs_editados_fact:
-                df_editado_fact = pd.concat(dfs_editados_fact, ignore_index=True)
-        else:
-            st.success("✅ No hay pedidos pendientes de facturación en este momento.")
-    else:
-        st.warning("No hay datos cargados para facturación.")
 
 # ==============================================================================
 # === [BLOQUE 9: MOTOR DE GUARDADO Y PDF] ===

@@ -140,7 +140,7 @@ nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
 if "VISOR" in nombre_usuario.upper() or "DEMO" in str(st.session_state.get('usuario', '')).upper():
     rol_usuario = "Visor"
 
-# FILA 1: LOGO, NAVEGACIÓN Y CONTROLES (Esta fila es la que se queda congelada)
+# FILA 1: LOGO, NAVEGACIÓN Y CONTROLES
 col_logo, col_menu, col_chk, col_btn, col_out = st.columns([1.2, 5.8, 1.2, 1.2, 0.6], vertical_alignment="center")
 
 with col_logo:
@@ -148,6 +148,10 @@ with col_logo:
 
 with col_menu:
     opciones_menu = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", "📦 Inventario", "📝 Remisiones", "🧾 Facturación"]
+    # --- CUARTEL GENERAL (Solo visible para Daniel / Administrador) ---
+    if "DANIEL" in nombre_usuario.upper() or "ADMIN" in rol_usuario.upper():
+        opciones_menu.append("🛠️ Cuartel General")
+        
     vista_actual = st.radio("Nav:", opciones_menu, horizontal=True, label_visibility="collapsed")
 
 es_visor = "VISOR" in rol_usuario.upper()
@@ -163,56 +167,64 @@ with col_out:
         st.session_state.clear()
         st.rerun()
 
-# FILA 2: HEADER COQUETO (Aseguradora grande y Vista)
+# FILA 2: HEADER COQUETO 
 aseguradora_sel = st.selectbox("Selecciona Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
-    
 color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00AEEF"
 border_color = color_aseg
 
 st.markdown(f"""
     <div class="header-coqueto" style="border-left-color: {border_color};">
         <div>
-            <h3 style="margin:0; padding:0; color:white; font-size: 1.6rem;">
-                {vista_actual}
-            </h3>
+            <h3 style="margin:0; padding:0; color:white; font-size: 1.6rem;">{vista_actual}</h3>
             <span style="color:#aaa; font-size:0.85rem;">👤 {nombre_usuario} | 🛡️ {rol_usuario}</span>
         </div>
         <div style="text-align: right;">
-            <h2 style="margin:0; padding:0; color:{color_aseg}; font-size: 2rem; letter-spacing: 1px;">
-                {aseguradora_sel.upper()}
-            </h2>
+            <h2 style="margin:0; padding:0; color:{color_aseg}; font-size: 2rem; letter-spacing: 1px;">{aseguradora_sel.upper()}</h2>
         </div>
     </div>
 """, unsafe_allow_html=True)
 
-# --- VISOR NATIVO DE PDFS ---
+# --- SISTEMA NATIVO DE DESCARGA DE PDFS (SIN CUADRO GRIS) ---
 if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
     for aviso in st.session_state.get('avisos_remision', []):
         st.warning(aviso)
     
     if st.session_state.get('pdfs_list'):
-        st.markdown("### 📄 Remisiones Generadas")
+        st.success("✅ ¡Remisiones generadas exitosamente!")
+        cols_pdf = st.columns(len(st.session_state['pdfs_list']) + 1)
         for i, pdf_obj in enumerate(st.session_state['pdfs_list']):
-            with st.expander(f"👁️ Vista Previa: Remisión {pdf_obj['folio']} ({pdf_obj['siniestro']})", expanded=True):
-                col_view, col_dl = st.columns([8, 2])
-                with col_view:
-                    b64 = base64.b64encode(pdf_obj['bytes']).decode()
-                    pdf_display = f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="450" type="application/pdf"></iframe>'
-                    st.markdown(pdf_display, unsafe_allow_html=True)
-                with col_dl:
-                    st.download_button(
-                        label=f"📥 Descargar PDF",
-                        data=pdf_obj['bytes'],
-                        file_name=pdf_obj['nombre'],
-                        mime="application/pdf",
-                        key=f"btn_pdf_dl_{i}",
-                        use_container_width=True
-                    )
-                    
-        if st.button("✅ Limpiar Bandeja", type="primary"):
-            st.session_state['pdfs_list'] = []
-            st.session_state['avisos_remision'] = []
-            st.rerun()
+            with cols_pdf[i]:
+                st.download_button(
+                    label=f"🖨️ Descargar {pdf_obj['folio']}",
+                    data=pdf_obj['bytes'],
+                    file_name=pdf_obj['nombre'],
+                    mime="application/pdf",
+                    key=f"btn_pdf_dl_{i}",
+                    use_container_width=True
+                )
+        with cols_pdf[-1]:
+            if st.button("✅ Limpiar Bandeja", type="primary", use_container_width=True):
+                st.session_state['pdfs_list'] = []
+                st.session_state['avisos_remision'] = []
+                st.rerun()
+
+# --- VISTA: CUARTEL GENERAL ---
+if vista_actual == "🛠️ Cuartel General":
+    st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")
+    st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, reimpresiones y rutas locales.")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**🚧 Próximas Implementaciones:**")
+        st.checkbox("Bóveda de Reimpresión de PDFs en Drive", value=False, disabled=True)
+        st.checkbox("Ruta de Escape Local (Offline DB)", value=False, disabled=True)
+        st.checkbox("Pantalla de Ruta Local para Don Dionicio", value=False, disabled=True)
+        st.checkbox("Módulo de Paquetería", value=False, disabled=True)
+    with col2:
+        st.markdown("**🐛 Reporte rápido de Bugs / Ideas:**")
+        txt_bug = st.text_area("Anota aquí fallos o ideas urgentes para no perderlas de radar:")
+        if st.button("Guardar Nota"):
+            st.toast("Nota guardada en bitácora de desarrollo.")
+    st.stop() # Detiene la ejecución del resto del código para que sea una vista exclusiva
 
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -518,10 +530,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                             
                             df_editado_parcial = st.data_editor(df_grupo[cols_conf], column_config=config_conf, disabled=[c for c in cols_conf if c not in ['Confirmar Surtido', 'Cancelar', col_comentarios]], hide_index=True, use_container_width=True, key=f"ed_conf_{taller}_{siniestro_auto}")
                             
-                            # --- CORRECCIÓN CRÍTICA: Asignación segura que respeta el orden ---
-                            for col in [col_id, col_taller, col_marca, col_modelo]:
+                            for col in [col_id, col_taller, col_marca, col_modelo, col_desc]:
                                 if col in df_grupo.columns and col not in df_editado_parcial.columns: 
-                                    df_editado_parcial[col] = df_grupo[col]
+                                    df_editado_parcial[col] = df_grupo[col].values
                             dfs_editados_conf.append(df_editado_parcial)
                         else:
                             cols_conf = [c for c in [col_cant, col_desc, col_asignacion, col_vencimiento, col_estatus, col_comentarios] if c in df_grupo.columns]
@@ -538,10 +549,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                 config_venc.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
                 df_editado_venc = st.data_editor(df_vencimientos[cols_venc], column_config=config_venc, disabled=[c for c in cols_venc if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios, col_guia]], hide_index=True, use_container_width=True, key="ed_venc")
                 
-                # --- CORRECCIÓN CRÍTICA ---
                 for col in [col_id, col_marca, col_modelo]:
                     if col in df_vencimientos.columns and col not in df_editado_venc.columns: 
-                        df_editado_venc[col] = df_vencimientos[col]
+                        df_editado_venc[col] = df_vencimientos[col].values
             else:
                 cols_venc = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_comentarios] if c in df_vencimientos.columns]
                 st.dataframe(df_vencimientos[cols_venc], column_config=base_config, hide_index=True, use_container_width=True)
@@ -560,10 +570,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                 config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
                 df_editado_atrasadas = st.data_editor(df_atrasadas[cols_atr], column_config=config_atr, disabled=[c for c in cols_atr if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios]], hide_index=True, use_container_width=True, key="ed_atr")
                 
-                # --- CORRECCIÓN CRÍTICA ---
                 for col in [col_id, col_marca, col_modelo]:
                     if col in df_atrasadas.columns and col not in df_editado_atrasadas.columns: 
-                        df_editado_atrasadas[col] = df_atrasadas[col]
+                        df_editado_atrasadas[col] = df_atrasadas[col].values
             else:
                 cols_atr = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_atrasadas.columns]
                 st.dataframe(df_atrasadas[cols_atr], column_config=base_config, hide_index=True, use_container_width=True)
@@ -578,10 +587,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                 config_cobro.update({"Marcar Recibido": st.column_config.CheckboxColumn("🏁 Marcar Recibido", default=False)})
                 df_editado_cobro = st.data_editor(df_por_cobrar[cols_cobro], column_config=config_cobro, disabled=[c for c in cols_cobro if c not in ['Marcar Recibido', col_comentarios]], hide_index=True, use_container_width=True, key="ed_cobro")
                 
-                # --- CORRECCIÓN CRÍTICA ---
                 for col in [col_id]: 
                     if col in df_por_cobrar.columns and col not in df_editado_cobro.columns: 
-                        df_editado_cobro[col] = df_por_cobrar[col]
+                        df_editado_cobro[col] = df_por_cobrar[col].values
             else:
                 cols_cobro = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_comentarios] if c in df_por_cobrar.columns]
                 st.dataframe(df_por_cobrar[cols_cobro], column_config=base_config, hide_index=True, use_container_width=True)
@@ -602,7 +610,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 df_asignados['Recibido'] = estatus_upper.str.contains("RECIBIDO")
                 df_asignados['Reasignacion'] = estatus_upper.str.contains("REASIGNAR")
                 df_asignados['Cancelar'] = estatus_upper.str.contains("CANCELADO")
-            df_asignados['Remision'] = df_asignados[col_remision].astype(str).str.strip() != '' if col_remision else False
+            # --- ELIMINADA LA CASILLA DE REMISIÓN COMPLETAMENTE DEL PANEL OPERATIVO ---
             df_asignados['Proveedor'] = "" 
             df_asignados['Costo Compra'] = 0.0 
             df_asignados['ETA (Días)'] = 0     
@@ -612,7 +620,8 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby(col_id):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion:
-                            columnas_checkbox = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Remision', 'Entregado', 'Recibido', 'Reasignacion', 'Cancelar']
+                            # Se quitó 'Remision' de la lista
+                            columnas_checkbox = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Reasignacion', 'Cancelar']
                             orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_checkbox
                             
                             config_pedidos = base_config.copy()
@@ -623,7 +632,6 @@ elif vista_actual == "⚙️ Panel Operativo":
                                 "Proveedor": st.column_config.TextColumn("🏢 Proveedor"), 
                                 "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="$ %.2f"), 
                                 "ETA (Días)": st.column_config.NumberColumn("⏳ Días", step=1),
-                                "Remision": st.column_config.CheckboxColumn("📝 Rem (Solo en pestaña)", disabled=True), 
                                 "Entregado": st.column_config.CheckboxColumn("🚚 Ent"), 
                                 "Recibido": st.column_config.CheckboxColumn("🏁 Rec"), 
                                 "Reasignacion": st.column_config.CheckboxColumn("🔄 Reasig"), 
@@ -634,10 +642,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                             
                             df_editado_parcial = st.data_editor(df_grupo[orden_deseado], column_config=config_pedidos, disabled=[c for c in orden_deseado if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                             
-                            # --- CORRECCIÓN CRÍTICA ---
                             for col in [col_id, col_taller, col_marca, col_modelo, 'Vehiculo_Info']:
                                 if col in df_grupo.columns and col not in df_editado_parcial.columns: 
-                                    df_editado_parcial[col] = df_grupo[col]
+                                    df_editado_parcial[col] = df_grupo[col].values
                             dfs_editados.append(df_editado_parcial)
                         else:
                             orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns]
@@ -1032,58 +1039,88 @@ if vista_actual == "📦 Inventario":
             st.info("El inventario está vacío o todas las piezas están agotadas.")
 
 # ==============================================================================
-# === [BLOQUE 8: VISTA 5 - FACTURACIÓN] ===
+# === [BLOQUE 8.5: VISTA REMISIONES (NUEVA UNIVERSAL)] ===
 # ==============================================================================
-if vista_actual == "🧾 Facturación":
-    st.markdown("### 🧾 Pedidos Listos para Facturar")
+if vista_actual == "📝 Remisiones":
+    st.markdown("### 📝 Centro de Emisión de Remisiones")
+    st.info("Busca por número de siniestro, nombre del taller o modelo del vehículo en TODA la base de datos.")
     
-    if col_estatus and not df_trabajo_completo.empty:
-        df_fact = df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"].copy()
+    if not df_completo.empty:
+        # Detectar las columnas en la base completa
+        col_estatus_univ = next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
+        col_rem_univ = next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
+        col_id_univ = next((c for c in df_completo.columns if "SINIESTRO" in str(c).upper()), None)
+        col_taller_univ = next((c for c in df_completo.columns if "TALLER" in str(c).upper()), None)
+        col_marca_univ = next((c for c in df_completo.columns if "MARCA" in str(c).upper()), None)
+        col_modelo_univ = next((c for c in df_completo.columns if "MODELO" in str(c).upper()), None)
+        col_desc_univ = next((c for c in df_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+        col_cant_univ = next((c for c in df_completo.columns if "CANTIDAD" in str(c).upper() or "CANT" == str(c).upper()), None)
         
-        if not df_fact.empty:
-            df_fact['Facturado'] = False
-            dfs_editados_fact = []
+        df_base = df_completo.copy()
+        df_base['Vehiculo_Info_Univ'] = df_base[col_marca_univ].astype(str) + " " + df_base[col_modelo_univ].astype(str)
+
+        # Filtro: Solo las que NO están canceladas/facturadas y NO tienen folio
+        mask_pendientes = (
+            (~df_base[col_estatus_univ].astype(str).str.upper().str.contains("CANCELADO|FACTURADO|ENTREGADO|RECIBIDO|CONFIRMAR")) &
+            (df_base[col_rem_univ].astype(str).str.strip() == "")
+        )
+        df_busqueda = df_base[mask_pendientes].copy()
+        
+        if not df_busqueda.empty:
+            df_busqueda['Busqueda_Global'] = df_busqueda[col_id_univ].astype(str) + " | " + df_busqueda[col_taller_univ].astype(str) + " | " + df_busqueda['Vehiculo_Info_Univ'].astype(str)
+            lista_opciones = [""] + sorted(list(df_busqueda['Busqueda_Global'].dropna().unique()))
             
-            for taller, df_taller in df_fact.groupby(col_taller):
-                with st.expander(f"🏢 {taller} | {len(df_taller)} Partida(s) pendiente(s)", expanded=True):
-                    if not modo_consulta and permiso_edicion:
-                        cols_fact = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_comentarios, 'Facturado'] if c in df_taller.columns]
+            col_busqueda, _ = st.columns([2, 1])
+            with col_busqueda:
+                siniestro_seleccionado = st.selectbox("🔍 Buscar Siniestro, Taller o Vehículo (Universal):", options=lista_opciones)
+                
+            if siniestro_seleccionado:
+                siniestro_buscar = siniestro_seleccionado.split(" | ")[0].strip()
+                df_siniestro = df_base[df_base[col_id_univ].astype(str) == siniestro_buscar].copy()
+                
+                if not df_siniestro.empty:
+                    st.markdown(f"**🚗 Vehículo:** {df_siniestro['Vehiculo_Info_Univ'].iloc[0]} | **🏢 Taller:** {df_siniestro[col_taller_univ].iloc[0]}")
+                    
+                    df_remisionar = df_siniestro[~df_siniestro[col_estatus_univ].astype(str).str.upper().str.contains("CANCELADO")].copy()
+                    
+                    if not df_remisionar.empty:
+                        df_remisionar['Seleccionar'] = df_remisionar[col_rem_univ].astype(str).str.strip() == ""
+                        cols_mostrar = [c for c in [col_cant_univ, col_desc_univ, col_estatus_univ, col_rem_univ, 'Seleccionar'] if c in df_remisionar.columns]
                         
-                        config_fact = {
-                            col_id: st.column_config.TextColumn("Siniestro", disabled=True),
-                            'Vehiculo_Info': st.column_config.TextColumn("Vehículo", disabled=True),
-                            col_desc: st.column_config.TextColumn("Descripción", disabled=True),
-                            col_cant: st.column_config.TextColumn("Cant", disabled=True),
-                            col_precio: st.column_config.TextColumn("Precio", disabled=True),
-                            col_comentarios: st.column_config.TextColumn("Observaciones", disabled=True),
-                            'Facturado': st.column_config.CheckboxColumn("🧾 Facturar")
+                        config_rem = {
+                            col_cant_univ: st.column_config.TextColumn("Cant", disabled=True),
+                            col_desc_univ: st.column_config.TextColumn("Descripción", disabled=True),
+                            col_estatus_univ: st.column_config.TextColumn("Estatus", disabled=True),
+                            col_rem_univ: st.column_config.TextColumn("Folio Actual", disabled=True),
+                            'Seleccionar': st.column_config.CheckboxColumn("📦 Incluir en Remisión")
                         }
                         
-                        df_ed_fact = st.data_editor(
-                            df_taller[cols_fact], 
-                            column_config=config_fact, 
-                            disabled=[c for c in cols_fact if c != 'Facturado'], 
+                        df_editado_rem = st.data_editor(
+                            df_remisionar[cols_mostrar], 
+                            column_config=config_rem, 
                             hide_index=True, 
                             use_container_width=True, 
-                            key=f"ed_fact_{taller}"
+                            key=f"ed_rem_tab_{siniestro_buscar}"
                         )
                         
-                        # --- CORRECCIÓN CRÍTICA ---
-                        for col in [col_id]:
-                            if col in df_taller.columns and col not in df_ed_fact.columns:
-                                df_ed_fact[col] = df_taller[col]
-                                
-                        dfs_editados_fact.append(df_ed_fact)
+                        piezas_seleccionadas = df_editado_rem[df_editado_rem['Seleccionar'] == True]
+                        piezas_validas = piezas_seleccionadas[piezas_seleccionadas[col_rem_univ].astype(str).str.strip() == ""]
+                        
+                        if not piezas_validas.empty:
+                            if st.button("🖨️ Generar Remisión PMR", type="primary", use_container_width=True):
+                                st.session_state['trigger_remision_manual'] = {
+                                    'siniestro': siniestro_buscar,
+                                    'descripciones': piezas_validas[col_desc_univ].tolist()
+                                }
+                                st.rerun()
+                        elif not piezas_seleccionadas.empty:
+                            st.warning("⚠️ No puedes generar una remisión para piezas que ya tienen un folio asignado.")
                     else:
-                        cols_mostrar = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_comentarios] if c in df_taller.columns]
-                        st.dataframe(df_taller[cols_mostrar], hide_index=True, use_container_width=True)
-            
-            if dfs_editados_fact:
-                df_editado_fact = pd.concat(dfs_editados_fact, ignore_index=True)
+                        st.warning("Todas las piezas de este siniestro están canceladas.")
         else:
-            st.success("✅ No hay pedidos pendientes de facturación en este momento.")
+            st.success("✅ ¡Felicidades! No hay pedidos pendientes de remisionar en toda la base.")
     else:
-        st.warning("No hay datos cargados para facturación.")
+        st.warning("La base de datos está vacía.")
             
 
 # ==============================================================================
@@ -1093,14 +1130,12 @@ if vista_actual == "🧾 Facturación":
     st.markdown("### 🧾 Pedidos Listos para Facturar")
     
     if col_estatus and not df_trabajo_completo.empty:
-        # Filtramos solo lo que ya fue RECIBIDO por el Taller
         df_fact = df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"].copy()
         
         if not df_fact.empty:
             df_fact['Facturado'] = False
             dfs_editados_fact = []
             
-            # Agrupamos por taller para mantener la vista ordenada y limpia
             for taller, df_taller in df_fact.groupby(col_taller):
                 with st.expander(f"🏢 {taller} | {len(df_taller)} Partida(s) pendiente(s)", expanded=True):
                     if not modo_consulta and permiso_edicion:
@@ -1126,7 +1161,7 @@ if vista_actual == "🧾 Facturación":
                         )
                         
                         for col in [col_id, col_desc]:
-                            if col in df_taller.columns:
+                            if col in df_taller.columns and col not in df_ed_fact.columns:
                                 df_ed_fact[col] = df_taller[col].values
                                 
                         dfs_editados_fact.append(df_ed_fact)
@@ -1266,34 +1301,25 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             for _, row in df_editado.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
-                actual_rem_bool = row.get('Remision', False)
                 pedido_bool = row.get('Pedido', False)
                 
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN TRANSITO" if actual_rem_bool else "EN PROCESAMIENTO" if pedido_bool else None
+                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN PROCESAMIENTO" if pedido_bool else None
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 guia_actual = str(row.get(col_guia, '')).strip()
                 venc_actual = str(row.get(col_vencimiento, '')).strip()
                 asig_actual = str(row.get(col_asignacion, '')).strip()
                 
+                # --- CANDADO ESTRICTO ANTI-FANTASMA: Si dice Cancelado, se bloquea cualquier otra acción. ---
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                     if nuevo_estatus == "RECIBIDO": cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
                     
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                 if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-                
                 if venc_actual and venc_actual != orig['vencimiento_db']: cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
                 if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
                 
-                # --- CANDADO ANTI-FANTASMAS ---
-                if nuevo_estatus == "CANCELADO":
-                    # Si el usuario cancela, bloqueamos completamente que se genere una remisión, pase lo que pase
-                    pass
-                else:
-                    if actual_rem_bool and not orig['remision_bool']: 
-                        cambios_a_guardar.setdefault(k, {}).update({'imprimir_remision': True, 'generar_nuevo_folio': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
-                        
-                if pedido_bool:
+                if pedido_bool and nuevo_estatus != "CANCELADO":
                     cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
                     cambios_a_guardar[k]['compra_prov'] = str(row.get('Proveedor', '')).strip()
                     cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
@@ -1322,14 +1348,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         cambios_bd_compras[k]['prov'] = row.get('Proveedor', '')
                         cambios_bd_compras[k]['recibido'] = 'SI' if row.get('Recibido') else 'NO'
                         
-                        if row.get('Imprimir Remisión'):
-                            cambios_a_guardar.setdefault(k, {})['imprimir_remision'] = True
-                            cambios_a_guardar[k]['estatus'] = "EN TRANSITO"
-                            if not orig['remision_bool']:
-                                cambios_a_guardar[k]['generar_nuevo_folio'] = True
-                                cambios_a_guardar[k]['usuario_rem'] = st.session_state.get('usuario_actual', 'Sistema')
-                                cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
-                        elif row.get('Recibido'):
+                        if row.get('Recibido'):
                             cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO" 
 
     if cambios_a_guardar or cambios_bd_compras:

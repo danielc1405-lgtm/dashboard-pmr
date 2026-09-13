@@ -227,7 +227,7 @@ if vista_actual == "🛠️ Cuartel General":
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
 # ==============================================================================
-import re # <--- LIBRERÍA INYECTADA PARA QUE FUNCIONEN LAS FECHAS
+import re
 
 def obtener_dataframe(nombre_hoja, silent=False):
     try:
@@ -287,6 +287,7 @@ if not df_trabajo_completo.empty:
     col_marca = next((c for c in df_trabajo_completo.columns if "MARCA" in str(c).upper()), None)
     col_modelo = next((c for c in df_trabajo_completo.columns if "MODELO" in str(c).upper()), None)
     col_ano = next((c for c in df_trabajo_completo.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
+    col_vin = next((c for c in df_trabajo_completo.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
     col_desc = next((c for c in df_trabajo_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
     col_cant = next((c for c in df_trabajo_completo.columns if "CANTIDAD" in str(c).upper() or "CANT" == str(c).upper()), None)
     col_precio = next((c for c in df_trabajo_completo.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
@@ -325,7 +326,7 @@ if not df_trabajo_completo.empty:
         if c and c in df_trabajo_completo.columns:
             df_trabajo_completo[c] = df_trabajo_completo[c].apply(estandarizar_fechas_mx)
 
-    # --- FORMATO DE VEHÍCULO LIMPIO (SINIESTRO | MARCA MODELO | AÑO) ---
+    # --- FORMATO DE VEHÍCULO LIMPIO (MARCA MODELO | AÑO | VIN) ---
     def armar_vehiculo(row):
         m = str(row.get(col_marca, '')).strip().upper()
         mod = str(row.get(col_modelo, '')).strip().upper()
@@ -335,7 +336,12 @@ if not df_trabajo_completo.empty:
         if col_ano:
             ano = str(row.get(col_ano, '')).strip()
             if ano.endswith('.0'): ano = ano[:-2]
-            if ano not in ['', 'NAN', 'NONE']: return f"{vehiculo} | {ano}"
+            if ano not in ['', 'NAN', 'NONE']: vehiculo += f" | {ano}"
+            
+        if col_vin:
+            vin = str(row.get(col_vin, '')).strip().upper()
+            if vin not in ['', 'NAN', 'NONE']: vehiculo += f" | {vin}"
+            
         return vehiculo
 
     df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo.apply(armar_vehiculo, axis=1)
@@ -915,12 +921,16 @@ if vista_actual == "🏢 Talleres":
         with st.expander("➕ Registrar Nuevo Taller", expanded=False):
             st.info("Registra un nuevo taller. El Asesor se asignará automáticamente si la ciudad está en el directorio GNP.")
             mapa_asesores = {"Monterrey": "Oscar Landeros Martinez", "CDMX": "Yessica Vianney Martinez Olivar", "Guadalajara": "Estefany Dayanna Ochoa Aranda"}
-            lista_estados = ["Aguascalientes", "Baja California", "CDMX", "Jalisco", "Nuevo León", "Yucatán"]
+            lista_estados = ["Aguascalientes", "Baja California", "CDMX", "Jalisco", "Nuevo León", "Yucatán", "Coahuila", "Veracruz", "Sinaloa", "Tabasco", "Sonora", "Guanajuato", "Morelos", "Querétaro", "Oaxaca", "Guerrero", "Michoacán", "SLP"]
+            
             c1, c2, c3 = st.columns([2, 2, 1])
             nuevo_taller = c1.text_input("Taller * (Obligatorio)")
-            ciudad_sel = c2.selectbox("Ciudad", [""] + sorted(list(mapa_asesores.keys())) + ["Otra (Escribir manualmente)..."])
-            if ciudad_sel == "Otra (Escribir manualmente)...":
-                nueva_ciudad = c2.text_input("Ingresa la Ciudad")
+            
+            opciones_ciudad = [""] + sorted(list(mapa_asesores.keys())) + ["➕ OTRA CIUDAD (Escribir manual)"]
+            ciudad_sel = c2.selectbox("Ciudad (Elige una o selecciona 'OTRA CIUDAD')", opciones_ciudad)
+            
+            if ciudad_sel == "➕ OTRA CIUDAD (Escribir manual)":
+                nueva_ciudad = c2.text_input("✍️ Escribe el nombre de la nueva Ciudad:")
                 asesor_asignado = c3.text_input("Asesor Asignado (Manual)")
             elif ciudad_sel != "":
                 nueva_ciudad = ciudad_sel
@@ -930,22 +940,51 @@ if vista_actual == "🏢 Talleres":
                 nueva_ciudad = ""
                 asesor_asignado = ""
                 c3.text_input("Asesor Asignado", disabled=True)
+            
             c4, c5, c6, c7 = st.columns(4)
-            nuevo_estado = c4.selectbox("Estado", [""] + lista_estados)
+            nuevo_estado = c4.selectbox("Estado", [""] + sorted(lista_estados))
             nuevo_seguro = c5.selectbox("Seguro", ["MULTI", "GNP", "AMBOS", "OTRO"])
             nuevo_contacto = c6.text_input("Contacto Taller")
             nuevo_tel = c7.text_input("Teléfono Contacto")
-            c8, c9, c10 = st.columns([1, 1, 2])
+            
+            c8, c9 = st.columns(2)
             nuevo_wa = c8.text_input("Whatsapp")
             nuevo_correo = c9.text_input("Correo")
-            nueva_dir = c10.text_input("Dirección Completa (Calle, Col.)")
+            
+            st.markdown("**📍 Dirección del Taller**")
+            c10, c11, c12 = st.columns([2, 2, 1])
+            nueva_calle = c10.text_input("Calle y Número")
+            nueva_colonia = c11.text_input("Colonia")
+            nuevo_cp = c12.text_input("C.P.")
+            
             if st.button("💾 Guardar en Catálogo", type="primary"):
                 if nuevo_taller.strip() == "": st.error("❌ El 'Nombre del Taller' es obligatorio.")
+                elif nueva_ciudad.strip() == "": st.error("❌ Por favor especifica una Ciudad.")
                 else:
                     try:
+                        # 1. Unir las 3 partes de la dirección en una sola cadena
+                        partes_dir = [p.strip() for p in [nueva_calle, nueva_colonia, nuevo_cp] if p.strip() != ""]
+                        nueva_dir = ", ".join(partes_dir)
+                        
                         doc = init_connection()
-                        ws_c = doc.worksheet("Catálogo")
-                        ws_c.append_row([nuevo_taller.upper(), nueva_dir.upper(), ciudad_sel.upper(), nuevo_estado.upper(), nuevo_contacto.upper(), nuevo_tel, nuevo_wa, nuevo_correo, asesor_asignado.upper(), nuevo_seguro.upper()], value_input_option='USER_ENTERED')
+                        hojas = [s.title for s in doc.worksheets()]
+                        nombre_hoja_cat = "BD_TALLERES" if "BD_TALLERES" in hojas else "Catálogo"
+                        ws_c = doc.worksheet(nombre_hoja_cat)
+                        
+                        # 2. ORDEN EXACTO DE TU IMAGEN CORRECTA (A hasta J)
+                        ws_c.append_row([
+                            nuevo_taller.upper(),         # A: Taller
+                            nuevo_contacto.upper(),       # B: Contacto Taller
+                            nuevo_tel,                    # C: Telefono Contacto
+                            nuevo_wa,                     # D: Whatsapp
+                            nuevo_correo,                 # E: Correo
+                            nueva_dir.upper(),            # F: DIRECCION
+                            nueva_ciudad.strip().upper(), # G: Ciudad
+                            nuevo_estado.strip().upper(), # H: Estado
+                            asesor_asignado.upper(),      # I: Asesor Asignado
+                            nuevo_seguro.upper()          # J: Seguro
+                        ], value_input_option='USER_ENTERED')
+                        
                         st.success(f"✅ Taller '{nuevo_taller}' agregado exitosamente en la nube.")
                         st.cache_data.clear()
                         time.sleep(1)
@@ -1005,14 +1044,12 @@ if vista_actual == "📦 Inventario":
                             st.rerun()
                         except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
 
-        # --- MÓDULO NUEVO DE SALIDAS Y VENTAS (CORREGIDO ID Y CERO STOCK) ---
         st.markdown("---")
         with st.expander("📉 Registrar Salida / Venta", expanded=False):
             if not df_inventario.empty:
                 col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
                 df_inv_act = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
                 
-                # Filtro estricto: Que NO tenga etiqueta de "Sin Existencia" Y que la Cantidad Numérica sea mayor a 0
                 df_inv_act['Cantidad_Num'] = pd.to_numeric(df_inv_act['Cantidad'], errors='coerce').fillna(0)
                 df_stock = df_inv_act[(~df_inv_act['Sin Existencia']) & (df_inv_act['Cantidad_Num'] > 0)].copy()
                 
@@ -1034,7 +1071,6 @@ if vista_actual == "📦 Inventario":
                             else:
                                 try:
                                     fila_encontrada = int(pieza_sel.split(' - ')[0].replace('ID:', '').strip())
-                                    
                                     doc = init_connection()
                                     ws_i = doc.worksheet("BD_INVENTARIO")
                                     datos_i = ws_i.get_all_values()
@@ -1062,43 +1098,42 @@ if vista_actual == "📦 Inventario":
                                     st.cache_data.clear()
                                     time.sleep(1)
                                     st.rerun()
-                                        
                                 except Exception as e:
                                     st.error(f"❌ Error al conectar con la nube: {e}")
                 else:
                     st.warning("No hay piezas disponibles en stock (Cantidades agotadas).")
 
-    st.markdown("---")
-    if not df_inventario.empty:
-        col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
-        df_inv_filtrado = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
-        
-        df_inv_filtrado['Cantidad_Num_Vista'] = pd.to_numeric(df_inv_filtrado['Cantidad'], errors='coerce').fillna(0)
-        df_inv_filtrado = df_inv_filtrado[(~df_inv_filtrado['Sin Existencia']) & (df_inv_filtrado['Cantidad_Num_Vista'] > 0)].copy()
-        
-        if not df_inv_filtrado.empty:
-            df_inv_filtrado['Filtro_Busqueda'] = df_inv_filtrado.apply(lambda r: " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+        st.markdown("---")
+        if not df_inventario.empty:
+            col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
+            df_inv_filtrado = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
             
-            busqueda_inv = st.multiselect("🔍 Buscar Pieza:", options=sorted(list(df_inv_filtrado['Filtro_Busqueda'].dropna().unique())))
+            df_inv_filtrado['Cantidad_Num_Vista'] = pd.to_numeric(df_inv_filtrado['Cantidad'], errors='coerce').fillna(0)
+            df_inv_filtrado = df_inv_filtrado[(~df_inv_filtrado['Sin Existencia']) & (df_inv_filtrado['Cantidad_Num_Vista'] > 0)].copy()
             
-            df_inv_disp = df_inv_filtrado[df_inv_filtrado['Filtro_Busqueda'].isin(busqueda_inv)].copy() if busqueda_inv else df_inv_filtrado.copy()
-            
-            if 'Filtro_Busqueda' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Filtro_Busqueda'])
-            if 'Cantidad_Num_Vista' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Cantidad_Num_Vista'])
-            
-            for c in df_inv_disp.columns:
-                if c != 'Sin Existencia': df_inv_disp[c] = df_inv_disp[c].fillna("").astype(str).replace(['nan', 'None', '0.0'], '').str.upper()
-            
-            df_inv_disp.insert(0, 'Nº', range(1, len(df_inv_disp) + 1))
-            st.markdown(f"**🔢 Total de piezas listadas:** {len(df_inv_disp)}")
-            
-            if permiso_edicion:
-                config_inv = {'Nº': st.column_config.NumberColumn("Nº", disabled=True), 'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)}
-                st.data_editor(df_inv_disp, num_rows="dynamic", column_config=config_inv, use_container_width=True, hide_index=True, key="ed_inv")
+            if not df_inv_filtrado.empty:
+                df_inv_filtrado['Filtro_Busqueda'] = df_inv_filtrado.apply(lambda r: " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+                
+                busqueda_inv = st.multiselect("🔍 Buscar Pieza:", options=sorted(list(df_inv_filtrado['Filtro_Busqueda'].dropna().unique())))
+                
+                df_inv_disp = df_inv_filtrado[df_inv_filtrado['Filtro_Busqueda'].isin(busqueda_inv)].copy() if busqueda_inv else df_inv_filtrado.copy()
+                
+                if 'Filtro_Busqueda' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Filtro_Busqueda'])
+                if 'Cantidad_Num_Vista' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Cantidad_Num_Vista'])
+                
+                for c in df_inv_disp.columns:
+                    if c != 'Sin Existencia': df_inv_disp[c] = df_inv_disp[c].fillna("").astype(str).replace(['nan', 'None', '0.0'], '').str.upper()
+                
+                df_inv_disp.insert(0, 'Nº', range(1, len(df_inv_disp) + 1))
+                st.markdown(f"**🔢 Total de piezas listadas:** {len(df_inv_disp)}")
+                
+                if permiso_edicion:
+                    config_inv = {'Nº': st.column_config.NumberColumn("Nº", disabled=True), 'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)}
+                    st.data_editor(df_inv_disp, num_rows="dynamic", column_config=config_inv, use_container_width=True, hide_index=True, key="ed_inv")
+                else:
+                    st.dataframe(df_inv_disp, use_container_width=True, hide_index=True)
             else:
-                st.dataframe(df_inv_disp, use_container_width=True, hide_index=True)
-        else:
-            st.info("El inventario está vacío o todas las piezas están agotadas.")
+                st.info("El inventario está vacío o todas las piezas están agotadas.")
           
 
 # ==============================================================================

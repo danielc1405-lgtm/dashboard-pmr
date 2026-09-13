@@ -785,123 +785,130 @@ if vista_actual == "🛒 Compras":
         
         if not df_c.empty:
             df_c['Recibido_Bool'] = df_c['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
-            df_c['Cancelar Compra'] = False
             
-            def parse_spanish_date(d_str):
-                if pd.isna(d_str) or str(d_str).strip() == '': return pd.NaT
-                d_str = str(d_str).lower().replace('-', '/') 
-                meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
-                for text, num in meses.items():
-                    if text in d_str: d_str = d_str.replace(text, num); break
-                try: return pd.to_datetime(d_str, format='%d/%m/%y', errors='coerce')
-                except: return pd.NaT
-
-            df_c['Fecha_Compra_Dt'] = df_c['Fecha Compra'].apply(parse_spanish_date)
-            df_c['ETA (Días)'] = pd.to_numeric(df_c['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
-            df_c['Llegada_Calculada'] = df_c['Fecha_Compra_Dt'] + pd.to_timedelta(df_c['ETA (Días)'], unit='d')
-            df_c['Llegada Est.'] = df_c['Llegada_Calculada'].dt.strftime('%d/%b/%y').fillna('-')
+            # --- FILTRO MÁGICO: Ocultar los ya recibidos a menos que sea Modo Consulta ---
+            if not modo_consulta:
+                df_c = df_c[df_c['Recibido_Bool'] == False].copy()
             
-            # --- NUEVA LÓGICA DE ALERTA FINANCIERA (Aviso 3 días antes) ---
-            tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
-            hoy_dt_alert = pd.to_datetime(datetime.datetime.now(tz_mx).date())
-            
-            def calc_alerta(row):
-                cond = str(row.get('Condición Pago', '')).strip().title()
-                dias_cr = pd.to_numeric(row.get('Días Crédito', 0), errors='coerce')
-                if pd.isna(dias_cr): dias_cr = 0
-
-                if cond in ['Previo', 'Anticipo', 'Contra Entrega']:
-                    return '🔴 Pago Inmediato'
-                elif cond == 'Crédito':
-                    if pd.notna(row['Fecha_Compra_Dt']):
-                        vencimiento = row['Fecha_Compra_Dt'] + pd.to_timedelta(dias_cr, unit='d')
-                        dias_restantes = (vencimiento - hoy_dt_alert).days
-                        f_venc = vencimiento.strftime('%d/%b')
-                        if dias_restantes < 0: return f"❌ VENCIDO ({f_venc})"
-                        elif dias_restantes <= 3: return f"🟠 Vence pronto: {f_venc}"
-                        else: return f"🟢 En tiempo: {f_venc}"
-                    else: return f"🟡 Crédito {dias_cr} días"
-                elif cond == 'Plataforma':
-                    return '🔵 Pago en Plataforma'
-                return '⚪ Configurar Pago'
-                
-            df_c['Alerta Financiera'] = df_c.apply(calc_alerta, axis=1)
-
-            def formato_auto_corto(v):
-                if pd.isna(v) or not str(v).strip() or str(v).lower() == 'nan': return ""
-                v_str = str(v).strip()
-                if ' - ' in v_str: v_str = v_str.split(' - ')[0].strip()
-                elif ' | ' in v_str:
-                    partes = v_str.split(' | ')
-                    if len(partes) >= 2: v_str = f"{partes[0]} {partes[1]}".strip()
-                    else: v_str = partes[0].strip()
-                return v_str
-            
-            df_c['Vehículo_Corto'] = df_c.get('Vehículo', pd.Series([""]*len(df_c))).apply(formato_auto_corto)
-            
-            cols_mostrar = [
-                'Siniestro', 'Vehículo_Corto', 'Taller', 'Descripción Pieza', 
-                'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 
-                'Condición Pago', 'Días Crédito', 'Estatus Pago', 
-                'Recibido_Bool', 'Cancelar Compra', 'Alerta Financiera'
-            ]
-            
-            df_disp = df_c[[c for c in cols_mostrar if c in df_c.columns]].copy()
-            
-            df_disp.rename(columns={
-                'Vehículo_Corto': 'Auto',
-                'Taller': 'CDR',
-                'Descripción Pieza': 'Pieza', 
-                'Costo Compra': 'Costo', 
-                'ETA (Días)': 'ETA(Días)', 
-                'Recibido_Bool': 'Recibido', 
-                'Estatus Pago': 'Pago', 
-                'Condición Pago': 'Cond. Pago', 
-                'Días Crédito': 'Días Cr.'
-            }, inplace=True)
-            
-            if not modo_consulta and permiso_edicion:
-                # --- NUEVAS OPCIONES DE PAGO ---
-                opciones_pago = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
-                
-                config_c = {
-                    'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True),
-                    'Auto': st.column_config.TextColumn("Auto", disabled=True),
-                    'CDR': st.column_config.TextColumn("CDR", disabled=True),
-                    'Pieza': st.column_config.TextColumn("Pieza", disabled=True),
-                    'Proveedor': st.column_config.TextColumn("Proveedor"),
-                    'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f"),
-                    'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1),
-                    'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
-                    'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago),
-                    'Días Cr.': st.column_config.NumberColumn("Días Cr.", step=1),
-                    'Pago': st.column_config.SelectboxColumn("Pago", options=["", "Pendiente", "Pagado", "En Aclaración"]),
-                    'Recibido': st.column_config.CheckboxColumn("🏁 Recibido"),
-                    'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar"),
-                    'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True)
-                }
-                
-                df_editado_compras = st.data_editor(
-                    df_disp,
-                    column_config=config_c,
-                    hide_index=True,
-                    use_container_width=True,
-                    key="ed_compras_main"
-                )
-                
-                df_editado_compras.rename(columns={
-                    'Auto': 'Vehículo_Corto',
-                    'CDR': 'Taller',
-                    'Pieza': 'Descripción Pieza', 
-                    'Costo': 'Costo Compra', 
-                    'ETA(Días)': 'Tiempo Entrega (Días)', 
-                    'Cond. Pago': 'Condición Pago', 
-                    'Días Cr.': 'Días Crédito', 
-                    'Pago': 'Estatus Pago'
-                }, inplace=True)
-                st.session_state['df_editado_compras_temp'] = df_editado_compras
+            if df_c.empty:
+                st.success("✅ Todo está al día. No hay pedidos pendientes de recepción con estos filtros.")
             else:
-                st.dataframe(df_disp, hide_index=True, use_container_width=True)
+                df_c['Cancelar Compra'] = False
+                
+                def parse_spanish_date(d_str):
+                    if pd.isna(d_str) or str(d_str).strip() == '': return pd.NaT
+                    d_str = str(d_str).lower().replace('-', '/') 
+                    meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+                    for text, num in meses.items():
+                        if text in d_str: d_str = d_str.replace(text, num); break
+                    try: return pd.to_datetime(d_str, format='%d/%m/%y', errors='coerce')
+                    except: return pd.NaT
+
+                df_c['Fecha_Compra_Dt'] = df_c['Fecha Compra'].apply(parse_spanish_date)
+                df_c['ETA (Días)'] = pd.to_numeric(df_c['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
+                df_c['Llegada_Calculada'] = df_c['Fecha_Compra_Dt'] + pd.to_timedelta(df_c['ETA (Días)'], unit='d')
+                df_c['Llegada Est.'] = df_c['Llegada_Calculada'].dt.strftime('%d/%b/%y').fillna('-')
+                
+                # --- LÓGICA DE ALERTA FINANCIERA (Aviso 3 días antes) ---
+                tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+                hoy_dt_alert = pd.to_datetime(datetime.datetime.now(tz_mx).date())
+                
+                def calc_alerta(row):
+                    cond = str(row.get('Condición Pago', '')).strip().title()
+                    dias_cr = pd.to_numeric(row.get('Días Crédito', 0), errors='coerce')
+                    if pd.isna(dias_cr): dias_cr = 0
+
+                    if cond in ['Previo', 'Anticipo', 'Contra Entrega']:
+                        return '🔴 Pago Inmediato'
+                    elif cond == 'Crédito' or cond == 'Credito':
+                        if pd.notna(row['Fecha_Compra_Dt']):
+                            vencimiento = row['Fecha_Compra_Dt'] + pd.to_timedelta(dias_cr, unit='d')
+                            dias_restantes = (vencimiento - hoy_dt_alert).days
+                            f_venc = vencimiento.strftime('%d/%b')
+                            if dias_restantes < 0: return f"❌ VENCIDO ({f_venc})"
+                            elif dias_restantes <= 3: return f"🟠 Vence pronto: {f_venc}"
+                            else: return f"🟢 En tiempo: {f_venc}"
+                        else: return f"🟡 Crédito {dias_cr} días"
+                    elif cond == 'Plataforma':
+                        return '🔵 Pago en Plataforma'
+                    return '⚪ Configurar Pago'
+                    
+                df_c['Alerta Financiera'] = df_c.apply(calc_alerta, axis=1)
+
+                def formato_auto_corto(v):
+                    if pd.isna(v) or not str(v).strip() or str(v).lower() == 'nan': return ""
+                    v_str = str(v).strip()
+                    if ' - ' in v_str: v_str = v_str.split(' - ')[0].strip()
+                    elif ' | ' in v_str:
+                        partes = v_str.split(' | ')
+                        if len(partes) >= 2: v_str = f"{partes[0]} {partes[1]}".strip()
+                        else: v_str = partes[0].strip()
+                    return v_str
+                
+                df_c['Vehículo_Corto'] = df_c.get('Vehículo', pd.Series([""]*len(df_c))).apply(formato_auto_corto)
+                
+                cols_mostrar = [
+                    'Siniestro', 'Vehículo_Corto', 'Taller', 'Descripción Pieza', 
+                    'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 
+                    'Condición Pago', 'Días Crédito', 'Estatus Pago', 
+                    'Recibido_Bool', 'Cancelar Compra', 'Alerta Financiera'
+                ]
+                
+                df_disp = df_c[[c for c in cols_mostrar if c in df_c.columns]].copy()
+                
+                df_disp.rename(columns={
+                    'Vehículo_Corto': 'Auto',
+                    'Taller': 'CDR',
+                    'Descripción Pieza': 'Pieza', 
+                    'Costo Compra': 'Costo', 
+                    'ETA (Días)': 'ETA(Días)', 
+                    'Recibido_Bool': 'Recibido', 
+                    'Estatus Pago': 'Pago', 
+                    'Condición Pago': 'Cond. Pago', 
+                    'Días Crédito': 'Días Cr.'
+                }, inplace=True)
+                
+                if not modo_consulta and permiso_edicion:
+                    opciones_pago = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
+                    
+                    config_c = {
+                        'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True),
+                        'Auto': st.column_config.TextColumn("Auto", disabled=True),
+                        'CDR': st.column_config.TextColumn("CDR", disabled=True),
+                        'Pieza': st.column_config.TextColumn("Pieza", disabled=True),
+                        'Proveedor': st.column_config.TextColumn("Proveedor"),
+                        'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f"),
+                        'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1),
+                        'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
+                        'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago),
+                        'Días Cr.': st.column_config.NumberColumn("Días Cr.", step=1),
+                        'Pago': st.column_config.SelectboxColumn("Pago", options=["", "Pendiente", "Pagado", "En Aclaración"]),
+                        'Recibido': st.column_config.CheckboxColumn("🏁 Recibido"),
+                        'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar"),
+                        'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True)
+                    }
+                    
+                    df_editado_compras = st.data_editor(
+                        df_disp,
+                        column_config=config_c,
+                        hide_index=True,
+                        use_container_width=True,
+                        key="ed_compras_main"
+                    )
+                    
+                    df_editado_compras.rename(columns={
+                        'Auto': 'Vehículo_Corto',
+                        'CDR': 'Taller',
+                        'Pieza': 'Descripción Pieza', 
+                        'Costo': 'Costo Compra', 
+                        'ETA(Días)': 'Tiempo Entrega (Días)', 
+                        'Cond. Pago': 'Condición Pago', 
+                        'Días Cr.': 'Días Crédito', 
+                        'Pago': 'Estatus Pago'
+                    }, inplace=True)
+                    st.session_state['df_editado_compras_temp'] = df_editado_compras
+                else:
+                    st.dataframe(df_disp, hide_index=True, use_container_width=True)
         else:
             st.info("No hay pedidos en curso.")
     else:
@@ -910,6 +917,18 @@ if vista_actual == "🛒 Compras":
     st.markdown("---")
     st.markdown("#### 🏢 Directorio de Proveedores")
     
+    try:
+        doc_prov = init_connection()
+        ws_prov = doc_prov.worksheet("BD_PROVEEDORES")
+        datos_prov = ws_prov.get_all_values()
+        if datos_prov:
+            headers_prov = [str(h).strip() for h in datos_prov[0]]
+            df_proveedores = pd.DataFrame(datos_prov[1:], columns=headers_prov)
+        else:
+            df_proveedores = pd.DataFrame()
+    except Exception:
+        df_proveedores = pd.DataFrame()
+
     if permiso_edicion:
         with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
             with st.form("form_nuevo_proveedor", clear_on_submit=True):
@@ -1754,28 +1773,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             y_item = y_tabla + 6
                             pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
                             for _, row_rem in df_g.iterrows():
-                                cant_v = str(row_rem.get(col_cant, 1))Te sigo perfectamente. Para que al seleccionar el proveedor en la celda correspondiente (como el recuadro rojo en la columna "Proveedor" de **image_199a89.png**) el sistema te arroje automáticamente los tiempos y condiciones, necesitas estructurar un catálogo maestro de proveedores y conectarlo a tu tabla interactiva.
-
-**Estructura del Catálogo de Proveedores**
-En tu base de datos (Google Sheets), crea una hoja dedicada exclusivamente a los proveedores con los siguientes campos:
-
-| Proveedor | Sucursal Vinculada | Condición de Pago | Días de Crédito | Tiempo Entrega (Días) |
-| :--- | :--- | :--- | :--- | :--- |
-| Hyundai Valle Oriente | San Nicolás | Credito | 30 | 5 |
-| Proveedor B | Apodaca | Contra Entrega | 0 | 2 |
-| Proveedor C | San Nicolás | Previo | 0 | 1 |
-| Proveedor D | General | Anticipo | 0 | 7 |
-
-**Lógica de Autocompletado y Filtrado Inteligente**
-Al capturar una compra en tu panel operativo, el flujo de datos debe comportarse de la siguiente manera:
-
-* **Filtro por Sucursal:** Antes de desplegar la lista de proveedores en la celda, filtra el catálogo maestro usando la variable de la sucursal actual. Así, si el siniestro pertenece a una zona específica, el menú desplegable solo mostrará opciones relevantes.
-* **Mapeo Automático (Merge):** Una vez que el usuario selecciona el proveedor, el código debe interceptar ese evento (en Streamlit, al detectar el cambio en el `AgGrid` o `data_editor`). Usa una función de búsqueda (como un `.map()` o `pd.merge()` en Pandas) para traer los valores de `Tiempo Entrega (Días)`, `Condición de Pago` y `Días de Crédito`.
-* **Inyección en Tabla:** Los valores recuperados se inyectan en las columnas correspondientes de tu tabla temporal, rellenando automáticamente la columna **Días** que se observa en tu interfaz y registrando en segundo plano la condición de pago.
-
-**Sistema de Alertas de Pago a 30 Días**
-Para automatizar el aviso del día 27, la lógica en tu módulo de cuentas por pagar debe calcular las fechas dinámicamente:
-
-* **Cálculo de Vencimiento:** `Fecha de Vencimiento = Fecha de Compra + Días de Crédito`.
-* **Condonante de Alerta:** `Alerta = Fecha Actual >= (Fecha de Vencimiento - 3 días)`.
-* **Ejecución Visual:** Aplica un formato condicional en tu dataframe. Si la fila cumple la condonante de alerta y el estatus de la factura no es "Pagado", levanta una bandera visual (un icono, texto en rojo o una tarjeta de métrica en la parte superior del dashboard) que notifique el pago inminente a ese proveedor.
+                                cant_v = str(row_rem.get(col_cant, 1))
+                                
+                                

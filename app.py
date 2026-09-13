@@ -136,7 +136,6 @@ rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 # ==============================================================================
 
 # --- DESACTIVACIÓN DEL MODO CONSULTA VIEJO ---
-# Mantenemos la variable en False para no romper la lógica interna de los siguientes bloques
 modo_consulta = False
 
 # --- NUEVAS OPCIONES DE NAVEGACIÓN ---
@@ -153,34 +152,29 @@ opciones_menu = [
 ]
 
 # --- MAQUETACIÓN DEL ENCABEZADO ---
-# Ajuste de proporciones basado en tu interfaz gráfica
 col_logo, col_menu, col_btn = st.columns([1.5, 7.5, 1])
 
 with col_logo:
-    # Se mantiene el espacio de tu logo
-    try:
-        st.image("logo.png", width=120)
-    except:
-        st.markdown("**PREMIER**")
+    try: st.image("logo.png", width=120)
+    except: st.markdown("**PREMIER**")
 
 with col_menu:
-    # El radio button horizontal es el que genera tus "pestañas"
-    vista_actual = st.radio(
-        "Navegación", 
-        opciones_menu, 
-        horizontal=True, 
-        label_visibility="collapsed"
-    )
+    vista_actual = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
 
 with col_btn:
-    # El botón Guardar se mantiene a la derecha
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
 
-# --- LÍNEA DIVISORIA ESTÉTICA ---
 st.markdown("---")
 
-# --- SELECTOR DE ASEGURADORA (Para que el Bloque 3 funcione correctamente) ---
-aseguradora_sel = st.selectbox("Selecciona la Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
+# --- SALVAVIDAS ANTI-CRASH (Recuperar variables de sesión) ---
+usuario_activo = st.session_state.get('usuario_actual', 'Usuario')
+permiso_edicion = st.session_state.get('permiso_edicion', True)
+
+# --- SELECTOR INTELIGENTE (Desaparece en modo Consulta) ---
+if vista_actual != "🔍 Consultas":
+    aseguradora_sel = st.selectbox("Selecciona la Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
+else:
+    aseguradora_sel = "MULTI" # Valor fantasma para que no marque error, Consultas busca en toda la base.
 
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -369,7 +363,8 @@ if not modo_consulta:
         if col_estatus and not df_trabajo_completo.empty:
             pendientes_surtido = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"])
             if pendientes_surtido > 0:
-                primer_nombre = nombre_usuario.split()[0] if nombre_usuario else "Usuario"
+                # CORRECCIÓN DE LA VARIABLE DE USUARIO:
+                primer_nombre = str(usuario_activo).split()[0] if usuario_activo else "Usuario"
                 st.markdown(f'<div class="alerta-flash alerta-info">🎯 <strong>¡Hola {primer_nombre}!</strong> Hay <strong>{pendientes_surtido}</strong> pedido(s) confirmado(s) esperando a ser comprados/surtidos.</div>', unsafe_allow_html=True)
 
 if vista_actual == "📊 Analítico":
@@ -674,14 +669,13 @@ elif vista_actual == "⚙️ Panel Operativo":
                             
                             config_pedidos = base_config.copy()
                             
-                            # --- MEJORA UX: PROVEEDOR COMO SELECTOR INTELIGENTE ---
                             config_pedidos.update({ 
                                 col_asignacion: st.column_config.TextColumn("Asig. (Doble clic p/editar)"),
                                 col_vencimiento: st.column_config.TextColumn("Venc. (Doble clic p/editar)"),
                                 "Pedido": st.column_config.CheckboxColumn("🛒 Ped"), 
                                 "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), 
                                 "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="$ %.2f"), 
-                                "ETA (Días)": st.column_config.NumberColumn("⏳ Días", step=1, disabled=True), # Se auto-llena
+                                "ETA (Días)": st.column_config.NumberColumn("⏳ Días", step=1, disabled=True), 
                                 "Entregado": st.column_config.CheckboxColumn("🚚 Ent"), 
                                 "Recibido": st.column_config.CheckboxColumn("🏁 Rec"), 
                                 "Cancelar": st.column_config.CheckboxColumn("🚫 Can") 
@@ -711,15 +705,6 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_recoleccion.empty:
             cols_rec = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_recoleccion.columns]
             st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
-
-    if modo_consulta:
-        df_archivo = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("FACTURADO|CANCELADO")].copy() if col_estatus else pd.DataFrame()
-        with st.expander(f"🗄️ Archivo Histórico (Facturados y Cancelados) | {len(df_archivo)} Partida(s)", expanded=False):
-            if not df_archivo.empty:
-                cols_hist = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios, col_remision, col_guia] if c in df_archivo.columns]
-                st.dataframe(df_archivo[cols_hist], column_config=base_config, hide_index=True, use_container_width=True)
-            else:
-                st.info("No hay registros facturados ni cancelados en esta aseguradora.")
 
 # ==============================================================================
 # === [BLOQUE 6: VISTA 3 - COMPRAS] ===

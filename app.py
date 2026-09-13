@@ -769,6 +769,20 @@ elif vista_actual == "⚙️ Panel Operativo":
 if vista_actual == "🛒 Compras":
     st.markdown("### 🛒 Panel de Compras (Gestión y Pagos)")
     
+    # 1. Normalizar catálogo de proveedores (Corrector automático)
+    if not df_proveedores.empty:
+        def normalizar_pago(val):
+            v = str(val).strip().upper()
+            if 'PREV' in v: return 'Previo'
+            if 'ANTIC' in v: return 'Anticipo'
+            if 'CONTRA' in v: return 'Contra Entrega'
+            if 'CRED' in v or 'CRÉD' in v: return 'Crédito'
+            if 'PLAT' in v: return 'Plataforma'
+            return str(val).strip()
+            
+        if 'Condición Pago' in df_proveedores.columns:
+            df_proveedores['Condición Pago'] = df_proveedores['Condición Pago'].apply(normalizar_pago)
+
     if not df_compras.empty:
         df_c = df_compras.copy()
         
@@ -794,6 +808,42 @@ if vista_actual == "🛒 Compras":
             else:
                 df_c['Cancelar Compra'] = False
                 
+                # --- AUTO-REPARADOR MÁGICO PARA COMPRAS VIEJAS ---
+                if not df_proveedores.empty:
+                    dict_provs = {}
+                    for _, rp in df_proveedores.iterrows():
+                        p_n = str(rp.get('Proveedor', '')).strip().upper()
+                        s_n = str(rp.get('Sucursal', '')).strip().upper()
+                        llave_full = f"{p_n} - {s_n}" if s_n else p_n
+                        
+                        t_str = str(rp.get('Tiempo de Entrega', '')).upper()
+                        nums = re.findall(r'\d+', t_str)
+                        eta_v = nums[-1] if nums else "0"
+                        
+                        cond_v = str(rp.get('Condición Pago', '')).strip().title()
+                        dias_v = str(rp.get('Días Crédito', '0')).strip()
+                        
+                        dict_provs[llave_full] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v}
+                        dict_provs[p_n] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v} # Alias corto
+
+                    for idx, r_c in df_c.iterrows():
+                        prov_actual = str(r_c.get('Proveedor', '')).strip().upper()
+                        if prov_actual in dict_provs:
+                            datos_p = dict_provs[prov_actual]
+                            
+                            eta_actual = pd.to_numeric(r_c.get('Tiempo Entrega (Días)', 0), errors='coerce')
+                            if pd.isna(eta_actual) or eta_actual == 0:
+                                df_c.at[idx, 'Tiempo Entrega (Días)'] = datos_p['eta']
+                                
+                            cond_actual = str(r_c.get('Condición Pago', '')).strip().title()
+                            if cond_actual in ['', 'None', 'Nan']:
+                                df_c.at[idx, 'Condición Pago'] = datos_p['cond']
+                                
+                            dias_actual = pd.to_numeric(r_c.get('Días Crédito', 0), errors='coerce')
+                            if pd.isna(dias_actual) or dias_actual == 0:
+                                df_c.at[idx, 'Días Crédito'] = datos_p['dias']
+                # --------------------------------------------------
+
                 def parse_spanish_date(d_str):
                     if pd.isna(d_str) or str(d_str).strip() == '': return pd.NaT
                     d_str = str(d_str).lower().replace('-', '/') 
@@ -917,18 +967,6 @@ if vista_actual == "🛒 Compras":
     # ==============================================================================
     st.markdown("---")
     st.markdown("#### 🏢 Directorio de Proveedores")
-    
-    try:
-        doc_prov = init_connection()
-        ws_prov = doc_prov.worksheet("BD_PROVEEDORES")
-        datos_prov = ws_prov.get_all_values()
-        if datos_prov:
-            headers_prov = [str(h).strip() for h in datos_prov[0]]
-            df_proveedores = pd.DataFrame(datos_prov[1:], columns=headers_prov)
-        else:
-            df_proveedores = pd.DataFrame()
-    except Exception:
-        df_proveedores = pd.DataFrame()
 
     if permiso_edicion:
         with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
@@ -970,24 +1008,9 @@ if vista_actual == "🛒 Compras":
     if not df_proveedores.empty:
         df_prov_disp = df_proveedores.copy()
         
-        # --- AUTO-CORRECTOR DE ESTATUS PARA LA TABLA ---
-        def normalizar_pago(val):
-            v = str(val).strip().upper()
-            if 'PREV' in v: return 'Previo'
-            if 'ANTIC' in v: return 'Anticipo'
-            if 'CONTRA' in v: return 'Contra Entrega'
-            if 'CRED' in v or 'CRÉD' in v: return 'Crédito'
-            if 'PLAT' in v: return 'Plataforma'
-            return str(val).strip()
-            
-        if 'Condición Pago' in df_prov_disp.columns:
-            df_prov_disp['Condición Pago'] = df_prov_disp['Condición Pago'].apply(normalizar_pago)
-
         for c in df_prov_disp.columns:
             df_prov_disp[c] = df_prov_disp[c].fillna("").astype(str).replace(['nan', 'None'], '')
         
-        # --- MENÚ DESPLEGABLE DE PAGO (SELECTBOX) ---
-        opciones_pago_prov = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
         config_prov = {
             'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
             'Sucursal': st.column_config.TextColumn("Sucursal", width="medium"),
@@ -996,84 +1019,8 @@ if vista_actual == "🛒 Compras":
             'Contacto': st.column_config.TextColumn("Contacto", width="medium"),
             'Teléfono': st.column_config.TextColumn("Teléfono", width="medium"),
             'Correo': st.column_config.TextColumn("Correo", width="medium"),
-            'Condición Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago_prov, width="medium"),
+            'Condición Pago': st.column_config.SelectboxColumn("Cond. Pago", options=["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"], width="medium"),
             'Días Crédito': st.column_config.TextColumn("Días Cr.", width="small")
-        }
-        
-        if permiso_edicion:
-            st.data_editor(df_prov_disp, num_rows="dynamic", column_config=config_prov, use_container_width=True, hide_index=True, key="ed_prov")
-        else:
-            st.dataframe(df_prov_disp, column_config=config_prov, use_container_width=True, hide_index=True)
-    else:
-        st.info("El directorio de proveedores está vacío.")
-
-    # ==============================================================================
-    # --- SECCIÓN: DIRECTORIO DE PROVEEDORES ---
-    # ==============================================================================
-    st.markdown("---")
-    st.markdown("#### 🏢 Directorio de Proveedores")
-    
-    try:
-        doc_prov = init_connection()
-        ws_prov = doc_prov.worksheet("BD_PROVEEDORES")
-        datos_prov = ws_prov.get_all_values()
-        if datos_prov:
-            headers_prov = [str(h).strip() for h in datos_prov[0]]
-            df_proveedores = pd.DataFrame(datos_prov[1:], columns=headers_prov)
-        else:
-            df_proveedores = pd.DataFrame()
-    except Exception:
-        df_proveedores = pd.DataFrame()
-
-    if permiso_edicion:
-        with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
-            with st.form("form_nuevo_proveedor", clear_on_submit=True):
-                col_p1, col_p2, col_p3 = st.columns(3)
-                n_prov = col_p1.text_input("Proveedor * (Obligatorio)")
-                n_suc = col_p2.text_input("Sucursal")
-                n_tiempo = col_p3.text_input("Tiempo de Entrega (Ej. 5 A 7 DÍAS)")
-                
-                n_dir = st.text_input("Dirección")
-                
-                col_p4, col_p5, col_p6 = st.columns(3)
-                n_contacto = col_p4.text_input("Contacto")
-                n_tel = col_p5.text_input("Teléfono")
-                n_correo = col_p6.text_input("Correo")
-                
-                col_p7, col_p8, _ = st.columns([1, 1, 2])
-                n_cond = col_p7.selectbox("Condición Pago", ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"])
-                n_dias = col_p8.text_input("Días Crédito")
-                
-                if st.form_submit_button("💾 Guardar Proveedor"):
-                    if n_prov.strip() == "":
-                        st.error("❌ El nombre del Proveedor es obligatorio.")
-                    else:
-                        try:
-                            doc = init_connection()
-                            ws_p = doc.worksheet("BD_PROVEEDORES")
-                            ws_p.append_row([
-                                n_prov.upper(), n_suc.upper(), n_dir.upper(), n_tiempo.upper(), 
-                                n_contacto.upper(), n_tel, n_correo, n_cond, n_dias
-                            ], value_input_option='USER_ENTERED')
-                            st.success(f"✅ Proveedor '{n_prov}' agregado exitosamente.")
-                            st.cache_data.clear()
-                            time.sleep(1)
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error al guardar el proveedor: {e}")
-
-    if not df_proveedores.empty:
-        df_prov_disp = df_proveedores.copy()
-        for c in df_prov_disp.columns:
-            df_prov_disp[c] = df_prov_disp[c].fillna("").astype(str).replace(['nan', 'None'], '')
-        
-        # --- MEJORA UX: EXPANSIÓN DEL DIRECTORIO ---
-        config_prov = {
-            'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
-            'Sucursal': st.column_config.TextColumn("Sucursal", width="medium"),
-            'Dirección': st.column_config.TextColumn("Dirección", width="large"),
-            'Contacto': st.column_config.TextColumn("Contacto", width="medium"),
-            'Correo': st.column_config.TextColumn("Correo", width="medium")
         }
         
         if permiso_edicion:

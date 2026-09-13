@@ -800,26 +800,60 @@ if vista_actual == "🛒 Compras":
                 return '⚪ Configurar Pago'
                 
             df_c['Alerta Financiera'] = df_c.apply(calc_alerta, axis=1)
+
+            # --- CONSTRUCTOR DEL AUTO CORTO (Ej. RIO 2018) ---
+            def formato_auto_corto(v):
+                if pd.isna(v) or not str(v).strip() or str(v).lower() == 'nan': return ""
+                partes = str(v).split('|')
+                marca_modelo = partes[0].strip()
+                ano = partes[1].strip() if len(partes) > 1 else ""
+                
+                # Quitar la marca (primera palabra) para dejar solo el modelo
+                palabras = marca_modelo.split()
+                modelo = " ".join(palabras[1:]) if len(palabras) > 1 else marca_modelo
+                return f"{modelo} {ano}".strip()
             
-            # --- ELIMINADA LA COLUMNA DE REMISIÓN ---
-            cols_mostrar = ['Siniestro', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Tiempo Entrega (Días)', 'Llegada Est.', 'Condición Pago', 'Días Crédito', 'Alerta Financiera', 'Estatus Pago', 'Recibido_Bool', 'Cancelar Compra']
+            # Se aplica el formato corto a la columna Vehículo (si existe, si no, genera vacío)
+            df_c['Vehículo_Corto'] = df_c.get('Vehículo', pd.Series([""]*len(df_c))).apply(formato_auto_corto)
+            
+            # --- NUEVO ORDEN DE COLUMNAS ---
+            cols_mostrar = [
+                'Siniestro', 'Vehículo_Corto', 'Taller', 'Descripción Pieza', 
+                'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 
+                'Condición Pago', 'Días Crédito', 'Estatus Pago', 
+                'Recibido_Bool', 'Cancelar Compra', 'Alerta Financiera'
+            ]
+            
             df_disp = df_c[[c for c in cols_mostrar if c in df_c.columns]].copy()
             
-            df_disp.rename(columns={'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'Tiempo Entrega (Días)': 'ETA(Días)', 'Recibido_Bool': 'Recibido', 'Estatus Pago': 'Pago', 'Condición Pago': 'Cond. Pago', 'Días Crédito': 'Días Cr.'}, inplace=True)
+            df_disp.rename(columns={
+                'Vehículo_Corto': 'Auto',
+                'Taller': 'CDR',
+                'Descripción Pieza': 'Pieza', 
+                'Costo Compra': 'Costo', 
+                'ETA (Días)': 'ETA(Días)', 
+                'Recibido_Bool': 'Recibido', 
+                'Estatus Pago': 'Pago', 
+                'Condición Pago': 'Cond. Pago', 
+                'Días Crédito': 'Días Cr.'
+            }, inplace=True)
             
             if not modo_consulta and permiso_edicion:
                 config_c = {
                     'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True),
+                    'Auto': st.column_config.TextColumn("Auto", disabled=True),
+                    'CDR': st.column_config.TextColumn("CDR", disabled=True),
                     'Pieza': st.column_config.TextColumn("Pieza", disabled=True),
-                    'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
-                    'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True),
+                    'Proveedor': st.column_config.TextColumn("Proveedor"), # --- RESTAURADO COMO EDITABLE ---
                     'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f"),
                     'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1),
+                    'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
                     'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=["", "Contado", "Crédito", "Plataforma"]),
                     'Días Cr.': st.column_config.NumberColumn("Días Cr.", step=1),
                     'Pago': st.column_config.SelectboxColumn("Pago", options=["", "Pendiente", "Pagado", "En Aclaración"]),
                     'Recibido': st.column_config.CheckboxColumn("🏁 Recibido"),
-                    'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar")
+                    'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar"),
+                    'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True)
                 }
                 
                 df_editado_compras = st.data_editor(
@@ -830,7 +864,16 @@ if vista_actual == "🛒 Compras":
                     key="ed_compras_main"
                 )
                 
-                df_editado_compras.rename(columns={'Pieza': 'Descripción Pieza', 'Costo': 'Costo Compra', 'ETA(Días)': 'Tiempo Entrega (Días)', 'Cond. Pago': 'Condición Pago', 'Días Cr.': 'Días Crédito', 'Pago': 'Estatus Pago'}, inplace=True)
+                df_editado_compras.rename(columns={
+                    'Auto': 'Vehículo_Corto',
+                    'CDR': 'Taller',
+                    'Pieza': 'Descripción Pieza', 
+                    'Costo': 'Costo Compra', 
+                    'ETA(Días)': 'Tiempo Entrega (Días)', 
+                    'Cond. Pago': 'Condición Pago', 
+                    'Días Cr.': 'Días Crédito', 
+                    'Pago': 'Estatus Pago'
+                }, inplace=True)
                 st.session_state['df_editado_compras_temp'] = df_editado_compras
             else:
                 st.dataframe(df_disp, hide_index=True, use_container_width=True)

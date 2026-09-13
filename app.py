@@ -138,7 +138,7 @@ rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 # --- DESACTIVACIÓN DEL MODO CONSULTA VIEJO ---
 modo_consulta = False
 
-# --- NUEVAS OPCIONES DE NAVEGACIÓN ---
+# --- NUEVAS OPCIONES DE NAVEGACIÓN (Ordenadas) ---
 opciones_menu = [
     "📊 Analítico", 
     "⚙️ Panel Operativo", 
@@ -147,8 +147,8 @@ opciones_menu = [
     "📦 Inventario", 
     "📝 Remisiones", 
     "🧾 Facturación", 
-    "🛠️ Cuartel General",
-    "🔍 Consultas"
+    "🔍 Consultas",
+    "🛠️ Cuartel General" # <--- Movido exactamente al final
 ]
 
 # --- MAQUETACIÓN DEL ENCABEZADO ---
@@ -174,7 +174,7 @@ permiso_edicion = st.session_state.get('permiso_edicion', True)
 if vista_actual != "🔍 Consultas":
     aseguradora_sel = st.selectbox("Selecciona la Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
 else:
-    aseguradora_sel = "MULTI" # Valor fantasma para que no marque error, Consultas busca en toda la base.
+    aseguradora_sel = "MULTI"
 
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -1904,3 +1904,32 @@ if vista_actual == "🔍 Consultas":
 
     elif len(query) > 0:
         st.caption("Escribe al menos 3 caracteres para activar el motor de búsqueda profunda...")
+
+# ==============================================================================
+# === [BLOQUE 11: CUARTEL GENERAL] ===
+# ==============================================================================
+if vista_actual == "🛠️ Cuartel General":
+    st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")
+    st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, reimpresiones y rutas locales.")
+    
+    col_c1, col_c2 = st.columns(2)
+    
+    with col_c1:
+        st.markdown("#### 🚧 Próximas Implementaciones:")
+        st.checkbox("Bóveda de Reimpresión de PDFs en Drive", value=False, disabled=True)
+        st.checkbox("Ruta de Escape Local (Offline DB)", value=False, disabled=True)
+        st.checkbox("Pantalla de Ruta Local para Don Dionicio", value=False, disabled=True)
+        st.checkbox("Módulo de Paquetería", value=False, disabled=True)
+        st.caption("_Nota: Estas casillas están deshabilitadas a propósito porque son nuestro 'Mapa de Ruta' de futuras actualizaciones, no funciones operativas (todavía)._")
+        
+    with col_c2:
+        st.markdown("#### 🐛 Reporte rápido de Bugs / Ideas:")
+        
+        # Recuperar nota si ya existe en la sesión
+        nota_actual = st.session_state.get('notas_cuartel', "Solo dejo este mensaje de prueba...\npor lo pronto, veo que las remisiones ya estan unificadas... no se si son todas las que deberian estar, faltan o sobran.\n\npor que estan deshabilitadas las casillas que tenemos a la izquierda?")
+        
+        nueva_nota = st.text_area("Anota aquí fallos o ideas urgentes para no perderlas de radar:", value=nota_actual, height=150)
+        
+        if st.button("Guardar Nota"):
+            st.session_state['notas_cuartel'] = nueva_nota
+            st.success("✅ Nota guardada en la memoria temporal.")

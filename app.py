@@ -246,7 +246,6 @@ def obtener_dataframe(nombre_hoja, silent=False):
 def cargar_datos():
     df_uni = obtener_dataframe("BD_UNIFICADA")
     df_comp = obtener_dataframe("BD_COMPRAS", silent=True)
-    
     df_cat = obtener_dataframe("BD_TALLERES", silent=True)
     if df_cat.empty: df_cat = obtener_dataframe("Catálogo", silent=True)
         
@@ -255,13 +254,17 @@ def cargar_datos():
         if not df_inv.empty and 'Sin Existencia' in df_inv.columns:
             df_inv['Sin Existencia'] = df_inv['Sin Existencia'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'X', 'V', 'VERDADERO'])
     except: df_inv = pd.DataFrame()
+    
+    # --- CARGA GLOBAL DEL DIRECTORIO DE PROVEEDORES ---
+    df_prov = obtener_dataframe("BD_PROVEEDORES", silent=True)
         
     if not df_uni.empty:
         if 'Siniestro Relacionado' in df_uni.columns: df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
             
-    return df_uni, df_comp, df_cat, df_inv
+    return df_uni, df_comp, df_cat, df_inv, df_prov
 
-df_completo, df_compras, df_catalogo, df_inventario = cargar_datos()
+# --- EXTRACCIÓN DE LAS 5 BASES ---
+df_completo, df_compras, df_catalogo, df_inventario, df_proveedores = cargar_datos()
 
 aseguradora_filtro = aseguradora_sel.strip().upper()
 palabra_clave_aseg = "MULTI" if "MULTI" in aseguradora_filtro else "GNP"
@@ -278,7 +281,6 @@ if not df_trabajo_completo.empty:
     col_id = next((c for c in df_trabajo_completo.columns if "SINIESTRO" in str(c).upper()), None)
     col_taller = next((c for c in df_trabajo_completo.columns if "TALLER" in str(c).upper()), None)
     
-    # --- ESCUDO ANTI-BASURA MASIVO ---
     if col_id and col_taller:
         df_trabajo_completo = df_trabajo_completo[df_trabajo_completo[col_id].astype(str).str.strip() != '']
         df_trabajo_completo = df_trabajo_completo[~df_trabajo_completo[col_id].astype(str).str.contains(r'[-_]{2,}')]
@@ -300,7 +302,6 @@ if not df_trabajo_completo.empty:
     col_comentarios = next((c for c in df_trabajo_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
     col_aseg = col_aseg_val
 
-    # --- ESTANDARIZADOR DE FECHAS UNIVERSAL (11/sep/26) ---
     def estandarizar_fechas_mx(fecha_val):
         if pd.isna(fecha_val) or str(fecha_val).strip() in ['', 'None', 'nan', 'NaT']: return ""
         d_str = str(fecha_val).strip().lower().replace('-', '/')
@@ -326,7 +327,6 @@ if not df_trabajo_completo.empty:
         if c and c in df_trabajo_completo.columns:
             df_trabajo_completo[c] = df_trabajo_completo[c].apply(estandarizar_fechas_mx)
 
-    # --- FORMATO DE VEHÍCULO LIMPIO (MARCA MODELO | AÑO | VIN) ---
     def armar_vehiculo(row):
         m = str(row.get(col_marca, '')).strip().upper()
         mod = str(row.get(col_modelo, '')).strip().upper()
@@ -349,7 +349,6 @@ if not df_trabajo_completo.empty:
     
     df_trabajo = df_trabajo_completo.copy()
     
-    # --- MODO CONSULTA HISTÓRICA ---
     if modo_consulta:
         df_proceso = df_trabajo.copy()
     else:
@@ -371,7 +370,16 @@ df_editado_cobro = pd.DataFrame()
 df_editado_fact = pd.DataFrame()
 df_editado = pd.DataFrame()
 
-# --- MEJORA UX: ANIMACIÓN DE ALERTAS (3 Destellos y estático) ---
+# --- PREPARAR LISTA INTELIGENTE DE PROVEEDORES ---
+lista_proveedores = [""]
+if not df_proveedores.empty:
+    for _, row_p in df_proveedores.iterrows():
+        p_str = str(row_p.get('Proveedor', '')).strip().upper()
+        s_str = str(row_p.get('Sucursal', '')).strip().upper()
+        if p_str:
+            lista_proveedores.append(f"{p_str} - {s_str}" if s_str else p_str)
+    lista_proveedores = sorted(list(set(lista_proveedores)))
+
 st.markdown("""
     <style>
     @keyframes destello_alerta {
@@ -399,7 +407,6 @@ if not modo_consulta:
             if pendientes_bot > 0:
                 st.markdown(f'<div class="alerta-flash alerta-warning">🚨 <strong>¡ATENCIÓN!</strong> Han ingresado <strong>{pendientes_bot}</strong> pedido(s) nuevo(s) por confirmar.</div>', unsafe_allow_html=True)
 
-    # --- CORRECCIÓN: La alerta de compras ahora es visible para Administradores y Operadores ---
     if vista_actual in ["⚙️ Panel Operativo", "🛒 Compras"]:
         if col_estatus and not df_trabajo_completo.empty:
             pendientes_surtido = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"])
@@ -708,13 +715,15 @@ elif vista_actual == "⚙️ Panel Operativo":
                             orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_checkbox
                             
                             config_pedidos = base_config.copy()
+                            
+                            # --- MEJORA UX: PROVEEDOR COMO SELECTOR INTELIGENTE ---
                             config_pedidos.update({ 
                                 col_asignacion: st.column_config.TextColumn("Asig. (Doble clic p/editar)"),
                                 col_vencimiento: st.column_config.TextColumn("Venc. (Doble clic p/editar)"),
                                 "Pedido": st.column_config.CheckboxColumn("🛒 Ped"), 
-                                "Proveedor": st.column_config.TextColumn("🏢 Proveedor"), 
+                                "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), 
                                 "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="$ %.2f"), 
-                                "ETA (Días)": st.column_config.NumberColumn("⏳ Días", step=1),
+                                "ETA (Días)": st.column_config.NumberColumn("⏳ Días", step=1, disabled=True), # Se auto-llena
                                 "Entregado": st.column_config.CheckboxColumn("🚚 Ent"), 
                                 "Recibido": st.column_config.CheckboxColumn("🏁 Rec"), 
                                 "Cancelar": st.column_config.CheckboxColumn("🚫 Can") 
@@ -792,36 +801,44 @@ if vista_actual == "🛒 Compras":
             df_c['Llegada_Calculada'] = df_c['Fecha_Compra_Dt'] + pd.to_timedelta(df_c['ETA (Días)'], unit='d')
             df_c['Llegada Est.'] = df_c['Llegada_Calculada'].dt.strftime('%d/%b/%y').fillna('-')
             
-            df_c['Días Crédito'] = pd.to_numeric(df_c.get('Días Crédito', 0), errors='coerce').fillna(0)
+            # --- NUEVA LÓGICA DE ALERTA FINANCIERA (Aviso 3 días antes) ---
+            tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+            hoy_dt_alert = pd.to_datetime(datetime.datetime.now(tz_mx).date())
             
             def calc_alerta(row):
-                if row.get('Condición Pago', '') == 'Contado': return '🔴 Pago Inmediato'
-                elif row.get('Condición Pago', '') == 'Crédito': return f"🟡 Vence en {row['Días Crédito']} días"
+                cond = str(row.get('Condición Pago', '')).strip().title()
+                dias_cr = pd.to_numeric(row.get('Días Crédito', 0), errors='coerce')
+                if pd.isna(dias_cr): dias_cr = 0
+
+                if cond in ['Previo', 'Anticipo', 'Contra Entrega']:
+                    return '🔴 Pago Inmediato'
+                elif cond == 'Crédito':
+                    if pd.notna(row['Fecha_Compra_Dt']):
+                        vencimiento = row['Fecha_Compra_Dt'] + pd.to_timedelta(dias_cr, unit='d')
+                        dias_restantes = (vencimiento - hoy_dt_alert).days
+                        f_venc = vencimiento.strftime('%d/%b')
+                        if dias_restantes < 0: return f"❌ VENCIDO ({f_venc})"
+                        elif dias_restantes <= 3: return f"🟠 Vence pronto: {f_venc}"
+                        else: return f"🟢 En tiempo: {f_venc}"
+                    else: return f"🟡 Crédito {dias_cr} días"
+                elif cond == 'Plataforma':
+                    return '🔵 Pago en Plataforma'
                 return '⚪ Configurar Pago'
                 
             df_c['Alerta Financiera'] = df_c.apply(calc_alerta, axis=1)
 
-            # --- CONSTRUCTOR DEL AUTO CORTO (EXTIRPADOR DE VIN) ---
             def formato_auto_corto(v):
                 if pd.isna(v) or not str(v).strip() or str(v).lower() == 'nan': return ""
                 v_str = str(v).strip()
-                
-                # Si viene crudo con el guion del VIN (Ej. SPARK 2017 - MA6C...)
-                if ' - ' in v_str:
-                    v_str = v_str.split(' - ')[0].strip()
-                # Si viene estandarizado de la BD (Ej. KIA RIO | 2018 | 3KPF...)
+                if ' - ' in v_str: v_str = v_str.split(' - ')[0].strip()
                 elif ' | ' in v_str:
                     partes = v_str.split(' | ')
-                    if len(partes) >= 2:
-                        v_str = f"{partes[0]} {partes[1]}".strip()
-                    else:
-                        v_str = partes[0].strip()
-                        
+                    if len(partes) >= 2: v_str = f"{partes[0]} {partes[1]}".strip()
+                    else: v_str = partes[0].strip()
                 return v_str
             
             df_c['Vehículo_Corto'] = df_c.get('Vehículo', pd.Series([""]*len(df_c))).apply(formato_auto_corto)
             
-            # --- NUEVO ORDEN DE COLUMNAS (ALERTA AL FINAL) ---
             cols_mostrar = [
                 'Siniestro', 'Vehículo_Corto', 'Taller', 'Descripción Pieza', 
                 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 
@@ -844,6 +861,9 @@ if vista_actual == "🛒 Compras":
             }, inplace=True)
             
             if not modo_consulta and permiso_edicion:
+                # --- NUEVAS OPCIONES DE PAGO ---
+                opciones_pago = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
+                
                 config_c = {
                     'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True),
                     'Auto': st.column_config.TextColumn("Auto", disabled=True),
@@ -853,7 +873,7 @@ if vista_actual == "🛒 Compras":
                     'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f"),
                     'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1),
                     'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
-                    'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=["", "Contado", "Crédito", "Plataforma"]),
+                    'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago),
                     'Días Cr.': st.column_config.NumberColumn("Días Cr.", step=1),
                     'Pago': st.column_config.SelectboxColumn("Pago", options=["", "Pendiente", "Pagado", "En Aclaración"]),
                     'Recibido': st.column_config.CheckboxColumn("🏁 Recibido"),
@@ -887,25 +907,9 @@ if vista_actual == "🛒 Compras":
     else:
         st.warning("No hay datos en la base de compras.")
 
-    # ==============================================================================
-    # --- SECCIÓN: DIRECTORIO DE PROVEEDORES ---
-    # ==============================================================================
     st.markdown("---")
     st.markdown("#### 🏢 Directorio de Proveedores")
     
-    # Carga de la BD_PROVEEDORES de forma independiente
-    try:
-        doc_prov = init_connection()
-        ws_prov = doc_prov.worksheet("BD_PROVEEDORES")
-        datos_prov = ws_prov.get_all_values()
-        if datos_prov:
-            headers_prov = [str(h).strip() for h in datos_prov[0]]
-            df_proveedores = pd.DataFrame(datos_prov[1:], columns=headers_prov)
-        else:
-            df_proveedores = pd.DataFrame()
-    except Exception:
-        df_proveedores = pd.DataFrame()
-
     if permiso_edicion:
         with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
             with st.form("form_nuevo_proveedor", clear_on_submit=True):
@@ -922,7 +926,7 @@ if vista_actual == "🛒 Compras":
                 n_correo = col_p6.text_input("Correo")
                 
                 col_p7, col_p8, _ = st.columns([1, 1, 2])
-                n_cond = col_p7.selectbox("Condición Pago", ["", "Contado", "Crédito", "Plataforma"])
+                n_cond = col_p7.selectbox("Condición Pago", ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"])
                 n_dias = col_p8.text_input("Días Crédito")
                 
                 if st.form_submit_button("💾 Guardar Proveedor"):
@@ -933,15 +937,8 @@ if vista_actual == "🛒 Compras":
                             doc = init_connection()
                             ws_p = doc.worksheet("BD_PROVEEDORES")
                             ws_p.append_row([
-                                n_prov.upper(), 
-                                n_suc.upper(), 
-                                n_dir.upper(), 
-                                n_tiempo.upper(), 
-                                n_contacto.upper(), 
-                                n_tel, 
-                                n_correo, 
-                                n_cond, 
-                                n_dias
+                                n_prov.upper(), n_suc.upper(), n_dir.upper(), n_tiempo.upper(), 
+                                n_contacto.upper(), n_tel, n_correo, n_cond, n_dias
                             ], value_input_option='USER_ENTERED')
                             st.success(f"✅ Proveedor '{n_prov}' agregado exitosamente.")
                             st.cache_data.clear()
@@ -1404,8 +1401,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     except: fecha_str = str(nueva_fecha)
                     cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                     if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                elif row.get('Reasignar') and not nuevo_estatus:
-                    nuevo_estatus = "REASIGNAR" 
+                elif row.get('Reasignar') and not nuevo_estatus: nuevo_estatus = "REASIGNAR" 
                 
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
@@ -1424,8 +1420,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     except: fecha_str = str(nueva_fecha)
                     cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                     if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                elif row.get('Reasignar') and not nuevo_estatus:
-                    nuevo_estatus = "REASIGNAR" 
+                elif row.get('Reasignar') and not nuevo_estatus: nuevo_estatus = "REASIGNAR" 
                 
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
@@ -1438,8 +1433,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 if row.get('Marcar Recibido'): 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
                     cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
-                if comentario_actual != orig['comentario']: 
-                    cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
         if not df_editado_fact.empty:
             for _, row in df_editado_fact.iterrows():
@@ -1460,7 +1454,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 venc_actual = str(row.get(col_vencimiento, '')).strip()
                 asig_actual = str(row.get(col_asignacion, '')).strip()
                 
-                # --- CANDADO ESTRICTO ANTI-FANTASMA: Si dice Cancelado, se bloquea cualquier otra acción. ---
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                     if nuevo_estatus == "RECIBIDO": cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
@@ -1474,7 +1467,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
                     cambios_a_guardar[k]['compra_prov'] = str(row.get('Proveedor', '')).strip()
                     cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
-                    cambios_a_guardar[k]['compra_eta'] = str(row.get('ETA (Días)', '0')).strip()
                     cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
                     cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
 
@@ -1499,8 +1491,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         cambios_bd_compras[k]['prov'] = row.get('Proveedor', '')
                         cambios_bd_compras[k]['recibido'] = 'SI' if row.get('Recibido') else 'NO'
                         
-                        if row.get('Recibido'):
-                            cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO" 
+                        if row.get('Recibido'): cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO" 
 
     if cambios_a_guardar or cambios_bd_compras:
         with st.spinner("Sincronizando en la nube..."):
@@ -1629,11 +1620,36 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                 n_row[idx_c_desc] = k[1]
                                 n_row[i_tall] = v.get('compra_taller', '')
                                 n_row[i_veh] = v.get('compra_vehiculo', '')
-                                n_row[i_prov] = v.get('compra_prov', '')
-                                n_row[i_costo] = v.get('compra_costo', '0')
-                                n_row[i_tiempo] = v.get('compra_eta', '0')
                                 n_row[i_fcomp] = fecha_hoy_comp
                                 n_row[i_rec] = 'NO'
+                                n_row[i_costo] = v.get('compra_costo', '0')
+                                
+                                # --- AUTO-COMPLETADO MÁGICO DE PROVEEDORES ---
+                                nombre_prov_completo = str(v.get('compra_prov', '')).strip()
+                                eta_calc = "0"
+                                cond_pago_calc = ""
+                                dias_cred_calc = "0"
+                                
+                                if nombre_prov_completo and not df_proveedores.empty:
+                                    for _, row_p in df_proveedores.iterrows():
+                                        p_val = str(row_p.get('Proveedor', '')).strip().upper()
+                                        s_val = str(row_p.get('Sucursal', '')).strip().upper()
+                                        llave_p = f"{p_val} - {s_val}" if s_val else p_val
+                                        
+                                        if llave_p == nombre_prov_completo:
+                                            tiempo_str = str(row_p.get('Tiempo de Entrega', '')).upper()
+                                            numeros = re.findall(r'\d+', tiempo_str)
+                                            if numeros: eta_calc = numeros[-1]
+                                            
+                                            cond_pago_calc = str(row_p.get('Condición Pago', '')).strip().title()
+                                            dias_cred_calc = str(row_p.get('Días Crédito', '0')).strip()
+                                            break
+                                            
+                                n_row[i_prov] = nombre_prov_completo
+                                n_row[i_tiempo] = eta_calc if eta_calc else '0'
+                                n_row[i_cond_pago] = cond_pago_calc
+                                n_row[i_dias_cred] = dias_cred_calc
+                                
                                 nuevas_filas.append(n_row)
                         
                         filas_a_escribir = nuevos_datos_comp + nuevas_filas
@@ -1738,38 +1754,28 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             y_item = y_tabla + 6
                             pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
                             for _, row_rem in df_g.iterrows():
-                                cant_v = str(row_rem.get(col_cant, 1))
-                                if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
-                                pdf.set_xy(x_offset, y_item)
-                                pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C')
-                                pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
-                                y_item += 5
-                                
-                            pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)
-                            pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
+                                cant_v = str(row_rem.get(col_cant, 1))Te sigo perfectamente. Para que al seleccionar el proveedor en la celda correspondiente (como el recuadro rojo en la columna "Proveedor" de **image_199a89.png**) el sistema te arroje automáticamente los tiempos y condiciones, necesitas estructurar un catálogo maestro de proveedores y conectarlo a tu tabla interactiva.
 
-                        dibujar_bloque_remision(10)
-                        pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
-                        dibujar_bloque_remision(152)
+**Estructura del Catálogo de Proveedores**
+En tu base de datos (Google Sheets), crea una hoja dedicada exclusivamente a los proveedores con los siguientes campos:
 
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                            pdf.output(tmp.name)
-                            nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
-                            with open(tmp.name, "rb") as f: pdf_bytes = f.read()
-                            
-                            pdfs_list.append({
-                                'folio': folio_str_print,
-                                'siniestro': siniestro_v,
-                                'bytes': pdf_bytes,
-                                'nombre': nombre_archivo
-                            })
+| Proveedor | Sucursal Vinculada | Condición de Pago | Días de Crédito | Tiempo Entrega (Días) |
+| :--- | :--- | :--- | :--- | :--- |
+| Hyundai Valle Oriente | San Nicolás | Credito | 30 | 5 |
+| Proveedor B | Apodaca | Contra Entrega | 0 | 2 |
+| Proveedor C | San Nicolás | Previo | 0 | 1 |
+| Proveedor D | General | Anticipo | 0 | 7 |
 
-                    st.session_state['pdfs_list'] = pdfs_list
-                    if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
-                
-                st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅")
-                st.cache_data.clear()
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"❌ Error guardando: {e}")
+**Lógica de Autocompletado y Filtrado Inteligente**
+Al capturar una compra en tu panel operativo, el flujo de datos debe comportarse de la siguiente manera:
+
+* **Filtro por Sucursal:** Antes de desplegar la lista de proveedores en la celda, filtra el catálogo maestro usando la variable de la sucursal actual. Así, si el siniestro pertenece a una zona específica, el menú desplegable solo mostrará opciones relevantes.
+* **Mapeo Automático (Merge):** Una vez que el usuario selecciona el proveedor, el código debe interceptar ese evento (en Streamlit, al detectar el cambio en el `AgGrid` o `data_editor`). Usa una función de búsqueda (como un `.map()` o `pd.merge()` en Pandas) para traer los valores de `Tiempo Entrega (Días)`, `Condición de Pago` y `Días de Crédito`.
+* **Inyección en Tabla:** Los valores recuperados se inyectan en las columnas correspondientes de tu tabla temporal, rellenando automáticamente la columna **Días** que se observa en tu interfaz y registrando en segundo plano la condición de pago.
+
+**Sistema de Alertas de Pago a 30 Días**
+Para automatizar el aviso del día 27, la lógica en tu módulo de cuentas por pagar debe calcular las fechas dinámicamente:
+
+* **Cálculo de Vencimiento:** `Fecha de Vencimiento = Fecha de Compra + Días de Crédito`.
+* **Condonante de Alerta:** `Alerta = Fecha Actual >= (Fecha de Vencimiento - 3 días)`.
+* **Ejecución Visual:** Aplica un formato condicional en tu dataframe. Si la fila cumple la condonante de alerta y el estatus de la factura no es "Pagado", levanta una bandera visual (un icono, texto en rojo o una tarjeta de métrica en la parte superior del dashboard) que notifique el pago inminente a ese proveedor.

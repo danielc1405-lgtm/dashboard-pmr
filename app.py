@@ -866,26 +866,26 @@ if vista_actual == "🛒 Compras":
                     'Días Crédito': 'Días Cr.'
                 }, inplace=True)
                 
-                # --- MEJORA UX: FORZAR EXPANSIÓN DE ANCHOS (width="large") ---
-                opciones_pago = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
-                config_c = {
-                    'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True),
-                    'Auto': st.column_config.TextColumn("Auto", disabled=True, width="medium"),
-                    'CDR': st.column_config.TextColumn("CDR", disabled=True, width="medium"),
-                    'Pieza': st.column_config.TextColumn("Pieza", disabled=True, width="large"),
-                    'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
-                    'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f"),
-                    'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1),
-                    'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
-                    'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago, width="medium"),
-                    'Días Cr.': st.column_config.NumberColumn("Días Cr.", step=1),
-                    'Pago': st.column_config.SelectboxColumn("Pago", options=["", "Pendiente", "Pagado", "En Aclaración"], width="small"),
-                    'Recibido': st.column_config.CheckboxColumn("🏁 Recibido"),
-                    'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar"),
-                    'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True, width="medium")
-                }
-
                 if not modo_consulta and permiso_edicion:
+                    opciones_pago = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
+                    
+                    config_c = {
+                        'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True),
+                        'Auto': st.column_config.TextColumn("Auto", disabled=True, width="medium"),
+                        'CDR': st.column_config.TextColumn("CDR", disabled=True, width="medium"),
+                        'Pieza': st.column_config.TextColumn("Pieza", disabled=True, width="large"),
+                        'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
+                        'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f"),
+                        'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1),
+                        'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
+                        'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago, width="medium"),
+                        'Días Cr.': st.column_config.NumberColumn("Días Cr.", step=1),
+                        'Pago': st.column_config.SelectboxColumn("Pago", options=["", "Pendiente", "Pagado", "En Aclaración"], width="small"),
+                        'Recibido': st.column_config.CheckboxColumn("🏁 Recibido"),
+                        'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar"),
+                        'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True, width="medium")
+                    }
+                    
                     df_editado_compras = st.data_editor(
                         df_disp,
                         column_config=config_c,
@@ -906,11 +906,106 @@ if vista_actual == "🛒 Compras":
                     }, inplace=True)
                     st.session_state['df_editado_compras_temp'] = df_editado_compras
                 else:
-                    st.dataframe(df_disp, column_config=config_c, hide_index=True, use_container_width=True)
+                    st.dataframe(df_disp, hide_index=True, use_container_width=True)
         else:
             st.info("No hay pedidos en curso.")
     else:
         st.warning("No hay datos en la base de compras.")
+
+    # ==============================================================================
+    # --- SECCIÓN: DIRECTORIO DE PROVEEDORES ---
+    # ==============================================================================
+    st.markdown("---")
+    st.markdown("#### 🏢 Directorio de Proveedores")
+    
+    try:
+        doc_prov = init_connection()
+        ws_prov = doc_prov.worksheet("BD_PROVEEDORES")
+        datos_prov = ws_prov.get_all_values()
+        if datos_prov:
+            headers_prov = [str(h).strip() for h in datos_prov[0]]
+            df_proveedores = pd.DataFrame(datos_prov[1:], columns=headers_prov)
+        else:
+            df_proveedores = pd.DataFrame()
+    except Exception:
+        df_proveedores = pd.DataFrame()
+
+    if permiso_edicion:
+        with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
+            with st.form("form_nuevo_proveedor", clear_on_submit=True):
+                col_p1, col_p2, col_p3 = st.columns(3)
+                n_prov = col_p1.text_input("Proveedor * (Obligatorio)")
+                n_suc = col_p2.text_input("Sucursal")
+                n_tiempo = col_p3.text_input("Tiempo de Entrega (Ej. 5 A 7 DÍAS)")
+                
+                n_dir = st.text_input("Dirección")
+                
+                col_p4, col_p5, col_p6 = st.columns(3)
+                n_contacto = col_p4.text_input("Contacto")
+                n_tel = col_p5.text_input("Teléfono")
+                n_correo = col_p6.text_input("Correo")
+                
+                col_p7, col_p8, _ = st.columns([1, 1, 2])
+                n_cond = col_p7.selectbox("Condición Pago", ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"])
+                n_dias = col_p8.text_input("Días Crédito")
+                
+                if st.form_submit_button("💾 Guardar Proveedor"):
+                    if n_prov.strip() == "":
+                        st.error("❌ El nombre del Proveedor es obligatorio.")
+                    else:
+                        try:
+                            doc = init_connection()
+                            ws_p = doc.worksheet("BD_PROVEEDORES")
+                            ws_p.append_row([
+                                n_prov.upper(), n_suc.upper(), n_dir.upper(), n_tiempo.upper(), 
+                                n_contacto.upper(), n_tel, n_correo, n_cond, n_dias
+                            ], value_input_option='USER_ENTERED')
+                            st.success(f"✅ Proveedor '{n_prov}' agregado exitosamente.")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al guardar el proveedor: {e}")
+
+    if not df_proveedores.empty:
+        df_prov_disp = df_proveedores.copy()
+        
+        # --- AUTO-CORRECTOR DE ESTATUS PARA LA TABLA ---
+        def normalizar_pago(val):
+            v = str(val).strip().upper()
+            if 'PREV' in v: return 'Previo'
+            if 'ANTIC' in v: return 'Anticipo'
+            if 'CONTRA' in v: return 'Contra Entrega'
+            if 'CRED' in v or 'CRÉD' in v: return 'Crédito'
+            if 'PLAT' in v: return 'Plataforma'
+            return str(val).strip()
+            
+        if 'Condición Pago' in df_prov_disp.columns:
+            df_prov_disp['Condición Pago'] = df_prov_disp['Condición Pago'].apply(normalizar_pago)
+
+        for c in df_prov_disp.columns:
+            df_prov_disp[c] = df_prov_disp[c].fillna("").astype(str).replace(['nan', 'None'], '')
+        
+        # --- MENÚ DESPLEGABLE DE PAGO (SELECTBOX) ---
+        opciones_pago_prov = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
+        config_prov = {
+            'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
+            'Sucursal': st.column_config.TextColumn("Sucursal", width="medium"),
+            'Dirección': st.column_config.TextColumn("Dirección", width="large"),
+            'Tiempo de Entrega': st.column_config.TextColumn("Tiempo de Entrega", width="medium"),
+            'Contacto': st.column_config.TextColumn("Contacto", width="medium"),
+            'Teléfono': st.column_config.TextColumn("Teléfono", width="medium"),
+            'Correo': st.column_config.TextColumn("Correo", width="medium"),
+            'Condición Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago_prov, width="medium"),
+            'Días Crédito': st.column_config.TextColumn("Días Cr.", width="small")
+        }
+        
+        if permiso_edicion:
+            st.data_editor(df_prov_disp, num_rows="dynamic", column_config=config_prov, use_container_width=True, hide_index=True, key="ed_prov")
+        else:
+            st.dataframe(df_prov_disp, column_config=config_prov, use_container_width=True, hide_index=True)
+    else:
+        st.info("El directorio de proveedores está vacío.")
 
     # ==============================================================================
     # --- SECCIÓN: DIRECTORIO DE PROVEEDORES ---

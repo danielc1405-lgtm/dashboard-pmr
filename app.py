@@ -801,22 +801,27 @@ if vista_actual == "🛒 Compras":
                 
             df_c['Alerta Financiera'] = df_c.apply(calc_alerta, axis=1)
 
-            # --- CONSTRUCTOR DEL AUTO CORTO (Ej. RIO 2018) ---
+            # --- CONSTRUCTOR DEL AUTO CORTO (EXTIRPADOR DE VIN) ---
             def formato_auto_corto(v):
                 if pd.isna(v) or not str(v).strip() or str(v).lower() == 'nan': return ""
-                partes = str(v).split('|')
-                marca_modelo = partes[0].strip()
-                ano = partes[1].strip() if len(partes) > 1 else ""
+                v_str = str(v).strip()
                 
-                # Quitar la marca (primera palabra) para dejar solo el modelo
-                palabras = marca_modelo.split()
-                modelo = " ".join(palabras[1:]) if len(palabras) > 1 else marca_modelo
-                return f"{modelo} {ano}".strip()
+                # Si viene crudo con el guion del VIN (Ej. SPARK 2017 - MA6C...)
+                if ' - ' in v_str:
+                    v_str = v_str.split(' - ')[0].strip()
+                # Si viene estandarizado de la BD (Ej. KIA RIO | 2018 | 3KPF...)
+                elif ' | ' in v_str:
+                    partes = v_str.split(' | ')
+                    if len(partes) >= 2:
+                        v_str = f"{partes[0]} {partes[1]}".strip()
+                    else:
+                        v_str = partes[0].strip()
+                        
+                return v_str
             
-            # Se aplica el formato corto a la columna Vehículo (si existe, si no, genera vacío)
             df_c['Vehículo_Corto'] = df_c.get('Vehículo', pd.Series([""]*len(df_c))).apply(formato_auto_corto)
             
-            # --- NUEVO ORDEN DE COLUMNAS ---
+            # --- NUEVO ORDEN DE COLUMNAS (ALERTA AL FINAL) ---
             cols_mostrar = [
                 'Siniestro', 'Vehículo_Corto', 'Taller', 'Descripción Pieza', 
                 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 
@@ -844,7 +849,7 @@ if vista_actual == "🛒 Compras":
                     'Auto': st.column_config.TextColumn("Auto", disabled=True),
                     'CDR': st.column_config.TextColumn("CDR", disabled=True),
                     'Pieza': st.column_config.TextColumn("Pieza", disabled=True),
-                    'Proveedor': st.column_config.TextColumn("Proveedor"), # --- RESTAURADO COMO EDITABLE ---
+                    'Proveedor': st.column_config.TextColumn("Proveedor"),
                     'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f"),
                     'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1),
                     'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
@@ -880,7 +885,82 @@ if vista_actual == "🛒 Compras":
         else:
             st.info("No hay pedidos en curso.")
     else:
-        st.warning("No hay datos en la base de compras.")   
+        st.warning("No hay datos en la base de compras.")
+
+    # ==============================================================================
+    # --- SECCIÓN: DIRECTORIO DE PROVEEDORES ---
+    # ==============================================================================
+    st.markdown("---")
+    st.markdown("#### 🏢 Directorio de Proveedores")
+    
+    # Carga de la BD_PROVEEDORES de forma independiente
+    try:
+        doc_prov = init_connection()
+        ws_prov = doc_prov.worksheet("BD_PROVEEDORES")
+        datos_prov = ws_prov.get_all_values()
+        if datos_prov:
+            headers_prov = [str(h).strip() for h in datos_prov[0]]
+            df_proveedores = pd.DataFrame(datos_prov[1:], columns=headers_prov)
+        else:
+            df_proveedores = pd.DataFrame()
+    except Exception:
+        df_proveedores = pd.DataFrame()
+
+    if permiso_edicion:
+        with st.expander("➕ Registrar Nuevo Proveedor", expanded=False):
+            with st.form("form_nuevo_proveedor", clear_on_submit=True):
+                col_p1, col_p2, col_p3 = st.columns(3)
+                n_prov = col_p1.text_input("Proveedor * (Obligatorio)")
+                n_suc = col_p2.text_input("Sucursal")
+                n_tiempo = col_p3.text_input("Tiempo de Entrega (Ej. 5 A 7 DÍAS)")
+                
+                n_dir = st.text_input("Dirección")
+                
+                col_p4, col_p5, col_p6 = st.columns(3)
+                n_contacto = col_p4.text_input("Contacto")
+                n_tel = col_p5.text_input("Teléfono")
+                n_correo = col_p6.text_input("Correo")
+                
+                col_p7, col_p8, _ = st.columns([1, 1, 2])
+                n_cond = col_p7.selectbox("Condición Pago", ["", "Contado", "Crédito", "Plataforma"])
+                n_dias = col_p8.text_input("Días Crédito")
+                
+                if st.form_submit_button("💾 Guardar Proveedor"):
+                    if n_prov.strip() == "":
+                        st.error("❌ El nombre del Proveedor es obligatorio.")
+                    else:
+                        try:
+                            doc = init_connection()
+                            ws_p = doc.worksheet("BD_PROVEEDORES")
+                            ws_p.append_row([
+                                n_prov.upper(), 
+                                n_suc.upper(), 
+                                n_dir.upper(), 
+                                n_tiempo.upper(), 
+                                n_contacto.upper(), 
+                                n_tel, 
+                                n_correo, 
+                                n_cond, 
+                                n_dias
+                            ], value_input_option='USER_ENTERED')
+                            st.success(f"✅ Proveedor '{n_prov}' agregado exitosamente.")
+                            st.cache_data.clear()
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al guardar el proveedor: {e}")
+
+    if not df_proveedores.empty:
+        df_prov_disp = df_proveedores.copy()
+        for c in df_prov_disp.columns:
+            df_prov_disp[c] = df_prov_disp[c].fillna("").astype(str).replace(['nan', 'None'], '')
+        
+        if permiso_edicion:
+            st.data_editor(df_prov_disp, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_prov")
+        else:
+            st.dataframe(df_prov_disp, use_container_width=True, hide_index=True)
+    else:
+        st.info("El directorio de proveedores está vacío.")   
 
 # ==============================================================================
 # === [BLOQUE 7: VISTAS 4 Y 5 - TALLERES E INVENTARIO] ===

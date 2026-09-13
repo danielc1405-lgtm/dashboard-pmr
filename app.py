@@ -178,7 +178,7 @@ with col_btn:
 
 # --- LÍNEA DIVISORIA ESTÉTICA ---
 st.markdown("---")
-    st.stop()
+st.stop()
 
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===

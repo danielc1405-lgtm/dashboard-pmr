@@ -371,17 +371,45 @@ df_editado_cobro = pd.DataFrame()
 df_editado_fact = pd.DataFrame()
 df_editado = pd.DataFrame()
 
-if not modo_consulta:
-    if col_estatus and not df_trabajo_completo.empty:
-        pendientes_bot = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")])
-        if pendientes_bot > 0:
-            st.warning(f"🚨 **¡ATENCIÓN!** Han ingresado **{pendientes_bot}** pedido(s) nuevo(s) por confirmar. Revisa el Panel Operativo.", icon="🚨")
+# --- MEJORA UX: ANIMACIÓN DE ALERTAS (3 Destellos y estático) ---
+st.markdown("""
+    <style>
+    @keyframes destello_alerta {
+        0% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.3; transform: scale(0.99); }
+        100% { opacity: 1; transform: scale(1); }
+    }
+    .alerta-flash {
+        animation: destello_alerta 0.7s ease-in-out 3; /* Dura 0.7s y se repite 3 veces */
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1rem;
+        color: white;
+        font-size: 1rem;
+    }
+    .alerta-warning {
+        background-color: rgba(255, 170, 0, 0.2);
+        border-left: 5px solid #ffaa00;
+    }
+    .alerta-info {
+        background-color: rgba(0, 174, 239, 0.2);
+        border-left: 5px solid #00AEEF;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-    if "MARCO" in usuario_activo:
+if not modo_consulta:
+    if vista_actual == "⚙️ Panel Operativo":
+        if col_estatus and not df_trabajo_completo.empty:
+            pendientes_bot = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")])
+            if pendientes_bot > 0:
+                st.markdown(f'<div class="alerta-flash alerta-warning">🚨 <strong>¡ATENCIÓN!</strong> Han ingresado <strong>{pendientes_bot}</strong> pedido(s) nuevo(s) por confirmar. Revisa el Panel Operativo.</div>', unsafe_allow_html=True)
+
+    if vista_actual in ["⚙️ Panel Operativo", "🛒 Compras"] and "MARCO" in nombre_usuario.upper():
         if col_estatus and not df_trabajo_completo.empty:
             pendientes_surtido = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"])
             if pendientes_surtido > 0:
-                st.warning(f"🎯 **¡Hola Marco!** Tienes **{pendientes_surtido}** pedido(s) confirmado(s) esperando a ser comprados/surtidos.", icon="🎯")
+                st.markdown(f'<div class="alerta-flash alerta-info">🎯 <strong>¡Hola Marco!</strong> Tienes <strong>{pendientes_surtido}</strong> pedido(s) confirmado(s) esperando a ser comprados/surtidos.</div>', unsafe_allow_html=True)
 
 if vista_actual == "📊 Analítico":
     st.markdown("## 📊 Rendimiento de Operación")
@@ -504,7 +532,6 @@ if vista_actual == "📊 Analítico":
 elif vista_actual == "⚙️ Panel Operativo":
     st.markdown("### 📈 Indicadores Diarios")
     
-    # --- AJUSTE DE FECHA PARA KPIs AL FORMATO ESPAÑOL HOMOLOGADO ---
     tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
     hoy_dt_full = datetime.datetime.now(tz_mx)
     meses_es = {1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep', 10:'oct', 11:'nov', 12:'dic'}
@@ -1233,7 +1260,8 @@ if vista_actual == "📝 Remisiones":
                     df_remisionar = df_siniestro[~df_siniestro[col_estatus_univ].astype(str).str.upper().str.contains("CANCELADO")].copy()
                     
                     if not df_remisionar.empty:
-                        df_remisionar['Seleccionar'] = df_remisionar[col_rem_univ].astype(str).str.strip() == ""
+                        # --- MEJORA UX: Casillas en blanco por defecto ---
+                        df_remisionar['Seleccionar'] = False 
                         cols_mostrar = [c for c in [col_cant_univ, col_desc_univ, col_estatus_univ, col_rem_univ, 'Seleccionar'] if c in df_remisionar.columns]
                         
                         config_rem = {
@@ -1256,12 +1284,15 @@ if vista_actual == "📝 Remisiones":
                         piezas_validas = piezas_seleccionadas[piezas_seleccionadas[col_rem_univ].astype(str).str.strip() == ""]
                         
                         if not piezas_validas.empty:
-                            if st.button("🖨️ Generar Remisión PMR", type="primary", use_container_width=True):
-                                st.session_state['trigger_remision_manual'] = {
-                                    'siniestro': siniestro_buscar,
-                                    'descripciones': piezas_validas[col_desc_univ].tolist()
-                                }
-                                st.rerun()
+                            # --- MEJORA UX: Botón pequeño y alineado a la derecha ---
+                            col_espacio, col_boton = st.columns([7, 3])
+                            with col_boton:
+                                if st.button("🖨️ Generar Remisión PMR", type="primary", use_container_width=True):
+                                    st.session_state['trigger_remision_manual'] = {
+                                        'siniestro': siniestro_buscar,
+                                        'descripciones': piezas_validas[col_desc_univ].tolist()
+                                    }
+                                    st.rerun()
                         elif not piezas_seleccionadas.empty:
                             st.warning("⚠️ No puedes generar una remisión para piezas que ya tienen un folio asignado.")
                     else:

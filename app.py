@@ -1420,7 +1420,8 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     except: fecha_str = str(nueva_fecha)
                     cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                     if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                elif row.get('Reasignar') and not nuevo_estatus: nuevo_estatus = "REASIGNAR" 
+                elif row.get('Reasignar') and not nuevo_estatus:
+                    nuevo_estatus = "REASIGNAR" 
                 
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
@@ -1439,7 +1440,8 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     except: fecha_str = str(nueva_fecha)
                     cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                     if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                elif row.get('Reasignar') and not nuevo_estatus: nuevo_estatus = "REASIGNAR" 
+                elif row.get('Reasignar') and not nuevo_estatus:
+                    nuevo_estatus = "REASIGNAR" 
                 
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
@@ -1452,7 +1454,8 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 if row.get('Marcar Recibido'): 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
                     cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+                if comentario_actual != orig['comentario']: 
+                    cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
         if not df_editado_fact.empty:
             for _, row in df_editado_fact.iterrows():
@@ -1774,5 +1777,37 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
                             for _, row_rem in df_g.iterrows():
                                 cant_v = str(row_rem.get(col_cant, 1))
+                                if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
+                                pdf.set_xy(x_offset, y_item)
+                                pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C')
+                                pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
+                                y_item += 5
                                 
-                                
+                            pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)
+                            pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
+
+                        dibujar_bloque_remision(10)
+                        pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
+                        dibujar_bloque_remision(152)
+
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                            pdf.output(tmp.name)
+                            nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
+                            with open(tmp.name, "rb") as f: pdf_bytes = f.read()
+                            
+                            pdfs_list.append({
+                                'folio': folio_str_print,
+                                'siniestro': siniestro_v,
+                                'bytes': pdf_bytes,
+                                'nombre': nombre_archivo
+                            })
+
+                    st.session_state['pdfs_list'] = pdfs_list
+                    if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
+                
+                st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅")
+                st.cache_data.clear()
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"❌ Error guardando: {e}")                                

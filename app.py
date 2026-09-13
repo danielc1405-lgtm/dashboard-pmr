@@ -132,96 +132,52 @@ usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
 rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 
 # ==============================================================================
-# === [BLOQUE 2: MENÚ UX COQUETO, FIJO Y HEADER PRINCIPAL] ===
+# === [BLOQUE 2: MENÚ SUPERIOR Y NAVEGACIÓN] ===
 # ==============================================================================
-rol_usuario = str(st.session_state.get('rol', st.session_state.get('rol_actual', 'Visor')))
-nombre_usuario = str(st.session_state.get('usuario_actual', 'Demo'))
 
-if "VISOR" in nombre_usuario.upper() or "DEMO" in str(st.session_state.get('usuario', '')).upper():
-    rol_usuario = "Visor"
+# --- DESACTIVACIÓN DEL MODO CONSULTA VIEJO ---
+# Mantenemos la variable en False para no romper los bloques 3 al 9
+modo_consulta = False
 
-# FILA 1: LOGO, NAVEGACIÓN Y CONTROLES
-col_logo, col_menu, col_chk, col_btn, col_out = st.columns([1.2, 5.8, 1.2, 1.2, 0.6], vertical_alignment="center")
+# --- NUEVAS OPCIONES DE NAVEGACIÓN ---
+opciones_menu = [
+    "📊 Analítico", 
+    "⚙️ Panel Operativo", 
+    "🛒 Compras", 
+    "🏢 Talleres", 
+    "📦 Inventario", 
+    "📝 Remisiones", 
+    "🧾 Facturación", 
+    "🛠️ Cuartel General",
+    "🔍 Consultas"  # <--- NUEVO CENTRO DE INTELIGENCIA
+]
+
+# --- MAQUETACIÓN DEL ENCABEZADO ---
+# Ajuste de proporciones basado en tu interfaz gráfica
+col_logo, col_menu, col_btn = st.columns([1.5, 7.5, 1])
 
 with col_logo:
-    if os.path.exists("logo.png"): st.image("logo.png", width=110)
+    # Se mantiene el espacio de tu logo
+    try:
+        st.image("logo.png", width=120)
+    except:
+        st.markdown("**PREMIER**")
 
 with col_menu:
-    opciones_menu = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", "📦 Inventario", "📝 Remisiones", "🧾 Facturación"]
-    if "DANIEL" in nombre_usuario.upper() or "ADMIN" in rol_usuario.upper():
-        opciones_menu.append("🛠️ Cuartel General")
-        
-    vista_actual = st.radio("Nav:", opciones_menu, horizontal=True, label_visibility="collapsed")
-
-es_visor = "VISOR" in rol_usuario.upper()
-with col_chk:
-    modo_consulta = st.checkbox("Modo Consulta", value=True if es_visor else False, disabled=es_visor)
-permiso_edicion = not modo_consulta
+    # El radio button horizontal es el que genera tus "pestañas"
+    vista_actual = st.radio(
+        "Navegación", 
+        opciones_menu, 
+        horizontal=True, 
+        label_visibility="collapsed"
+    )
 
 with col_btn:
-    btn_guardar = st.button("💾 Guardar", use_container_width=True, type="primary", disabled=not permiso_edicion)
+    # El botón Guardar se mantiene a la derecha
+    btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
 
-with col_out:
-    if st.button("🚪", help="Cerrar Sesión"):
-        st.session_state.clear()
-        st.rerun()
-
-# FILA 2: HEADER COQUETO 
-aseguradora_sel = st.selectbox("Selecciona Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
-color_aseg = "#00FF00" if aseguradora_sel == "Multiasistencias" else "#00AEEF"
-border_color = color_aseg
-
-st.markdown(f"""
-    <div class="header-coqueto" style="border-left-color: {border_color};">
-        <div>
-            <h3 style="margin:0; padding:0; color:white; font-size: 1.6rem;">{vista_actual}</h3>
-            <span style="color:#aaa; font-size:0.85rem;">👤 {nombre_usuario} | 🛡️ {rol_usuario}</span>
-        </div>
-        <div style="text-align: right;">
-            <h2 style="margin:0; padding:0; color:{color_aseg}; font-size: 2rem; letter-spacing: 1px;">{aseguradora_sel.upper()}</h2>
-        </div>
-    </div>
-""", unsafe_allow_html=True)
-
-# --- SISTEMA DE DESCARGA DE PDFS (BOTONES COMPACTOS RESTAURADOS) ---
-if st.session_state.get('pdfs_list') or st.session_state.get('avisos_remision'):
-    for aviso in st.session_state.get('avisos_remision', []):
-        st.warning(aviso)
-    
-    if st.session_state.get('pdfs_list'):
-        st.success("✅ ¡Remisiones generadas exitosamente!")
-        cols_pdf = st.columns(len(st.session_state['pdfs_list']) + 1)
-        for i, pdf_obj in enumerate(st.session_state['pdfs_list']):
-            with cols_pdf[i]:
-                st.download_button(
-                    label=f"📥 Descargar {pdf_obj['folio']}",
-                    data=pdf_obj['bytes'],
-                    file_name=pdf_obj['nombre'],
-                    mime="application/pdf",
-                    key=f"btn_pdf_dl_{i}"
-                )
-        with cols_pdf[-1]:
-            if st.button("✅ Limpiar", type="primary"):
-                st.session_state['pdfs_list'] = []
-                st.session_state['avisos_remision'] = []
-                st.rerun()
-
-# --- VISTA: CUARTEL GENERAL ---
-if vista_actual == "🛠️ Cuartel General":
-    st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")
-    st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, reimpresiones y rutas locales.")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("**🚧 Próximas Implementaciones:**")
-        st.checkbox("Bóveda de Reimpresión de PDFs en Drive", value=False, disabled=True)
-        st.checkbox("Ruta de Escape Local (Offline DB)", value=False, disabled=True)
-        st.checkbox("Pantalla de Ruta Local para Don Dionicio", value=False, disabled=True)
-        st.checkbox("Módulo de Paquetería", value=False, disabled=True)
-    with col2:
-        st.markdown("**🐛 Reporte rápido de Bugs / Ideas:**")
-        txt_bug = st.text_area("Anota aquí fallos o ideas urgentes para no perderlas de radar:")
-        if st.button("Guardar Nota"):
-            st.toast("Nota guardada en bitácora de desarrollo.")
+# --- LÍNEA DIVISORIA ESTÉTICA ---
+st.markdown("---")
     st.stop()
 
 # ==============================================================================
@@ -1862,4 +1818,102 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 st.rerun()
                 
             except Exception as e:
-                st.error(f"❌ Error guardando: {e}")                                
+                st.error(f"❌ Error guardando: {e}")
+                
+
+
+# ==============================================================================
+# === [BLOQUE 10: CENTRO DE INTELIGENCIA 360°] ===
+# ==============================================================================
+if vista_actual == "🔍 Consultas":
+    st.markdown("## 🔍 Centro de Inteligencia 360°")
+    st.info("Buscador global: Ingresa un número de siniestro, VIN, nombre de taller, modelo de auto o refacción. El sistema escaneará todas las aseguradoras y el inventario.")
+    
+    query = st.text_input("🔎 Búsqueda Omnidireccional:", placeholder="Ej. B79816163, RIO 2018, 3KPF...").strip().upper()
+    
+    if len(query) >= 3:
+        # --- 1. RASTREO EN BASE MAESTRA (Ambas Aseguradoras) ---
+        df_search = df_completo.copy()
+        
+        # Unificar toda la fila en una sola cadena de texto para búsqueda ultra-rápida
+        df_search['Texto_Busqueda'] = df_search.fillna('').astype(str).apply(lambda x: ' '.join(x).upper(), axis=1)
+        resultados = df_search[df_search['Texto_Busqueda'].str.contains(query, regex=False)]
+        
+        if not resultados.empty:
+            col_id_univ = next((c for c in df_search.columns if "SINIESTRO" in str(c).upper()), None)
+            siniestros_encontrados = resultados[col_id_univ].dropna().unique()
+            
+            st.success(f"✅ Se encontraron coincidencias en **{len(siniestros_encontrados)}** expediente(s).")
+            
+            if len(siniestros_encontrados) > 1:
+                siniestro_sel = st.selectbox("📂 Múltiples resultados encontrados. Selecciona el expediente a revisar:", siniestros_encontrados)
+            else:
+                siniestro_sel = siniestros_encontrados[0]
+                
+            st.markdown("---")
+            
+            # --- 2. IDENTIDAD DEL CASO (Radiografía) ---
+            df_exp = df_search[df_search[col_id_univ].astype(str) == str(siniestro_sel)].copy()
+            
+            aseg_exp = str(df_exp.get(next((c for c in df_exp.columns if "ASEGURADORA" in str(c).upper()), df_exp.columns[0])).iloc[0]).upper()
+            taller_exp = str(df_exp.get(next((c for c in df_exp.columns if "TALLER" in str(c).upper()), df_exp.columns[0])).iloc[0]).upper()
+            
+            marca = str(df_exp.get(next((c for c in df_exp.columns if "MARCA" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
+            modelo = str(df_exp.get(next((c for c in df_exp.columns if "MODELO" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
+            ano = str(df_exp.get(next((c for c in df_exp.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), ''), pd.Series([''])).iloc[0])
+            if ano.endswith('.0'): ano = ano[:-2]
+            vin = str(df_exp.get(next((c for c in df_exp.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
+            
+            st.markdown(f"### 📁 Expediente: {siniestro_sel}")
+            
+            col_k1, col_k2, col_k3 = st.columns(3)
+            col_k1.metric("🛡️ Aseguradora", aseg_exp)
+            col_k2.metric("🚗 Vehículo", f"{marca} {modelo} {ano}".strip())
+            col_k3.metric("🏢 Taller Asignado", taller_exp)
+            st.caption(f"**VIN / Número de Serie:** {vin if vin not in ['NAN', 'NONE', ''] else 'No registrado'}")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # --- 3. LOGÍSTICA OPERATIVA (El Pedido) ---
+            st.markdown("#### 🛠️ Estatus del Pedido y Remisiones")
+            cols_log_keys = ['CANTIDAD', 'CANT', 'DESCRIPCION', 'DESCRIPCIÓN', 'DESCRIPCION PIEZA', 'PRECIO', 'COSTO', 'ESTATUS', 'STATUS', 'VENCIMIENTO', 'FECHA CONFI', 'ASIGNACION', 'GUIA', 'REMISION', 'REMISIÓN', 'COMENTARIOS', 'OBSERVACIONES']
+            cols_log = [c for c in df_exp.columns if c.upper() in cols_log_keys or "REFACCI" in c.upper()]
+            
+            df_log = df_exp[cols_log].copy()
+            # Resaltar filas canceladas en gris si Streamlit lo permite visualmente, por ahora estandarizamos
+            st.dataframe(df_log, hide_index=True, use_container_width=True)
+            
+            # --- 4. SALUD FINANCIERA (Las Compras) ---
+            st.markdown("#### 💰 Salud Financiera y Compras")
+            if not df_compras.empty:
+                col_sin_comp = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)
+                if col_sin_comp:
+                    df_comp_exp = df_compras[df_compras[col_sin_comp].astype(str) == str(siniestro_sel)].copy()
+                    if not df_comp_exp.empty:
+                        cols_comp = ['Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Recibido']
+                        df_comp_disp = df_comp_exp[[c for c in cols_comp if c in df_comp_exp.columns]].copy()
+                        df_comp_disp.rename(columns={'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'Tiempo Entrega (Días)': 'ETA (Días)'}, inplace=True)
+                        st.dataframe(df_comp_disp, hide_index=True, use_container_width=True)
+                    else:
+                        st.info("No existen registros de compras o pagos capturados para este siniestro.")
+            else:
+                st.warning("La base de datos de compras no está disponible.")
+                
+        else:
+            st.warning("No se encontraron siniestros activos ni en el histórico de aseguradoras con ese criterio.")
+            
+        # --- 5. RASTREO EN INVENTARIO FÍSICO (Bonus) ---
+        if not df_inventario.empty:
+            df_inv_search = df_inventario.copy()
+            df_inv_search['Texto_Busqueda'] = df_inv_search.fillna('').astype(str).apply(lambda x: ' '.join(x).upper(), axis=1)
+            res_inv = df_inv_search[df_inv_search['Texto_Busqueda'].str.contains(query, regex=False)]
+            
+            if not res_inv.empty:
+                st.markdown("---")
+                st.markdown("#### 📦 Coincidencias en Inventario Físico")
+                cols_inv_target = ['Ubicación Física', 'No. Parte (OEM)', 'Descripción de la Pieza', 'Marca', 'Modelo', 'Cantidad', 'Estado de la Pieza', 'Precio Venta']
+                df_inv_disp = res_inv[[c for c in cols_inv_target if c in res_inv.columns]].copy()
+                st.dataframe(df_inv_disp, hide_index=True, use_container_width=True)
+
+    elif len(query) > 0:
+        st.caption("Escribe al menos 3 caracteres para activar el motor de búsqueda profunda...")

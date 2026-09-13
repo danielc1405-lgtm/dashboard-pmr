@@ -786,7 +786,6 @@ if vista_actual == "🛒 Compras":
         if not df_c.empty:
             df_c['Recibido_Bool'] = df_c['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
             
-            # --- FILTRO MÁGICO: Ocultar los ya recibidos a menos que sea Modo Consulta ---
             if not modo_consulta:
                 df_c = df_c[df_c['Recibido_Bool'] == False].copy()
             
@@ -809,7 +808,6 @@ if vista_actual == "🛒 Compras":
                 df_c['Llegada_Calculada'] = df_c['Fecha_Compra_Dt'] + pd.to_timedelta(df_c['ETA (Días)'], unit='d')
                 df_c['Llegada Est.'] = df_c['Llegada_Calculada'].dt.strftime('%d/%b/%y').fillna('-')
                 
-                # --- LÓGICA DE ALERTA FINANCIERA (Aviso 3 días antes) ---
                 tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
                 hoy_dt_alert = pd.to_datetime(datetime.datetime.now(tz_mx).date())
                 
@@ -868,26 +866,26 @@ if vista_actual == "🛒 Compras":
                     'Días Crédito': 'Días Cr.'
                 }, inplace=True)
                 
+                # --- MEJORA UX: FORZAR EXPANSIÓN DE ANCHOS (width="large") ---
+                opciones_pago = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
+                config_c = {
+                    'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True),
+                    'Auto': st.column_config.TextColumn("Auto", disabled=True, width="medium"),
+                    'CDR': st.column_config.TextColumn("CDR", disabled=True, width="medium"),
+                    'Pieza': st.column_config.TextColumn("Pieza", disabled=True, width="large"),
+                    'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
+                    'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f"),
+                    'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1),
+                    'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
+                    'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago, width="medium"),
+                    'Días Cr.': st.column_config.NumberColumn("Días Cr.", step=1),
+                    'Pago': st.column_config.SelectboxColumn("Pago", options=["", "Pendiente", "Pagado", "En Aclaración"], width="small"),
+                    'Recibido': st.column_config.CheckboxColumn("🏁 Recibido"),
+                    'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar"),
+                    'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True, width="medium")
+                }
+
                 if not modo_consulta and permiso_edicion:
-                    opciones_pago = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
-                    
-                    config_c = {
-                        'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True),
-                        'Auto': st.column_config.TextColumn("Auto", disabled=True),
-                        'CDR': st.column_config.TextColumn("CDR", disabled=True),
-                        'Pieza': st.column_config.TextColumn("Pieza", disabled=True),
-                        'Proveedor': st.column_config.TextColumn("Proveedor"),
-                        'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f"),
-                        'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1),
-                        'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True),
-                        'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago),
-                        'Días Cr.': st.column_config.NumberColumn("Días Cr.", step=1),
-                        'Pago': st.column_config.SelectboxColumn("Pago", options=["", "Pendiente", "Pagado", "En Aclaración"]),
-                        'Recibido': st.column_config.CheckboxColumn("🏁 Recibido"),
-                        'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar"),
-                        'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True)
-                    }
-                    
                     df_editado_compras = st.data_editor(
                         df_disp,
                         column_config=config_c,
@@ -908,12 +906,15 @@ if vista_actual == "🛒 Compras":
                     }, inplace=True)
                     st.session_state['df_editado_compras_temp'] = df_editado_compras
                 else:
-                    st.dataframe(df_disp, hide_index=True, use_container_width=True)
+                    st.dataframe(df_disp, column_config=config_c, hide_index=True, use_container_width=True)
         else:
             st.info("No hay pedidos en curso.")
     else:
         st.warning("No hay datos en la base de compras.")
 
+    # ==============================================================================
+    # --- SECCIÓN: DIRECTORIO DE PROVEEDORES ---
+    # ==============================================================================
     st.markdown("---")
     st.markdown("#### 🏢 Directorio de Proveedores")
     
@@ -971,10 +972,19 @@ if vista_actual == "🛒 Compras":
         for c in df_prov_disp.columns:
             df_prov_disp[c] = df_prov_disp[c].fillna("").astype(str).replace(['nan', 'None'], '')
         
+        # --- MEJORA UX: EXPANSIÓN DEL DIRECTORIO ---
+        config_prov = {
+            'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
+            'Sucursal': st.column_config.TextColumn("Sucursal", width="medium"),
+            'Dirección': st.column_config.TextColumn("Dirección", width="large"),
+            'Contacto': st.column_config.TextColumn("Contacto", width="medium"),
+            'Correo': st.column_config.TextColumn("Correo", width="medium")
+        }
+        
         if permiso_edicion:
-            st.data_editor(df_prov_disp, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_prov")
+            st.data_editor(df_prov_disp, num_rows="dynamic", column_config=config_prov, use_container_width=True, hide_index=True, key="ed_prov")
         else:
-            st.dataframe(df_prov_disp, use_container_width=True, hide_index=True)
+            st.dataframe(df_prov_disp, column_config=config_prov, use_container_width=True, hide_index=True)
     else:
         st.info("El directorio de proveedores está vacío.")   
 

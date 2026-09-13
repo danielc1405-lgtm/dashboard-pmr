@@ -136,7 +136,7 @@ rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 # ==============================================================================
 
 # --- DESACTIVACIÓN DEL MODO CONSULTA VIEJO ---
-# Mantenemos la variable en False para no romper los bloques 3 al 9
+# Mantenemos la variable en False para no romper la lógica interna de los siguientes bloques
 modo_consulta = False
 
 # --- NUEVAS OPCIONES DE NAVEGACIÓN ---
@@ -149,7 +149,7 @@ opciones_menu = [
     "📝 Remisiones", 
     "🧾 Facturación", 
     "🛠️ Cuartel General",
-    "🔍 Consultas"  # <--- NUEVO CENTRO DE INTELIGENCIA
+    "🔍 Consultas"
 ]
 
 # --- MAQUETACIÓN DEL ENCABEZADO ---
@@ -178,7 +178,9 @@ with col_btn:
 
 # --- LÍNEA DIVISORIA ESTÉTICA ---
 st.markdown("---")
-st.stop()
+
+# --- SELECTOR DE ASEGURADORA (Para que el Bloque 3 funcione correctamente) ---
+aseguradora_sel = st.selectbox("Selecciona la Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
 
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===

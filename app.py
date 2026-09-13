@@ -138,7 +138,7 @@ rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 # --- DESACTIVACIÓN DEL MODO CONSULTA VIEJO ---
 modo_consulta = False
 
-# --- NUEVAS OPCIONES DE NAVEGACIÓN (Ordenadas) ---
+# --- NUEVAS OPCIONES DE NAVEGACIÓN ---
 opciones_menu = [
     "📊 Analítico", 
     "⚙️ Panel Operativo", 
@@ -148,7 +148,7 @@ opciones_menu = [
     "📝 Remisiones", 
     "🧾 Facturación", 
     "🔍 Consultas",
-    "🛠️ Cuartel General" # <--- Movido exactamente al final
+    "🛠️ Cuartel General"
 ]
 
 # --- MAQUETACIÓN DEL ENCABEZADO ---
@@ -170,11 +170,11 @@ st.markdown("---")
 usuario_activo = st.session_state.get('usuario_actual', 'Usuario')
 permiso_edicion = st.session_state.get('permiso_edicion', True)
 
-# --- SELECTOR INTELIGENTE (Desaparece en modo Consulta) ---
-if vista_actual != "🔍 Consultas":
+# --- SELECTOR INTELIGENTE (Desaparece en modo Consulta y Cuartel General) ---
+if vista_actual not in ["🔍 Consultas", "🛠️ Cuartel General"]:
     aseguradora_sel = st.selectbox("Selecciona la Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
 else:
-    aseguradora_sel = "MULTI"
+    aseguradora_sel = "MULTI" # Valor fantasma para que no rompa el motor de carga
 
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===

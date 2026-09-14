@@ -1381,7 +1381,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
         desc_str = ' '.join(str(desc_val).strip().upper().split())
         return (id_str if id_str not in ['NAN', 'NONE'] else '', desc_str if desc_str not in ['NAN', 'NONE'] else '')
     
-    # --- CAMBIO CRÍTICO: Usamos df_completo (UNIVERSAL) en vez de df_trabajo_completo ---
     col_id_univ = next((c for c in df_completo.columns if "SINIESTRO" in str(c).upper()), None)
     col_desc_univ = next((c for c in df_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
     col_taller_univ = next((c for c in df_completo.columns if "TALLER" in str(c).upper()), None)
@@ -1393,12 +1392,12 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
     for _, r in df_completo.iterrows():
         k = generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, ''))
         originales[k] = {
-            'comentario': str(r.get(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), ''), ''))).strip(),
-            'guia': str(r.get(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), ''), ''))).strip(),
-            'estatus_db': str(r.get(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), ''), ''))).strip().upper(),
-            'remision_bool': str(r.get(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''), ''))).strip() != '',
-            'vencimiento_db': str(r.get(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), ''), ''))).strip(),
-            'asignacion_db': str(r.get(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), ''), ''))).strip()
+            'comentario': str(r.get(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), ''), '')).strip(),
+            'guia': str(r.get(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), ''), '')).strip(),
+            'estatus_db': str(r.get(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), ''), '')).strip().upper(),
+            'remision_bool': str(r.get(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''), '')).strip() != '',
+            'vencimiento_db': str(r.get(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), ''), '')).strip(),
+            'asignacion_db': str(r.get(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), ''), '')).strip()
         }
         
     cambios_a_guardar = {}
@@ -1713,7 +1712,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
 
                 llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
                 
-                # --- CAMBIO CRÍTICO: Filtrado Universal para generación de PDF ---
                 if llaves_a_imprimir:
                     marcados_remision = df_completo[df_completo.apply(lambda r: generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, '')) in llaves_a_imprimir, axis=1)]
                     cols_agrup_univ = [col_id_univ, col_taller_univ, col_marca_univ, col_modelo_univ]

@@ -1,91 +1,4 @@
 # ==============================================================================
-# === [BLOQUE 1: IMPORTS, CONFIGURACIÓN VISUAL Y CSS] ===
-# ==============================================================================
-import streamlit as st
-import pandas as pd
-import warnings
-import time
-import os
-import datetime
-import tempfile
-import base64
-from fpdf import FPDF
-import plotly.express as px
-import gspread
-import json
-from google.oauth2.service_account import Credentials
-
-warnings.filterwarnings("ignore")
-
-st.set_page_config(
-    page_title="Dashboard PMR - Operación",
-    page_icon="📦",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
-
-st.markdown("""
-    <style>
-        [data-testid="stDataFrame"] { zoom: 0.95; }
-        .block-container { 
-            padding-top: 1rem !important; 
-            padding-bottom: 40px; 
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-            max-width: 100% !important; 
-        }
-        header { visibility: hidden; }
-        
-        /* HACK PARA CONGELAR EL ENCABEZADO */
-        div[data-testid="stVerticalBlock"] > div:has(div.stRadio) {
-            position: sticky;
-            top: 0px;
-            z-index: 999;
-            background-color: #0E1117; 
-            padding-top: 15px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid #333;
-        }
-        
-        div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }
-        div.row-widget.stRadio > div > label { 
-            background-color: #1E1E24; 
-            padding: 6px 14px; 
-            border-radius: 6px; 
-            cursor: pointer; 
-            border: 1px solid #333; 
-            font-size: 0.95rem;
-            transition: all 0.3s ease;
-        }
-        div.row-widget.stRadio > div > label:hover { border-color: #F63366; background-color: #2A2A35;}
-        div.row-widget.stRadio > div > label[data-checked="true"] { 
-            background-color: #F63366; 
-            color: white; 
-            border-color: #F63366; 
-        }
-        div.row-widget.stRadio > div > label > div:first-child { display: none; }
-        
-        .header-coqueto {
-            background: linear-gradient(90deg, #1A1A24 0%, #262730 100%);
-            padding: 12px 20px;
-            border-radius: 8px;
-            border-left: 6px solid;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 10px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-        }
-        
-        /* ELIMINAR EL PARPADEO GRIS AL EDITAR CELDAS */
-        [data-testid="stDataGrid"] { opacity: 1 !important; }
-        .st-emotion-cache-1kyxreq { display: none !important; }
-        div[data-testid="stAppViewContainer"] { transition: none !important; }
-    </style>
-""", unsafe_allow_html=True)
-
-# ==============================================================================
 # === [BLOQUE 0: CONEXIÓN TEMPRANA Y SISTEMA DE LOGIN] ===
 # ==============================================================================
 SHEET_ID = "10jrOsS054n0atMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
@@ -156,8 +69,8 @@ opciones_menu = [
     "🛠️ Cuartel General"
 ]
 
-# --- MAQUETACIÓN DEL ENCABEZADO ---
-col_logo, col_menu, col_btn = st.columns([1.5, 7.5, 1])
+# --- MAQUETACIÓN DEL ENCABEZADO (Selector integrado) ---
+col_logo, col_menu, col_aseg, col_btn = st.columns([1.5, 6.0, 1.5, 1])
 
 with col_logo:
     try: st.image("logo.png", width=120)
@@ -165,6 +78,13 @@ with col_logo:
 
 with col_menu:
     vista_actual = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
+
+with col_aseg:
+    # El selector vive aquí arriba y SOLO aparece en estas dos vistas
+    if vista_actual in ["📊 Analítico", "⚙️ Panel Operativo"]:
+        aseguradora_sel = st.selectbox("Aseguradora", ["Multiasistencias", "GNP"], label_visibility="collapsed")
+    else:
+        aseguradora_sel = "MULTI" # Valor fantasma para que no marque error
 
 with col_btn:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
@@ -174,12 +94,6 @@ st.markdown("---")
 # --- SALVAVIDAS ANTI-CRASH (Recuperar variables de sesión) ---
 usuario_activo = st.session_state.get('usuario_actual', 'Usuario')
 permiso_edicion = st.session_state.get('permiso_edicion', True)
-
-# --- SELECTOR INTELIGENTE (Desaparece en modo Consulta y Cuartel General) ---
-if vista_actual not in ["🔍 Consultas", "🛠️ Cuartel General"]:
-    aseguradora_sel = st.selectbox("Selecciona la Aseguradora:", ["Multiasistencias", "GNP"], label_visibility="collapsed")
-else:
-    aseguradora_sel = "MULTI" # Valor fantasma para que no rompa el motor de carga
 
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -1840,3 +1754,162 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 
             except Exception as e:
                 st.error(f"❌ Error guardando: {e}")
+
+# ==============================================================================
+# === [BLOQUE 10: CENTRO DE INTELIGENCIA 360°] ===
+# ==============================================================================
+if vista_actual == "🔍 Consultas":
+    st.markdown("## 🔍 Centro de Inteligencia 360°")
+    st.info("Buscador global: Ingresa un número de siniestro, VIN, nombre de taller, modelo de auto o refacción. El sistema escaneará todas las aseguradoras y el inventario.")
+    
+    query = st.text_input("🔎 Búsqueda Omnidireccional:", placeholder="Ej. B79816163, RIO 2018, 3KPF...").strip().upper()
+    
+    if len(query) >= 3:
+        # --- 1. RASTREO EN BASE MAESTRA (Ambas Aseguradoras) ---
+        df_search = df_completo.copy()
+        
+        # Unificar toda la fila en una sola cadena de texto para búsqueda ultra-rápida
+        df_search['Texto_Busqueda'] = df_search.fillna('').astype(str).apply(lambda x: ' '.join(x).upper(), axis=1)
+        resultados = df_search[df_search['Texto_Busqueda'].str.contains(query, regex=False)]
+        
+        if not resultados.empty:
+            col_id_univ = next((c for c in df_search.columns if "SINIESTRO" in str(c).upper()), None)
+            siniestros_encontrados = resultados[col_id_univ].dropna().unique()
+            
+            st.success(f"✅ Se encontraron coincidencias en **{len(siniestros_encontrados)}** expediente(s).")
+            
+            if len(siniestros_encontrados) > 1:
+                siniestro_sel = st.selectbox("📂 Múltiples resultados encontrados. Selecciona el expediente a revisar:", siniestros_encontrados)
+            else:
+                siniestro_sel = siniestros_encontrados[0]
+                
+            st.markdown("---")
+            
+            # --- 2. IDENTIDAD DEL CASO (Radiografía) ---
+            df_exp = df_search[df_search[col_id_univ].astype(str) == str(siniestro_sel)].copy()
+            
+            aseg_exp = str(df_exp.get(next((c for c in df_exp.columns if "ASEGURADORA" in str(c).upper()), df_exp.columns[0])).iloc[0]).upper()
+            taller_exp = str(df_exp.get(next((c for c in df_exp.columns if "TALLER" in str(c).upper()), df_exp.columns[0])).iloc[0]).upper()
+            
+            marca = str(df_exp.get(next((c for c in df_exp.columns if "MARCA" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
+            modelo = str(df_exp.get(next((c for c in df_exp.columns if "MODELO" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
+            ano = str(df_exp.get(next((c for c in df_exp.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), ''), pd.Series([''])).iloc[0])
+            if ano.endswith('.0'): ano = ano[:-2]
+            vin = str(df_exp.get(next((c for c in df_exp.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
+            
+            st.markdown(f"### 📁 Expediente: {siniestro_sel}")
+            
+            col_k1, col_k2, col_k3 = st.columns(3)
+            col_k1.metric("🛡️ Aseguradora", aseg_exp)
+            col_k2.metric("🚗 Vehículo", f"{marca} {modelo} {ano}".strip())
+            col_k3.metric("🏢 Taller Asignado", taller_exp)
+            st.caption(f"**VIN / Número de Serie:** {vin if vin not in ['NAN', 'NONE', ''] else 'No registrado'}")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # --- 3. LOGÍSTICA OPERATIVA (El Pedido) ---
+            st.markdown("#### 🛠️ Estatus del Pedido y Remisiones")
+            cols_log_keys = ['CANTIDAD', 'CANT', 'DESCRIPCION', 'DESCRIPCIÓN', 'DESCRIPCION PIEZA', 'PRECIO', 'COSTO', 'ESTATUS', 'STATUS', 'VENCIMIENTO', 'FECHA CONFI', 'ASIGNACION', 'GUIA', 'REMISION', 'REMISIÓN', 'COMENTARIOS', 'OBSERVACIONES']
+            cols_log = [c for c in df_exp.columns if c.upper() in cols_log_keys or "REFACCI" in c.upper()]
+            
+            df_log = df_exp[cols_log].copy()
+            st.dataframe(df_log, hide_index=True, use_container_width=True)
+            
+            # --- 4. SALUD FINANCIERA (Las Compras) ---
+            st.markdown("#### 💰 Salud Financiera y Compras")
+            if not df_compras.empty:
+                col_sin_comp = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)
+                if col_sin_comp:
+                    df_comp_exp = df_compras[df_compras[col_sin_comp].astype(str) == str(siniestro_sel)].copy()
+                    if not df_comp_exp.empty:
+                        cols_comp = ['Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Recibido']
+                        df_comp_disp = df_comp_exp[[c for c in cols_comp if c in df_comp_exp.columns]].copy()
+                        df_comp_disp.rename(columns={'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'Tiempo Entrega (Días)': 'ETA (Días)'}, inplace=True)
+                        st.dataframe(df_comp_disp, hide_index=True, use_container_width=True)
+                    else:
+                        st.info("No existen registros de compras o pagos capturados para este siniestro.")
+            else:
+                st.warning("La base de datos de compras no está disponible.")
+                
+        else:
+            st.warning("No se encontraron siniestros activos ni en el histórico de aseguradoras con ese criterio.")
+            
+        # --- 5. RASTREO EN INVENTARIO FÍSICO (Bonus) ---
+        if not df_inventario.empty:
+            df_inv_search = df_inventario.copy()
+            df_inv_search['Texto_Busqueda'] = df_inv_search.fillna('').astype(str).apply(lambda x: ' '.join(x).upper(), axis=1)
+            res_inv = df_inv_search[df_inv_search['Texto_Busqueda'].str.contains(query, regex=False)]
+            
+            if not res_inv.empty:
+                st.markdown("---")
+                st.markdown("#### 📦 Coincidencias en Inventario Físico")
+                cols_inv_target = ['Ubicación Física', 'No. Parte (OEM)', 'Descripción de la Pieza', 'Marca', 'Modelo', 'Cantidad', 'Estado de la Pieza', 'Precio Venta']
+                df_inv_disp = res_inv[[c for c in cols_inv_target if c in res_inv.columns]].copy()
+                st.dataframe(df_inv_disp, hide_index=True, use_container_width=True)
+
+    elif len(query) > 0:
+        st.caption("Escribe al menos 3 caracteres para activar el motor de búsqueda profunda...")
+
+# ==============================================================================
+# === [BLOQUE 11: CUARTEL GENERAL Y NOTAS] ===
+# ==============================================================================
+if vista_actual == "🛠️ Cuartel General":
+    st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")
+    st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, reimpresiones y rutas locales.")
+    
+    col_c1, col_c2 = st.columns(2)
+    
+    with col_c1:
+        st.markdown("#### 🚧 Próximas Implementaciones (Mapa de Ruta):")
+        st.checkbox("Bóveda de Reimpresión de PDFs en Drive", value=False, disabled=True)
+        st.checkbox("Ruta de Escape Local (Offline DB)", value=False, disabled=True)
+        st.checkbox("Pantalla de Ruta Local para Don Dionicio", value=False, disabled=True)
+        st.checkbox("Módulo de Paquetería", value=False, disabled=True)
+        st.caption("_Nota: Estas funciones se encuentran bloqueadas temporalmente ya que representan la bitácora de desarrollo a futuro._")
+        
+    with col_c2:
+        st.markdown("#### 🐛 Reporte de Bugs e Ideas (Checklist Activo):")
+        
+        try:
+            doc = init_connection()
+            ws_notas = doc.worksheet("BD_NOTAS")
+            datos_notas = ws_notas.get_all_values()
+            
+            if not datos_notas:
+                ws_notas.append_row(["Fecha", "Nota", "Estatus"])
+                datos_notas = [["Fecha", "Nota", "Estatus"]]
+                
+            df_notas = pd.DataFrame(datos_notas[1:], columns=datos_notas[0])
+            
+            with st.form("form_nueva_nota", clear_on_submit=True):
+                nueva_nota = st.text_input("Añadir nuevo pendiente, bug o idea:")
+                if st.form_submit_button("➕ Agregar a la lista"):
+                    if nueva_nota.strip():
+                        fecha_str = datetime.datetime.now().strftime("%d/%b/%y %H:%M")
+                        ws_notas.append_row([fecha_str, nueva_nota.strip(), "PENDIENTE"], value_input_option='USER_ENTERED')
+                        st.success("✅ Nota registrada en la base de datos.")
+                        time.sleep(1)
+                        st.rerun()
+
+            st.markdown("**Tareas por resolver:**")
+            if not df_notas.empty:
+                df_notas['GS_Row'] = df_notas.index + 2
+                df_pendientes = df_notas[df_notas['Estatus'].astype(str).str.upper() != 'COMPLETADO']
+                
+                if df_pendientes.empty:
+                    st.success("¡Todo al día! No hay tareas pendientes en el radar.")
+                else:
+                    for _, row in df_pendientes.iterrows():
+                        marcado = st.checkbox(f"{row['Nota']} *(Reportado: {row['Fecha']})*", key=f"nota_{row['GS_Row']}")
+                        if marcado:
+                            ws_notas.update_cell(row['GS_Row'], 3, "COMPLETADO")
+                            st.toast(f"Tarea completada: {row['Nota']}", icon="✅")
+                            time.sleep(0.5)
+                            st.rerun()
+            else:
+                st.success("¡Todo al día! No hay tareas pendientes en el radar.")
+                
+        except gspread.exceptions.WorksheetNotFound:
+            st.error("⚠️ Error de conexión: Para usar esta función, debes crear una nueva pestaña llamada **BD_NOTAS** en tu Google Sheets.")
+        except Exception as e:
+            st.error(f"⚠️ Ha ocurrido un error al cargar las notas: {e}")

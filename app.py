@@ -1906,7 +1906,7 @@ if vista_actual == "🔍 Consultas":
         st.caption("Escribe al menos 3 caracteres para activar el motor de búsqueda profunda...")
 
 # ==============================================================================
-# === [BLOQUE 11: CUARTEL GENERAL] ===
+# === [BLOQUE 11: CUARTEL GENERAL Y NOTAS] ===
 # ==============================================================================
 if vista_actual == "🛠️ Cuartel General":
     st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")
@@ -1915,21 +1915,56 @@ if vista_actual == "🛠️ Cuartel General":
     col_c1, col_c2 = st.columns(2)
     
     with col_c1:
-        st.markdown("#### 🚧 Próximas Implementaciones:")
+        st.markdown("#### 🚧 Próximas Implementaciones (Mapa de Ruta):")
         st.checkbox("Bóveda de Reimpresión de PDFs en Drive", value=False, disabled=True)
         st.checkbox("Ruta de Escape Local (Offline DB)", value=False, disabled=True)
         st.checkbox("Pantalla de Ruta Local para Don Dionicio", value=False, disabled=True)
         st.checkbox("Módulo de Paquetería", value=False, disabled=True)
-        st.caption("_Nota: Estas casillas están deshabilitadas a propósito porque son nuestro 'Mapa de Ruta' de futuras actualizaciones, no funciones operativas (todavía)._")
+        st.caption("_Nota: Estas funciones se encuentran bloqueadas temporalmente ya que representan la bitácora de desarrollo a futuro._")
         
     with col_c2:
-        st.markdown("#### 🐛 Reporte rápido de Bugs / Ideas:")
+        st.markdown("#### 🐛 Reporte de Bugs e Ideas (Checklist Activo):")
         
-        # Recuperar nota si ya existe en la sesión
-        nota_actual = st.session_state.get('notas_cuartel', "Solo dejo este mensaje de prueba...\npor lo pronto, veo que las remisiones ya estan unificadas... no se si son todas las que deberian estar, faltan o sobran.\n\npor que estan deshabilitadas las casillas que tenemos a la izquierda?")
-        
-        nueva_nota = st.text_area("Anota aquí fallos o ideas urgentes para no perderlas de radar:", value=nota_actual, height=150)
-        
-        if st.button("Guardar Nota"):
-            st.session_state['notas_cuartel'] = nueva_nota
-            st.success("✅ Nota guardada en la memoria temporal.")
+        try:
+            doc = init_connection()
+            ws_notas = doc.worksheet("BD_NOTAS")
+            datos_notas = ws_notas.get_all_values()
+            
+            if not datos_notas:
+                ws_notas.append_row(["Fecha", "Nota", "Estatus"])
+                datos_notas = [["Fecha", "Nota", "Estatus"]]
+                
+            df_notas = pd.DataFrame(datos_notas[1:], columns=datos_notas[0])
+            
+            with st.form("form_nueva_nota", clear_on_submit=True):
+                nueva_nota = st.text_input("Añadir nuevo pendiente, bug o idea:")
+                if st.form_submit_button("➕ Agregar a la lista"):
+                    if nueva_nota.strip():
+                        fecha_str = datetime.datetime.now().strftime("%d/%b/%y %H:%M")
+                        ws_notas.append_row([fecha_str, nueva_nota.strip(), "PENDIENTE"], value_input_option='USER_ENTERED')
+                        st.success("✅ Nota registrada en la base de datos.")
+                        time.sleep(1)
+                        st.rerun()
+
+            st.markdown("**Tareas por resolver:**")
+            if not df_notas.empty:
+                df_notas['GS_Row'] = df_notas.index + 2
+                df_pendientes = df_notas[df_notas['Estatus'].astype(str).str.upper() != 'COMPLETADO']
+                
+                if df_pendientes.empty:
+                    st.success("¡Todo al día! No hay tareas pendientes en el radar.")
+                else:
+                    for _, row in df_pendientes.iterrows():
+                        marcado = st.checkbox(f"{row['Nota']} *(Reportado: {row['Fecha']})*", key=f"nota_{row['GS_Row']}")
+                        if marcado:
+                            ws_notas.update_cell(row['GS_Row'], 3, "COMPLETADO")
+                            st.toast(f"Tarea completada: {row['Nota']}", icon="✅")
+                            time.sleep(0.5)
+                            st.rerun()
+            else:
+                st.success("¡Todo al día! No hay tareas pendientes en el radar.")
+                
+        except gspread.exceptions.WorksheetNotFound:
+            st.error("⚠️ Error de conexión: Para usar esta función, debes crear una nueva pestaña llamada **BD_NOTAS** en tu Google Sheets.")
+        except Exception as e:
+            st.error(f"⚠️ Ha ocurrido un error al cargar las notas: {e}")

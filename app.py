@@ -97,15 +97,10 @@ permiso_edicion = st.session_state.get('permiso_edicion', True)
 # ==============================================================================
 modo_consulta = False
 
-# Lista base para todo el equipo operativo
 opciones_menu = [
     "📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", 
-    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🔍 Consultas"
+    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🔍 Consultas", "🛠️ Cuartel General"
 ]
-
-# Validación de seguridad: Añade el Cuartel General SOLO si el usuario es Administrador
-if "ADMIN" in rol_activo:
-    opciones_menu.append("🛠️ Cuartel General")
 
 col_logo, col_menu, col_aseg, col_btn = st.columns([1.5, 6.0, 1.5, 1])
 
@@ -124,6 +119,8 @@ with col_aseg:
 
 with col_btn:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
+    # --- CREAMOS EL ESPACIO RESERVADO PARA EL SPINNER ---
+    espacio_spinner = st.empty()
 
 st.markdown("---")
 
@@ -1224,214 +1221,217 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         if row.get('Recibido'): cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO" 
 
     if cambios_a_guardar or cambios_bd_compras:
-        with st.spinner("Sincronizando en la nube..."):
-            try:
-                doc = init_connection()
-                if cambios_a_guardar:
-                    ws_uni = doc.worksheet("BD_UNIFICADA")
-                    datos_uni = ws_uni.get_all_values()
-                    headers = [str(h).strip() for h in datos_uni[0]]
-                    idx_id, idx_desc, idx_estatus, idx_rem = headers.index(col_id_univ), headers.index(col_desc_univ), headers.index(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), '')), headers.index(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''))
-                    idx_usr_rem = headers.index("Usuario Remisión") if "Usuario Remisión" in headers else -1
-                    idx_coment = headers.index(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '')) if next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '') in headers else -1
-                    idx_guia = headers.index(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '') in headers else -1
-                    idx_venc = headers.index(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '') in headers else -1
-                    idx_asig = headers.index(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '') in headers else -1
-                    idx_confi = headers.index(next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '') in headers else -1
-                    idx_envio = headers.index("Fecha Envío") if "Fecha Envío" in headers else -1
-                    idx_recibido = headers.index("Fecha Recibido") if "Fecha Recibido" in headers else -1
-                    idx_facturacion = headers.index("Fecha Facturación") if "Fecha Facturación" in headers else -1
-                    
-                    max_folio_pmr = 0
-                    numeros = df_completo[next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), '')].astype(str).str.extract(r'(?i)PMR\s*-\s*0*(\d+)', expand=False)
-                    if not numeros.empty: max_folio_pmr = int(pd.to_numeric(numeros, errors='coerce').max() if pd.notna(pd.to_numeric(numeros, errors='coerce').max()) else 0)
-
-                    folios_asignados_en_sesion = {}
-                    for k, v in cambios_a_guardar.items():
-                        if v.get('generar_nuevo_folio'):
-                            siniestro_id = k[0] 
-                            if siniestro_id not in folios_asignados_en_sesion:
-                                max_folio_pmr += 1
-                                folios_asignados_en_sesion[siniestro_id] = f"PMR - {max_folio_pmr:03d}"
-                            v['remision_num'] = folios_asignados_en_sesion[siniestro_id]
-
-                    for i in range(1, len(datos_uni)):
-                        k = generar_llave(datos_uni[i][idx_id], datos_uni[i][idx_desc])
-                        if k in cambios_a_guardar:
-                            c = cambios_a_guardar[k]
-                            if 'estatus' in c: datos_uni[i][idx_estatus] = c['estatus']
-                            if 'remision_num' in c: datos_uni[i][idx_rem] = c['remision_num']
-                            if 'usuario_rem' in c and idx_usr_rem >= 0: datos_uni[i][idx_usr_rem] = c['usuario_rem']
-                            if 'comentario' in c and idx_coment >= 0: datos_uni[i][idx_coment] = c['comentario']
-                            if 'guia' in c and idx_guia >= 0: datos_uni[i][idx_guia] = c['guia']
-                            if 'vencimiento' in c and idx_venc >= 0: datos_uni[i][idx_venc] = c['vencimiento']
-                            if 'asignacion' in c and idx_asig >= 0: datos_uni[i][idx_asig] = c['asignacion']
-                            if 'fecha_confi' in c and idx_confi >= 0: datos_uni[i][idx_confi] = c['fecha_confi']
-                            if 'fecha_envio' in c and idx_envio >= 0: datos_uni[i][idx_envio] = c['fecha_envio']
-                            if 'fecha_recibido' in c and idx_recibido >= 0: datos_uni[i][idx_recibido] = c['fecha_recibido']
-                            if 'fecha_facturacion' in c and idx_facturacion >= 0: datos_uni[i][idx_facturacion] = c['fecha_facturacion']
-                    ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
-
-                if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
-                    try:
-                        ws_comp = doc.worksheet("BD_COMPRAS")
-                        datos_comp_crudos = ws_comp.get_all_values()
-                        if not datos_comp_crudos:
-                            headers_comp = ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Recibido', 'Condición Pago', 'Días Crédito', 'Estatus Pago']
-                            datos_comp = [headers_comp]
-                        else:
-                            headers_comp = [str(h).strip() for h in datos_comp_crudos[0]]
-                            datos_comp = [headers_comp]
-                            for fila in datos_comp_crudos[1:]:
-                                if any(str(celda).strip() for celda in fila): datos_comp.append(fila)
-                            
-                        def get_col_idx(name):
-                            if name in headers_comp: return headers_comp.index(name)
-                            headers_comp.append(name); datos_comp[0] = headers_comp
-                            for r in datos_comp[1:]: r.append("")
-                            return len(headers_comp) - 1
-                            
-                        idx_c_sin = get_col_idx('Siniestro'); idx_c_desc = get_col_idx('Descripción Pieza'); i_tall = get_col_idx('Taller'); i_veh = get_col_idx('Vehículo')
-                        i_prov = get_col_idx('Proveedor'); i_costo = get_col_idx('Costo Compra'); i_fcomp = get_col_idx('Fecha Compra'); i_tiempo = get_col_idx('Tiempo Entrega (Días)')
-                        i_rec = get_col_idx('Recibido'); i_cond_pago = get_col_idx('Condición Pago'); i_dias_cred = get_col_idx('Días Crédito'); i_est_pago = get_col_idx('Estatus Pago')
+        # --- AQUÍ INYECTAMOS EL SPINNER AL ESPACIO VIP QUE CREAMOS ARRIBA ---
+        with espacio_spinner:
+            with st.spinner("Sincronizando..."):
+                try:
+                    doc = init_connection()
+                    if cambios_a_guardar:
+                        ws_uni = doc.worksheet("BD_UNIFICADA")
+                        datos_uni = ws_uni.get_all_values()
+                        headers = [str(h).strip() for h in datos_uni[0]]
+                        idx_id, idx_desc, idx_estatus, idx_rem = headers.index(col_id_univ), headers.index(col_desc_univ), headers.index(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), '')), headers.index(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''))
+                        idx_usr_rem = headers.index("Usuario Remisión") if "Usuario Remisión" in headers else -1
+                        idx_coment = headers.index(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '')) if next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '') in headers else -1
+                        idx_guia = headers.index(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '') in headers else -1
+                        idx_venc = headers.index(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '') in headers else -1
+                        idx_asig = headers.index(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '') in headers else -1
+                        idx_confi = headers.index(next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '') in headers else -1
                         
-                        llaves_en_compras = set()
-                        nuevos_datos_comp = [headers_comp]
-                        for i in range(1, len(datos_comp)):
-                            while len(datos_comp[i]) < len(headers_comp): datos_comp[i].append("")
-                            k_c = generar_llave(datos_comp[i][idx_c_sin], datos_comp[i][idx_c_desc])
-                            llaves_en_compras.add(k_c)
-                            eliminar_fila = False
-                            if k_c in cambios_bd_compras:
-                                cb = cambios_bd_compras[k_c]
-                                if cb.get('cancelar_compra'): eliminar_fila = True
-                                else:
-                                    if str(cb.get('costo','')).strip(): datos_comp[i][i_costo] = cb['costo']
-                                    if str(cb.get('tiempo','')).strip(): datos_comp[i][i_tiempo] = cb['tiempo']
-                                    if 'cond_pago' in cb and str(cb['cond_pago']).strip() != 'nan': datos_comp[i][i_cond_pago] = cb['cond_pago']
-                                    if 'dias_credito' in cb and str(cb['dias_credito']).strip() != 'nan': datos_comp[i][i_dias_cred] = cb['dias_credito']
-                                    if 'estatus_pago' in cb and str(cb['estatus_pago']).strip() != 'nan': datos_comp[i][i_est_pago] = cb['estatus_pago']
-                                    if 'prov' in cb and str(cb['prov']).strip() and str(cb['prov']).strip() != 'nan': datos_comp[i][i_prov] = cb['prov']
-                                    if 'recibido' in cb: datos_comp[i][i_rec] = cb['recibido']
-                            if not eliminar_fila: nuevos_datos_comp.append(datos_comp[i])
-                                    
-                        fecha_hoy_comp = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
-                        nuevas_filas = []
+                        idx_envio = headers.index("Fecha Envío") if "Fecha Envío" in headers else -1
+                        idx_recibido = headers.index("Fecha Recibido") if "Fecha Recibido" in headers else -1
+                        idx_facturacion = headers.index("Fecha Facturación") if "Fecha Facturación" in headers else -1
+                        
+                        max_folio_pmr = 0
+                        numeros = df_completo[next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), '')].astype(str).str.extract(r'(?i)PMR\s*-\s*0*(\d+)', expand=False)
+                        if not numeros.empty: max_folio_pmr = int(pd.to_numeric(numeros, errors='coerce').max() if pd.notna(pd.to_numeric(numeros, errors='coerce').max()) else 0)
+
+                        folios_asignados_en_sesion = {}
                         for k, v in cambios_a_guardar.items():
-                            if v.get('crear_compra') and k not in llaves_en_compras:
-                                n_row = [""] * len(headers_comp)
-                                n_row[idx_c_sin] = k[0]; n_row[idx_c_desc] = k[1]; n_row[i_tall] = v.get('compra_taller', ''); n_row[i_veh] = v.get('compra_vehiculo', '')
-                                n_row[i_fcomp] = fecha_hoy_comp; n_row[i_rec] = 'NO'; n_row[i_costo] = v.get('compra_costo', '0')
+                            if v.get('generar_nuevo_folio'):
+                                siniestro_id = k[0] 
+                                if siniestro_id not in folios_asignados_en_sesion:
+                                    max_folio_pmr += 1
+                                    folios_asignados_en_sesion[siniestro_id] = f"PMR - {max_folio_pmr:03d}"
+                                v['remision_num'] = folios_asignados_en_sesion[siniestro_id]
+
+                        for i in range(1, len(datos_uni)):
+                            k = generar_llave(datos_uni[i][idx_id], datos_uni[i][idx_desc])
+                            if k in cambios_a_guardar:
+                                c = cambios_a_guardar[k]
+                                if 'estatus' in c: datos_uni[i][idx_estatus] = c['estatus']
+                                if 'remision_num' in c: datos_uni[i][idx_rem] = c['remision_num']
+                                if 'usuario_rem' in c and idx_usr_rem >= 0: datos_uni[i][idx_usr_rem] = c['usuario_rem']
+                                if 'comentario' in c and idx_coment >= 0: datos_uni[i][idx_coment] = c['comentario']
+                                if 'guia' in c and idx_guia >= 0: datos_uni[i][idx_guia] = c['guia']
+                                if 'vencimiento' in c and idx_venc >= 0: datos_uni[i][idx_venc] = c['vencimiento']
+                                if 'asignacion' in c and idx_asig >= 0: datos_uni[i][idx_asig] = c['asignacion']
+                                if 'fecha_confi' in c and idx_confi >= 0: datos_uni[i][idx_confi] = c['fecha_confi']
+                                if 'fecha_envio' in c and idx_envio >= 0: datos_uni[i][idx_envio] = c['fecha_envio']
+                                if 'fecha_recibido' in c and idx_recibido >= 0: datos_uni[i][idx_recibido] = c['fecha_recibido']
+                                if 'fecha_facturacion' in c and idx_facturacion >= 0: datos_uni[i][idx_facturacion] = c['fecha_facturacion']
+                        ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
+
+                    if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
+                        try:
+                            ws_comp = doc.worksheet("BD_COMPRAS")
+                            datos_comp_crudos = ws_comp.get_all_values()
+                            if not datos_comp_crudos:
+                                headers_comp = ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Recibido', 'Condición Pago', 'Días Crédito', 'Estatus Pago']
+                                datos_comp = [headers_comp]
+                            else:
+                                headers_comp = [str(h).strip() for h in datos_comp_crudos[0]]
+                                datos_comp = [headers_comp]
+                                for fila in datos_comp_crudos[1:]:
+                                    if any(str(celda).strip() for celda in fila): datos_comp.append(fila)
                                 
-                                nombre_prov_completo = str(v.get('compra_prov', '')).strip()
-                                eta_calc = "0"; cond_pago_calc = ""; dias_cred_calc = "0"
-                                if nombre_prov_completo and not df_proveedores.empty:
-                                    for _, row_p in df_proveedores.iterrows():
-                                        p_val = str(row_p.get('Proveedor', '')).strip().upper(); s_val = str(row_p.get('Sucursal', '')).strip().upper()
-                                        llave_p = f"{p_val} - {s_val}" if s_val else p_val
-                                        if llave_p == nombre_prov_completo:
-                                            tiempo_str = str(row_p.get('Tiempo de Entrega', '')).upper()
-                                            numeros = re.findall(r'\d+', tiempo_str)
-                                            if numeros: eta_calc = numeros[-1]
-                                            cond_pago_calc = str(row_p.get('Condición Pago', '')).strip().title()
-                                            dias_cred_calc = str(row_p.get('Días Crédito', '0')).strip()
-                                            break
-                                n_row[i_prov] = nombre_prov_completo; n_row[i_tiempo] = eta_calc if eta_calc else '0'
-                                n_row[i_cond_pago] = cond_pago_calc; n_row[i_dias_cred] = dias_cred_calc
-                                nuevas_filas.append(n_row)
-                        
-                        filas_a_escribir = nuevos_datos_comp + nuevas_filas
-                        while len(filas_a_escribir) < len(datos_comp_crudos): filas_a_escribir.append([""] * len(headers_comp))
-                        ws_comp.update(range_name='A1', values=filas_a_escribir, value_input_option='USER_ENTERED')
-                    except Exception as e_comp: st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
-
-                llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
-                if llaves_a_imprimir:
-                    marcados_remision = df_completo[df_completo.apply(lambda r: generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, '')) in llaves_a_imprimir, axis=1)]
-                    cols_agrup_univ = [col_id_univ, col_taller_univ, col_marca_univ, col_modelo_univ]
-                    agrupadores = [c for c in cols_agrup_univ if c in marcados_remision.columns]
-                    
-                    avisos_unicos = set()
-                    pdfs_list = []
-                    usuario_print = st.session_state.get('usuario_actual', 'Sistema')
-                    
-                    for keys, df_g in marcados_remision.groupby(agrupadores):
-                        siniestro_v = keys[agrupadores.index(col_id_univ)] if col_id_univ in agrupadores else ""
-                        taller_v = keys[agrupadores.index(col_taller_univ)] if col_taller_univ in agrupadores else ""
-                        marca_v = keys[agrupadores.index(col_marca_univ)] if col_marca_univ in agrupadores else ""
-                        modelo_v = keys[agrupadores.index(col_modelo_univ)] if col_modelo_univ in agrupadores else ""
-                        
-                        folio_str_print = "S/N"
-                        for _, row_rem in df_g.iterrows():
-                            key_rem = generar_llave(row_rem.get(col_id_univ, ''), row_rem.get(col_desc_univ, ''))
-                            if key_rem in cambios_a_guardar and 'remision_num' in cambios_a_guardar[key_rem]:
-                                folio_str_print = cambios_a_guardar[key_rem]['remision_num']; break
-                        
-                        fecha_actual = datetime.datetime.now(tz_mx)
-                        fecha_header = fecha_actual.strftime('%d/%b/%Y').upper()
-                        firma_digital = f"Generado por: {usuario_print}"
-                        
-                        dir_v = ""
-                        col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
-                        if not df_catalogo.empty and col_cat_taller:
-                            match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == str(taller_v).strip().upper()]
-                            if not match_taller.empty:
-                                col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
-                                if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
-                            else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
-                        else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
-
-                        def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
-
-                        pdf = FPDF(orientation='L', unit='mm', format='A4')
-                        pdf.set_auto_page_break(auto=False, margin=0); pdf.add_page()
-                        
-                        def dibujar_bloque_remision(x_offset):
-                            y_offset = 15
-                            if os.path.exists("logo.png"):
-                                try: pdf.image("logo.png", x_offset, y_offset - 3, 30)
-                                except: pass
+                            def get_col_idx(name):
+                                if name in headers_comp: return headers_comp.index(name)
+                                headers_comp.append(name); datos_comp[0] = headers_comp
+                                for r in datos_comp[1:]: r.append("")
+                                return len(headers_comp) - 1
+                                
+                            idx_c_sin = get_col_idx('Siniestro'); idx_c_desc = get_col_idx('Descripción Pieza'); i_tall = get_col_idx('Taller'); i_veh = get_col_idx('Vehículo')
+                            i_prov = get_col_idx('Proveedor'); i_costo = get_col_idx('Costo Compra'); i_fcomp = get_col_idx('Fecha Compra'); i_tiempo = get_col_idx('Tiempo Entrega (Días)')
+                            i_rec = get_col_idx('Recibido'); i_cond_pago = get_col_idx('Condición Pago'); i_dias_cred = get_col_idx('Días Crédito'); i_est_pago = get_col_idx('Estatus Pago')
                             
-                            pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
-                            pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"))
-                            pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5); pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"))
-                            pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_xy(x_offset + 32, y_offset + 9); pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"))
-                            pdf.set_xy(x_offset + 32, y_offset + 12); pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"))
-
-                            pdf.set_text_color(0, 0, 0); pdf.set_xy(x_offset + 105, y_offset); pdf.set_font("Arial", 'B', 9); pdf.cell(30, 5, "REMISION", border=1, align='C')
-                            pdf.set_text_color(200, 0, 0); pdf.set_font("Arial", 'B', 10); pdf.set_xy(x_offset + 105, y_offset + 5); pdf.cell(30, 6, folio_str_print, border=1, align='C')
-                            pdf.set_text_color(100, 100, 100); pdf.set_font("Arial", '', 7); pdf.set_xy(x_offset + 105, y_offset + 12); pdf.cell(30, 4, f"FECHA: {fecha_header}", align='C')
+                            llaves_en_compras = set()
+                            nuevos_datos_comp = [headers_comp]
+                            for i in range(1, len(datos_comp)):
+                                while len(datos_comp[i]) < len(headers_comp): datos_comp[i].append("")
+                                k_c = generar_llave(datos_comp[i][idx_c_sin], datos_comp[i][idx_c_desc])
+                                llaves_en_compras.add(k_c)
+                                eliminar_fila = False
+                                if k_c in cambios_bd_compras:
+                                    cb = cambios_bd_compras[k_c]
+                                    if cb.get('cancelar_compra'): eliminar_fila = True
+                                    else:
+                                        if str(cb.get('costo','')).strip(): datos_comp[i][i_costo] = cb['costo']
+                                        if str(cb.get('tiempo','')).strip(): datos_comp[i][i_tiempo] = cb['tiempo']
+                                        if 'cond_pago' in cb and str(cb['cond_pago']).strip() != 'nan': datos_comp[i][i_cond_pago] = cb['cond_pago']
+                                        if 'dias_credito' in cb and str(cb['dias_credito']).strip() != 'nan': datos_comp[i][i_dias_cred] = cb['dias_credito']
+                                        if 'estatus_pago' in cb and str(cb['estatus_pago']).strip() != 'nan': datos_comp[i][i_est_pago] = cb['estatus_pago']
+                                        if 'prov' in cb and str(cb['prov']).strip() and str(cb['prov']).strip() != 'nan': datos_comp[i][i_prov] = cb['prov']
+                                        if 'recibido' in cb: datos_comp[i][i_rec] = cb['recibido']
+                                if not eliminar_fila: nuevos_datos_comp.append(datos_comp[i])
+                                        
+                            fecha_hoy_comp = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
+                            nuevas_filas = []
+                            for k, v in cambios_a_guardar.items():
+                                if v.get('crear_compra') and k not in llaves_en_compras:
+                                    n_row = [""] * len(headers_comp)
+                                    n_row[idx_c_sin] = k[0]; n_row[idx_c_desc] = k[1]; n_row[i_tall] = v.get('compra_taller', ''); n_row[i_veh] = v.get('compra_vehiculo', '')
+                                    n_row[i_fcomp] = fecha_hoy_comp; n_row[i_rec] = 'NO'; n_row[i_costo] = v.get('compra_costo', '0')
+                                    
+                                    nombre_prov_completo = str(v.get('compra_prov', '')).strip()
+                                    eta_calc = "0"; cond_pago_calc = ""; dias_cred_calc = "0"
+                                    if nombre_prov_completo and not df_proveedores.empty:
+                                        for _, row_p in df_proveedores.iterrows():
+                                            p_val = str(row_p.get('Proveedor', '')).strip().upper(); s_val = str(row_p.get('Sucursal', '')).strip().upper()
+                                            llave_p = f"{p_val} - {s_val}" if s_val else p_val
+                                            if llave_p == nombre_prov_completo:
+                                                tiempo_str = str(row_p.get('Tiempo de Entrega', '')).upper()
+                                                numeros = re.findall(r'\d+', tiempo_str)
+                                                if numeros: eta_calc = numeros[-1]
+                                                cond_pago_calc = str(row_p.get('Condición Pago', '')).strip().title()
+                                                dias_cred_calc = str(row_p.get('Días Crédito', '0')).strip()
+                                                break
+                                    n_row[i_prov] = nombre_prov_completo; n_row[i_tiempo] = eta_calc if eta_calc else '0'
+                                    n_row[i_cond_pago] = cond_pago_calc; n_row[i_dias_cred] = dias_cred_calc
+                                    nuevas_filas.append(n_row)
                             
-                            y_datos = y_offset + 22; pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
-                            pdf.set_xy(x_offset, y_datos); pdf.cell(20, 5, "TALLER", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {taller_v}")[:75], border=1)
-                            y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "DIRECCION", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}")[:85], border=1)
-                            y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "SINIESTRO", border=1, fill=True); pdf.set_font("Arial", 'B', 8); pdf.cell(45, 5, limpiar_texto(f" {siniestro_v}"), border=1)
-                            pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "VEHICULO", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}")[:35], border=1)
+                            filas_a_escribir = nuevos_datos_comp + nuevas_filas
+                            while len(filas_a_escribir) < len(datos_comp_crudos): filas_a_escribir.append([""] * len(headers_comp))
+                            ws_comp.update(range_name='A1', values=filas_a_escribir, value_input_option='USER_ENTERED')
+                        except Exception as e_comp: st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
 
-                            y_tabla = y_datos + 10; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0); pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
-                            pdf.cell(15, 6, "CANT", border=1, fill=True, align='C'); pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C')
-
-                            y_item = y_tabla + 6; pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
+                    llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
+                    if llaves_a_imprimir:
+                        marcados_remision = df_completo[df_completo.apply(lambda r: generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, '')) in llaves_a_imprimir, axis=1)]
+                        cols_agrup_univ = [col_id_univ, col_taller_univ, col_marca_univ, col_modelo_univ]
+                        agrupadores = [c for c in cols_agrup_univ if c in marcados_remision.columns]
+                        
+                        avisos_unicos = set()
+                        pdfs_list = []
+                        usuario_print = st.session_state.get('usuario_actual', 'Sistema')
+                        
+                        for keys, df_g in marcados_remision.groupby(agrupadores):
+                            siniestro_v = keys[agrupadores.index(col_id_univ)] if col_id_univ in agrupadores else ""
+                            taller_v = keys[agrupadores.index(col_taller_univ)] if col_taller_univ in agrupadores else ""
+                            marca_v = keys[agrupadores.index(col_marca_univ)] if col_marca_univ in agrupadores else ""
+                            modelo_v = keys[agrupadores.index(col_modelo_univ)] if col_modelo_univ in agrupadores else ""
+                            
+                            folio_str_print = "S/N"
                             for _, row_rem in df_g.iterrows():
-                                cant_v = str(row_rem.get(col_cant_univ, 1))
-                                if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
-                                pdf.set_xy(x_offset, y_item); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C'); pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc_univ, '')))[:80], border=1)
-                                y_item += 5
+                                key_rem = generar_llave(row_rem.get(col_id_univ, ''), row_rem.get(col_desc_univ, ''))
+                                if key_rem in cambios_a_guardar and 'remision_num' in cambios_a_guardar[key_rem]:
+                                    folio_str_print = cambios_a_guardar[key_rem]['remision_num']; break
+                            
+                            fecha_actual = datetime.datetime.now(tz_mx)
+                            fecha_header = fecha_actual.strftime('%d/%b/%Y').upper()
+                            firma_digital = f"Generado por: {usuario_print}"
+                            
+                            dir_v = ""
+                            col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
+                            if not df_catalogo.empty and col_cat_taller:
+                                match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == str(taller_v).strip().upper()]
+                                if not match_taller.empty:
+                                    col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
+                                    if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
+                                else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
+                            else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
+
+                            def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
+
+                            pdf = FPDF(orientation='L', unit='mm', format='A4')
+                            pdf.set_auto_page_break(auto=False, margin=0); pdf.add_page()
+                            
+                            def dibujar_bloque_remision(x_offset):
+                                y_offset = 15
+                                if os.path.exists("logo.png"):
+                                    try: pdf.image("logo.png", x_offset, y_offset - 3, 30)
+                                    except: pass
                                 
-                            pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120); pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
+                                pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
+                                pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"))
+                                pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5); pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"))
+                                pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_xy(x_offset + 32, y_offset + 9); pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"))
+                                pdf.set_xy(x_offset + 32, y_offset + 12); pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"))
 
-                        dibujar_bloque_remision(10)
-                        pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
-                        dibujar_bloque_remision(152)
+                                pdf.set_text_color(0, 0, 0); pdf.set_xy(x_offset + 105, y_offset); pdf.set_font("Arial", 'B', 9); pdf.cell(30, 5, "REMISION", border=1, align='C')
+                                pdf.set_text_color(200, 0, 0); pdf.set_font("Arial", 'B', 10); pdf.set_xy(x_offset + 105, y_offset + 5); pdf.cell(30, 6, folio_str_print, border=1, align='C')
+                                pdf.set_text_color(100, 100, 100); pdf.set_font("Arial", '', 7); pdf.set_xy(x_offset + 105, y_offset + 12); pdf.cell(30, 4, f"FECHA: {fecha_header}", align='C')
+                                
+                                y_datos = y_offset + 22; pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
+                                pdf.set_xy(x_offset, y_datos); pdf.cell(20, 5, "TALLER", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {taller_v}")[:75], border=1)
+                                y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "DIRECCION", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}")[:85], border=1)
+                                y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "SINIESTRO", border=1, fill=True); pdf.set_font("Arial", 'B', 8); pdf.cell(45, 5, limpiar_texto(f" {siniestro_v}"), border=1)
+                                pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "VEHICULO", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}")[:35], border=1)
 
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                            pdf.output(tmp.name)
-                            nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
-                            with open(tmp.name, "rb") as f: pdf_bytes = f.read()
-                            pdfs_list.append({'folio': folio_str_print, 'siniestro': siniestro_v, 'bytes': pdf_bytes, 'nombre': nombre_archivo})
+                                y_tabla = y_datos + 10; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0); pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
+                                pdf.cell(15, 6, "CANT", border=1, fill=True, align='C'); pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C')
 
-                    st.session_state['pdfs_list'] = pdfs_list
-                    if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
-                
-                st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅"); st.cache_data.clear(); st.rerun()
-            except Exception as e: st.error(f"❌ Error guardando: {e}")
+                                y_item = y_tabla + 6; pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
+                                for _, row_rem in df_g.iterrows():
+                                    cant_v = str(row_rem.get(col_cant_univ, 1))
+                                    if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
+                                    pdf.set_xy(x_offset, y_item); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C'); pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc_univ, '')))[:80], border=1)
+                                    y_item += 5
+                                    
+                                pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120); pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
+
+                            dibujar_bloque_remision(10)
+                            pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
+                            dibujar_bloque_remision(152)
+
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                                pdf.output(tmp.name)
+                                nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
+                                with open(tmp.name, "rb") as f: pdf_bytes = f.read()
+                                pdfs_list.append({'folio': folio_str_print, 'siniestro': siniestro_v, 'bytes': pdf_bytes, 'nombre': nombre_archivo})
+
+                        st.session_state['pdfs_list'] = pdfs_list
+                        if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
+                    
+                    st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅"); st.cache_data.clear(); st.rerun()
+                except Exception as e: st.error(f"❌ Error guardando: {e}")

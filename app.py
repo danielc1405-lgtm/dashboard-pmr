@@ -97,10 +97,15 @@ permiso_edicion = st.session_state.get('permiso_edicion', True)
 # ==============================================================================
 modo_consulta = False
 
+# Lista base para todo el equipo operativo
 opciones_menu = [
     "📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", 
-    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🔍 Consultas", "🛠️ Cuartel General"
+    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🔍 Consultas"
 ]
+
+# Validación de seguridad: Añade el Cuartel General SOLO si el usuario es Administrador
+if "ADMIN" in rol_activo:
+    opciones_menu.append("🛠️ Cuartel General")
 
 col_logo, col_menu, col_aseg, col_btn = st.columns([1.5, 6.0, 1.5, 1])
 
@@ -404,8 +409,10 @@ elif vista_actual == "⚙️ Panel Operativo":
     def parse_dt_safe_op(val):
         if pd.isna(val) or str(val).strip() == '': return pd.NaT
         val_str = str(val).lower()
-        for m_es, m_num in meses_es.items():
-            if m_es in val_str: val_str = val_str.replace(m_es, str(m_num).zfill(2)); break
+        # CORRECCIÓN: Diccionario puramente de strings para evitar TypeError
+        meses_map = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+        for m_es, m_num in meses_map.items():
+            if m_es in val_str: val_str = val_str.replace(m_es, m_num); break
         try: return pd.to_datetime(val_str, dayfirst=True)
         except: return pd.NaT
 

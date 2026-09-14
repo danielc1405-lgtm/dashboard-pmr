@@ -50,50 +50,142 @@ usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
 rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 
 # ==============================================================================
-# === [BLOQUE 2: MENÚ SUPERIOR Y NAVEGACIÓN] ===
+# === [BLOQUE 1: IMPORTS, CONFIGURACIÓN VISUAL Y CSS] ===
 # ==============================================================================
+import streamlit as st
+import pandas as pd
+import warnings
+import time
+import os
+import datetime
+import tempfile
+import base64
+from fpdf import FPDF
+import plotly.express as px
+import gspread
+import json
+from google.oauth2.service_account import Credentials
 
-# --- DESACTIVACIÓN DEL MODO CONSULTA VIEJO ---
-modo_consulta = False
+warnings.filterwarnings("ignore")
 
-# --- NUEVAS OPCIONES DE NAVEGACIÓN ---
-opciones_menu = [
-    "📊 Analítico", 
-    "⚙️ Panel Operativo", 
-    "🛒 Compras", 
-    "🏢 Talleres", 
-    "📦 Inventario", 
-    "📝 Remisiones", 
-    "🧾 Facturación", 
-    "🔍 Consultas",
-    "🛠️ Cuartel General"
-]
+st.set_page_config(
+    page_title="Dashboard PMR - Operación",
+    page_icon="📦",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-# --- MAQUETACIÓN DEL ENCABEZADO (Selector integrado) ---
-col_logo, col_menu, col_aseg, col_btn = st.columns([1.5, 6.0, 1.5, 1])
+st.markdown("""
+    <style>
+        [data-testid="stDataFrame"] { zoom: 0.95; }
+        .block-container { 
+            padding-top: 1rem !important; 
+            padding-bottom: 40px; 
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+            max-width: 100% !important; 
+        }
+        header { visibility: hidden; }
+        
+        /* HACK PARA CONGELAR EL ENCABEZADO */
+        div[data-testid="stVerticalBlock"] > div:has(div.stRadio) {
+            position: sticky;
+            top: 0px;
+            z-index: 999;
+            background-color: #0E1117; 
+            padding-top: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #333;
+        }
+        
+        div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }
+        div.row-widget.stRadio > div > label { 
+            background-color: #1E1E24; 
+            padding: 6px 14px; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            border: 1px solid #333; 
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+        }
+        div.row-widget.stRadio > div > label:hover { border-color: #F63366; background-color: #2A2A35;}
+        div.row-widget.stRadio > div > label[data-checked="true"] { 
+            background-color: #F63366; 
+            color: white; 
+            border-color: #F63366; 
+        }
+        div.row-widget.stRadio > div > label > div:first-child { display: none; }
+        
+        .header-coqueto {
+            background: linear-gradient(90deg, #1A1A24 0%, #262730 100%);
+            padding: 12px 20px;
+            border-radius: 8px;
+            border-left: 6px solid;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        }
+        
+        /* ELIMINAR EL PARPADEO GRIS AL EDITAR CELDAS */
+        [data-testid="stDataGrid"] { opacity: 1 !important; }
+        .st-emotion-cache-1kyxreq { display: none !important; }
+        div[data-testid="stAppViewContainer"] { transition: none !important; }
+    </style>
+""", unsafe_allow_html=True)
 
-with col_logo:
-    try: st.image("logo.png", width=120)
-    except: st.markdown("**PREMIER**")
+# ==============================================================================
+# === [BLOQUE 0: CONEXIÓN TEMPRANA Y SISTEMA DE LOGIN] ===
+# ==============================================================================
+SHEET_ID = "10jrOsS054n0atMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
 
-with col_menu:
-    vista_actual = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
+@st.cache_resource
+def init_connection():
+    scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    cred_dict = json.loads(st.secrets["google_credentials"])
+    credenciales = Credentials.from_service_account_info(cred_dict, scopes=scopes)
+    cliente = gspread.authorize(credenciales)
+    return cliente.open_by_key(SHEET_ID)
 
-with col_aseg:
-    # El selector vive aquí arriba y SOLO aparece en estas dos vistas
-    if vista_actual in ["📊 Analítico", "⚙️ Panel Operativo"]:
-        aseguradora_sel = st.selectbox("Aseguradora", ["Multiasistencias", "GNP"], label_visibility="collapsed")
-    else:
-        aseguradora_sel = "MULTI" # Valor fantasma para que no marque error
+if 'autenticado' not in st.session_state:
+    st.session_state['autenticado'] = False
 
-with col_btn:
-    btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
+if not st.session_state['autenticado']:
+    st.markdown("<h1 style='text-align: center; color: #FF4B4B;'>🛡️ Acceso al Sistema PMR</h1>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        with st.form("login_form"):
+            usuario_input = st.text_input("👤 Usuario").strip().lower()
+            password_input = st.text_input("🔑 Contraseña", type="password")
+            btn_login = st.form_submit_button("Entrar al Dashboard", use_container_width=True)
+            
+            if btn_login:
+                try:
+                    doc = init_connection()
+                    ws_usuarios = doc.worksheet("Usuarios") 
+                    df_usuarios = pd.DataFrame(ws_usuarios.get_all_records())
+                    
+                    df_usuarios['Usuario'] = df_usuarios['Usuario'].astype(str).str.strip().str.lower()
+                    df_usuarios['Password'] = df_usuarios['Password'].astype(str).str.strip()
+                    
+                    match = df_usuarios[(df_usuarios['Usuario'] == usuario_input) & (df_usuarios['Password'] == password_input)]
+                    
+                    if not match.empty:
+                        st.session_state['autenticado'] = True
+                        st.session_state['usuario_actual'] = match.iloc[0]['Nombre Completo']
+                        st.session_state['rol_actual'] = match.iloc[0]['Rol']
+                        st.rerun()
+                    else:
+                        st.error("❌ Usuario o contraseña incorrectos.")
+                except Exception as e:
+                    st.error(f"Error al conectar con la base de usuarios: {e}")
+    st.stop() 
 
-st.markdown("---")
-
-# --- SALVAVIDAS ANTI-CRASH (Recuperar variables de sesión) ---
-usuario_activo = st.session_state.get('usuario_actual', 'Usuario')
-permiso_edicion = st.session_state.get('permiso_edicion', True)
+usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
+rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
 
 # ==============================================================================
 # === [BLOQUE 3: CARGA Y PROCESAMIENTO DE DATOS] ===

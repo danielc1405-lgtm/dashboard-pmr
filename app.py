@@ -1381,17 +1381,24 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
         desc_str = ' '.join(str(desc_val).strip().upper().split())
         return (id_str if id_str not in ['NAN', 'NONE'] else '', desc_str if desc_str not in ['NAN', 'NONE'] else '')
     
+    # --- CAMBIO CRÍTICO: Usamos df_completo (UNIVERSAL) en vez de df_trabajo_completo ---
+    col_id_univ = next((c for c in df_completo.columns if "SINIESTRO" in str(c).upper()), None)
+    col_desc_univ = next((c for c in df_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+    col_taller_univ = next((c for c in df_completo.columns if "TALLER" in str(c).upper()), None)
+    col_marca_univ = next((c for c in df_completo.columns if "MARCA" in str(c).upper()), None)
+    col_modelo_univ = next((c for c in df_completo.columns if "MODELO" in str(c).upper()), None)
+    col_cant_univ = next((c for c in df_completo.columns if "CANTIDAD" in str(c).upper() or "CANT" == str(c).upper()), None)
+    
     originales = {}
-    for _, r in df_trabajo_completo.iterrows():
-        k = generar_llave(r.get('Siniestro', r.get(col_id, '')), r.get(col_desc, ''))
+    for _, r in df_completo.iterrows():
+        k = generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, ''))
         originales[k] = {
-            'comentario': str(r.get(col_comentarios, '')).strip(),
-            'guia': str(r.get(col_guia, '')).strip(),
-            'estatus_db': str(r.get(col_estatus, '')).strip().upper(),
-            'remision_bool': str(r.get(col_remision, '')).strip() != '',
-            'aseg': str(r.get(col_aseg, '')).strip().upper(),
-            'vencimiento_db': str(r.get(col_vencimiento, '')).strip(),
-            'asignacion_db': str(r.get(col_asignacion, '')).strip()
+            'comentario': str(r.get(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), ''), ''))).strip(),
+            'guia': str(r.get(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), ''), ''))).strip(),
+            'estatus_db': str(r.get(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), ''), ''))).strip().upper(),
+            'remision_bool': str(r.get(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''), ''))).strip() != '',
+            'vencimiento_db': str(r.get(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), ''), ''))).strip(),
+            'asignacion_db': str(r.get(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), ''), ''))).strip()
         }
         
     cambios_a_guardar = {}
@@ -1546,20 +1553,21 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     ws_uni = doc.worksheet("BD_UNIFICADA")
                     datos_uni = ws_uni.get_all_values()
                     headers = [str(h).strip() for h in datos_uni[0]]
-                    idx_id, idx_desc, idx_estatus, idx_rem = headers.index(col_id), headers.index(col_desc), headers.index(col_estatus), headers.index(col_remision)
+                    idx_id, idx_desc, idx_estatus, idx_rem = headers.index(col_id_univ), headers.index(col_desc_univ), headers.index(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), '')), headers.index(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''))
+                    
                     idx_usr_rem = headers.index("Usuario Remisión") if "Usuario Remisión" in headers else -1
-                    idx_coment = headers.index(col_comentarios) if col_comentarios in headers else -1
-                    idx_guia = headers.index(col_guia) if col_guia in headers else -1
-                    idx_venc = headers.index(col_vencimiento) if col_vencimiento in headers else -1
-                    idx_asig = headers.index(col_asignacion) if col_asignacion in headers else -1
-                    idx_confi = headers.index(col_fecha_confi) if col_fecha_confi in headers else -1
+                    idx_coment = headers.index(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '')) if next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '') in headers else -1
+                    idx_guia = headers.index(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '') in headers else -1
+                    idx_venc = headers.index(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '') in headers else -1
+                    idx_asig = headers.index(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '') in headers else -1
+                    idx_confi = headers.index(next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '') in headers else -1
                     
                     idx_envio = headers.index("Fecha Envío") if "Fecha Envío" in headers else -1
                     idx_recibido = headers.index("Fecha Recibido") if "Fecha Recibido" in headers else -1
                     idx_facturacion = headers.index("Fecha Facturación") if "Fecha Facturación" in headers else -1
                     
                     max_folio_pmr = 0
-                    numeros = df_completo[col_remision].astype(str).str.extract(r'(?i)PMR\s*-\s*0*(\d+)', expand=False)
+                    numeros = df_completo[next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), '')].astype(str).str.extract(r'(?i)PMR\s*-\s*0*(\d+)', expand=False)
                     if not numeros.empty:
                         max_folio_pmr = int(pd.to_numeric(numeros, errors='coerce').max() if pd.notna(pd.to_numeric(numeros, errors='coerce').max()) else 0)
 
@@ -1668,7 +1676,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                 n_row[i_rec] = 'NO'
                                 n_row[i_costo] = v.get('compra_costo', '0')
                                 
-                                # --- AUTO-COMPLETADO MÁGICO DE PROVEEDORES ---
                                 nombre_prov_completo = str(v.get('compra_prov', '')).strip()
                                 eta_calc = "0"
                                 cond_pago_calc = ""
@@ -1705,24 +1712,26 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
 
                 llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
+                
+                # --- CAMBIO CRÍTICO: Filtrado Universal para generación de PDF ---
                 if llaves_a_imprimir:
-                    marcados_remision = df_trabajo_completo[df_trabajo_completo.apply(lambda r: generar_llave(r.get(col_id, ''), r.get(col_desc, '')) in llaves_a_imprimir, axis=1)]
-                    cols_agrup = [col_id, col_taller, col_marca, col_modelo]
-                    agrupadores = [c for c in cols_agrup if c in marcados_remision.columns]
+                    marcados_remision = df_completo[df_completo.apply(lambda r: generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, '')) in llaves_a_imprimir, axis=1)]
+                    cols_agrup_univ = [col_id_univ, col_taller_univ, col_marca_univ, col_modelo_univ]
+                    agrupadores = [c for c in cols_agrup_univ if c in marcados_remision.columns]
                     
                     avisos_unicos = set()
                     pdfs_list = []
                     usuario_print = st.session_state.get('usuario_actual', 'Sistema')
                     
                     for keys, df_g in marcados_remision.groupby(agrupadores):
-                        siniestro_v = keys[agrupadores.index(col_id)] if col_id in agrupadores else ""
-                        taller_v = keys[agrupadores.index(col_taller)] if col_taller in agrupadores else ""
-                        marca_v = keys[agrupadores.index(col_marca)] if col_marca in agrupadores else ""
-                        modelo_v = keys[agrupadores.index(col_modelo)] if col_modelo in agrupadores else ""
+                        siniestro_v = keys[agrupadores.index(col_id_univ)] if col_id_univ in agrupadores else ""
+                        taller_v = keys[agrupadores.index(col_taller_univ)] if col_taller_univ in agrupadores else ""
+                        marca_v = keys[agrupadores.index(col_marca_univ)] if col_marca_univ in agrupadores else ""
+                        modelo_v = keys[agrupadores.index(col_modelo_univ)] if col_modelo_univ in agrupadores else ""
                         
                         folio_str_print = "S/N"
                         for _, row_rem in df_g.iterrows():
-                            key_rem = generar_llave(row_rem.get(col_id, ''), row_rem.get(col_desc, ''))
+                            key_rem = generar_llave(row_rem.get(col_id_univ, ''), row_rem.get(col_desc_univ, ''))
                             if key_rem in cambios_a_guardar and 'remision_num' in cambios_a_guardar[key_rem]:
                                 folio_str_print = cambios_a_guardar[key_rem]['remision_num']
                                 break
@@ -1798,11 +1807,11 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             y_item = y_tabla + 6
                             pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
                             for _, row_rem in df_g.iterrows():
-                                cant_v = str(row_rem.get(col_cant, 1))
+                                cant_v = str(row_rem.get(col_cant_univ, 1))
                                 if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
                                 pdf.set_xy(x_offset, y_item)
                                 pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C')
-                                pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
+                                pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc_univ, '')))[:80], border=1)
                                 y_item += 5
                                 
                             pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120)

@@ -988,7 +988,7 @@ if vista_actual == "📝 Remisiones":
 # === [BLOQUE 9: VISTAS - CONSULTAS Y CUARTEL GENERAL] ===
 # ==============================================================================
 if vista_actual == "🔍 Consultas":
-    st.markdown("## 🔍 Centro de Inteligencia 360°")
+    st.markdown("## 🔍 Consulta Global")
     st.info("Buscador global: Ingresa un número de siniestro, VIN, nombre de taller, modelo de auto o refacción. El sistema escaneará todas las aseguradoras y el inventario.")
     query = st.text_input("🔎 Búsqueda Omnidireccional:", placeholder="Ej. B79816163, RIO 2018, 3KPF...").strip().upper()
     if len(query) >= 3:

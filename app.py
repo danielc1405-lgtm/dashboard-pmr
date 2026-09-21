@@ -234,7 +234,8 @@ if not df_trabajo_completo.empty:
     df_trabajo = df_trabajo_completo.copy()
     
     if modo_consulta: df_proceso = df_trabajo.copy()
-    else: df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|ENTREGADO|RECIBIDO|FACTURADO|REASIGNAR|RECOLEC")].copy() if col_estatus else df_trabajo.copy()
+    # AQUÍ ESTÁ LA CORRECCIÓN: Se quitó la palabra ENTREGADO de la lista de exclusión
+    else: df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|RECIBIDO|FACTURADO|REASIGNAR|RECOLEC")].copy() if col_estatus else df_trabajo.copy()
         
     df_recoleccion_total = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("REASIGNAR|RECOLEC")].copy() if col_estatus else pd.DataFrame()
 else:

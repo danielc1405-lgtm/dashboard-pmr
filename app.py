@@ -234,10 +234,10 @@ if not df_trabajo_completo.empty:
     df_trabajo = df_trabajo_completo.copy()
     
     if modo_consulta: df_proceso = df_trabajo.copy()
-    # AQUÍ ESTÁ LA CORRECCIÓN: Se quitó la palabra ENTREGADO de la lista de exclusión
-    else: df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|RECIBIDO|FACTURADO|REASIGNAR|RECOLEC")].copy() if col_estatus else df_trabajo.copy()
+    # CORRECCIÓN: Se liberó REASIGNAR y ENTREGADO del filtro de exclusión general
+    else: df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|RECIBIDO|FACTURADO|RECOLEC")].copy() if col_estatus else df_trabajo.copy()
         
-    df_recoleccion_total = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("REASIGNAR|RECOLEC")].copy() if col_estatus else pd.DataFrame()
+    df_recoleccion_total = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("RECOLEC")].copy() if col_estatus else pd.DataFrame()
 else:
     col_id = col_taller = col_marca = col_modelo = col_desc = col_cant = col_precio = col_estatus = col_vencimiento = col_asignacion = col_fecha_confi = col_guia = col_remision = col_comentarios = col_aseg = None
     df_trabajo = df_proceso = df_recoleccion_total = pd.DataFrame()
@@ -485,14 +485,17 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_conf], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
 
-    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REASIGNAR|RECOLEC"))].copy() if col_vencimiento else pd.DataFrame()
+    # CORRECCIÓN: Se quitó REASIGNAR del filtro de exclusión de Vencimientos de Hoy
+    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC"))].copy() if col_vencimiento else pd.DataFrame()
     with st.expander(f"🚨 Vencimientos de Hoy | {len(df_vencimientos)} Partida(s)", expanded=False):
         if not df_vencimientos.empty:
             if not modo_consulta and permiso_edicion:
-                df_vencimientos['Cancelar'] = False; df_vencimientos['Reasignar'] = False; df_vencimientos['Nueva Fecha'] = pd.NaT
+                df_vencimientos['Cancelar'] = False
+                df_vencimientos['Reasignar'] = df_vencimientos[col_estatus].astype(str).str.upper() == "REASIGNAR" # Activa la casilla si ya está reasignado
+                df_vencimientos['Nueva Fecha'] = pd.NaT
                 cols_venc = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_guia, col_comentarios, 'Cancelar', 'Reasignar', 'Nueva Fecha'] if c in df_vencimientos.columns]
                 config_venc = base_config.copy()
-                config_venc.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
+                config_venc.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig"), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
                 df_editado_venc = st.data_editor(df_vencimientos[cols_venc], column_config=config_venc, disabled=[c for c in cols_venc if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios, col_guia]], hide_index=True, use_container_width=True, key="ed_venc")
                 for col in [col_id, col_marca, col_modelo]:
                     if col in df_vencimientos.columns and col not in df_editado_venc.columns: df_editado_venc[col] = df_vencimientos[col].values
@@ -502,15 +505,18 @@ elif vista_actual == "⚙️ Panel Operativo":
                 
     if col_vencimiento and not df_filtrado.empty:
         fechas_venc_filtro = df_filtrado[col_vencimiento].apply(parse_dt_safe_op)
-        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REASIGNAR|RECOLEC"))].copy()
+        # CORRECCIÓN: Se quitó REASIGNAR del filtro de exclusión de Vencimientos Atrasados
+        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC"))].copy()
     else: df_atrasadas = pd.DataFrame()
     with st.expander(f"❌ Vencimientos Atrasados | {len(df_atrasadas)} Partida(s)", expanded=False):
         if not df_atrasadas.empty:
             if not modo_consulta and permiso_edicion:
-                df_atrasadas['Cancelar'] = False; df_atrasadas['Reasignar'] = False; df_atrasadas['Nueva Fecha'] = pd.NaT
+                df_atrasadas['Cancelar'] = False
+                df_atrasadas['Reasignar'] = df_atrasadas[col_estatus].astype(str).str.upper() == "REASIGNAR" # Activa la casilla si ya está reasignado
+                df_atrasadas['Nueva Fecha'] = pd.NaT
                 cols_atr = [c for c in [col_taller, col_id, 'Vehiculo_Info', col_cant, col_desc, col_precio, col_estatus, col_vencimiento, col_comentarios, 'Cancelar', 'Reasignar', 'Nueva Fecha'] if c in df_atrasadas.columns]
                 config_atr = base_config.copy()
-                config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
+                config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig"), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
                 df_editado_atrasadas = st.data_editor(df_atrasadas[cols_atr], column_config=config_atr, disabled=[c for c in cols_atr if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios]], hide_index=True, use_container_width=True, key="ed_atr")
                 for col in [col_id, col_marca, col_modelo]:
                     if col in df_atrasadas.columns and col not in df_editado_atrasadas.columns: df_editado_atrasadas[col] = df_atrasadas[col].values

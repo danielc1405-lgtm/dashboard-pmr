@@ -97,10 +97,10 @@ permiso_edicion = st.session_state.get('permiso_edicion', True)
 # ==============================================================================
 modo_consulta = False
 
-# SE AGREGÓ "💲 Cotizador" A LA LISTA DE NAVEGACIÓN
+# SE AGREGÓ "Precios Promedio " A LA LISTA DE NAVEGACIÓN
 opciones_menu = [
     "📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", 
-    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedios", "🔍 Consultas", "🛠️ Cuartel General"
+    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
 ]
 
 col_logo, col_menu, col_aseg, col_btn = st.columns([1.5, 6.0, 1.5, 1])
@@ -997,8 +997,8 @@ if vista_actual == "📝 Remisiones":
 # ==============================================================================
 # === [BLOQUE 9: VISTAS - COTIZADOR, CONSULTAS Y CUARTEL GENERAL] ===
 # ==============================================================================
-if vista_actual == "💲 Cotizador":
-    st.markdown("## 💲 Cotizador de Precios Históricos")
+if vista_actual == "Precio Promedio":
+    st.markdown("## Preco Promedio de Precios Históricos")
     st.info("Filtra el historial de la base unificada para obtener referencias de precios (Promedio, Máximo y Mínimo) para nuevas cotizaciones.")
 
     if not df_completo.empty:

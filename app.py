@@ -97,9 +97,10 @@ permiso_edicion = st.session_state.get('permiso_edicion', True)
 # ==============================================================================
 modo_consulta = False
 
+# SE AGREGÓ "💲 Cotizador" A LA LISTA DE NAVEGACIÓN
 opciones_menu = [
     "📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", 
-    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🔍 Consultas", "🛠️ Cuartel General"
+    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedios", "🔍 Consultas", "🛠️ Cuartel General"
 ]
 
 col_logo, col_menu, col_aseg, col_btn = st.columns([1.5, 6.0, 1.5, 1])
@@ -994,9 +995,80 @@ if vista_actual == "📝 Remisiones":
     else: st.warning("La base de datos está vacía.")
 
 # ==============================================================================
-# === [BLOQUE 9: VISTAS - CONSULTAS Y CUARTEL GENERAL] ===
+# === [BLOQUE 9: VISTAS - COTIZADOR, CONSULTAS Y CUARTEL GENERAL] ===
 # ==============================================================================
-if vista_actual == "🔍 Consultas":
+if vista_actual == "💲 Cotizador":
+    st.markdown("## 💲 Cotizador de Precios Históricos")
+    st.info("Filtra el historial de la base unificada para obtener referencias de precios (Promedio, Máximo y Mínimo) para nuevas cotizaciones.")
+
+    if not df_completo.empty:
+        df_cot = df_completo.copy()
+        
+        # Mapeo dinámico de columnas
+        col_marca_cot = next((c for c in df_cot.columns if "MARCA" in str(c).upper()), None)
+        col_modelo_cot = next((c for c in df_cot.columns if "MODELO" in str(c).upper()), None)
+        col_ano_cot = next((c for c in df_cot.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
+        col_desc_cot = next((c for c in df_cot.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+        col_origen_cot = next((c for c in df_cot.columns if "ORIGEN" in str(c).upper()), None)
+        col_precio_cot = next((c for c in df_cot.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
+
+        if col_marca_cot and col_precio_cot and col_desc_cot:
+            # Limpieza crucial: Quitar símbolos y convertir a número para las métricas matemáticas
+            df_cot['Precio_Num'] = df_cot[col_precio_cot].astype(str).replace({r'\$': '', r',': '', r' ': ''}, regex=True)
+            df_cot['Precio_Num'] = pd.to_numeric(df_cot['Precio_Num'], errors='coerce')
+            df_cot = df_cot.dropna(subset=['Precio_Num']) 
+            df_cot = df_cot[df_cot['Precio_Num'] > 0] 
+
+            col_m, col_mo, col_a, col_p = st.columns(4)
+            with col_m:
+                lista_marcas = ["Todas"] + sorted(df_cot[col_marca_cot].dropna().astype(str).unique().tolist())
+                filtro_marca = st.selectbox("Marca", options=lista_marcas)
+            with col_mo:
+                if filtro_marca != "Todas":
+                    lista_modelos = ["Todos"] + sorted(df_cot[df_cot[col_marca_cot] == filtro_marca][col_modelo_cot].dropna().astype(str).unique().tolist())
+                else:
+                    lista_modelos = ["Todos"] + sorted(df_cot[col_modelo_cot].dropna().astype(str).unique().tolist())
+                filtro_modelo = st.selectbox("Modelo", options=lista_modelos)
+            with col_a:
+                lista_anios = ["Todos"] + sorted(df_cot[col_ano_cot].dropna().astype(str).unique().tolist(), reverse=True)
+                filtro_anio = st.selectbox("Año", options=lista_anios)
+            with col_p:
+                filtro_pieza = st.text_input("Buscar Pieza (Ej. Salpicadera)", value="")
+
+            # Motor de filtrado
+            if filtro_marca != "Todas":
+                df_cot = df_cot[df_cot[col_marca_cot] == filtro_marca]
+            if filtro_modelo != "Todos":
+                df_cot = df_cot[df_cot[col_modelo_cot] == filtro_modelo]
+            if filtro_anio != "Todos":
+                df_cot = df_cot[df_cot[col_ano_cot].astype(str) == filtro_anio]
+            if filtro_pieza.strip() != "":
+                df_cot = df_cot[df_cot[col_desc_cot].astype(str).str.contains(filtro_pieza.strip(), case=False, na=False)]
+
+            st.divider()
+
+            if not df_cot.empty:
+                precio_promedio = df_cot['Precio_Num'].mean()
+                precio_max = df_cot['Precio_Num'].max()
+                precio_min = df_cot['Precio_Num'].min()
+
+                kpi1, kpi2, kpi3 = st.columns(3)
+                kpi1.metric("⚖️ Precio Promedio", f"${precio_promedio:,.2f}" if pd.notnull(precio_promedio) else "$0.00")
+                kpi2.metric("📈 Precio Máximo", f"${precio_max:,.2f}" if pd.notnull(precio_max) else "$0.00")
+                kpi3.metric("📉 Precio Mínimo", f"${precio_min:,.2f}" if pd.notnull(precio_min) else "$0.00")
+
+                st.caption(f"**Resultados encontrados:** {len(df_cot)} piezas históricas")
+
+                columnas_vista = [c for c in [col_marca_cot, col_modelo_cot, col_ano_cot, col_desc_cot, col_origen_cot, col_precio_cot] if c]
+                st.dataframe(df_cot[columnas_vista].sort_values(by=col_precio_cot, ascending=False), use_container_width=True, hide_index=True)
+            else:
+                st.info("No hay registros históricos que coincidan con estos filtros.")
+        else:
+            st.warning("Faltan columnas clave (Marca, Modelo, Descripción o Precio) en la base maestra.")
+    else:
+        st.warning("La base de datos está vacía.")
+
+elif vista_actual == "🔍 Consultas":
     st.markdown("## 🔍 Consulta Global")
     st.info("Buscador global: Ingresa un número de siniestro, VIN, nombre de taller, modelo de auto o refacción. El sistema escaneará todas las aseguradoras y el inventario.")
     query = st.text_input("🔎 Búsqueda Omnidireccional:", placeholder="Ej. B79816163, RIO 2018, 3KPF...").strip().upper()
@@ -1060,7 +1132,7 @@ if vista_actual == "🔍 Consultas":
                 st.dataframe(df_inv_disp, hide_index=True, use_container_width=True)
     elif len(query) > 0: st.caption("Escribe al menos 3 caracteres para activar el motor de búsqueda profunda...")
 
-if vista_actual == "🛠️ Cuartel General":
+elif vista_actual == "🛠️ Cuartel General":
     st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")
     st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, reimpresiones y rutas locales.")
     col_c1, col_c2 = st.columns(2)

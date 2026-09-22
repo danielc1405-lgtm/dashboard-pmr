@@ -997,8 +997,8 @@ if vista_actual == "📝 Remisiones":
 # ==============================================================================
 # === [BLOQUE 9: VISTAS - COTIZADOR, CONSULTAS Y CUARTEL GENERAL] ===
 # ==============================================================================
-if vista_actual == "Precio Promedio":
-    st.markdown("## Preco Promedio de Precios Históricos")
+if vista_actual == "Precios Promedio":
+    st.markdown("## 💲 Precios Promedio Históricos")
     st.info("Filtra el historial de la base unificada para obtener referencias de precios (Promedio, Máximo y Mínimo) para nuevas cotizaciones.")
 
     if not df_completo.empty:

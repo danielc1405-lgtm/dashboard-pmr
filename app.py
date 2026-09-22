@@ -25,9 +25,9 @@ st.markdown("""
     <style>
         [data-testid="stDataFrame"] { zoom: 0.95; }
         
-        /* Liberar el contenedor principal para que el sticky no se rompa al redibujar tablas */
+        /* 1. Matar el padding fantasma del contenedor principal de Streamlit */
         .main .block-container { 
-            padding-top: 1rem !important; 
+            padding-top: 0rem !important; 
             padding-bottom: 40px; 
             padding-left: 1rem !important; 
             padding-right: 1rem !important; 
@@ -39,20 +39,26 @@ st.markdown("""
             overflow: visible !important;
         }
         
-        header { visibility: hidden; height: 0px !important; }
+        /* 2. Destruir el espacio reservado del header nativo */
+        header[data-testid="stHeader"] { 
+            visibility: hidden !important; 
+            height: 0px !important; 
+            padding: 0px !important; 
+            min-height: 0px !important; 
+        }
         
-        /* --- CINTURÓN DE SEGURIDAD PARA EL MENÚ SUPERIOR (STICKY) --- */
-        /* Se agregan !important para evitar que Streamlit lo anule durante la edición de celdas */
+        /* --- 3. CINTURÓN DE SEGURIDAD PARA EL MENÚ SUPERIOR (STICKY) --- */
         div[data-testid="stVerticalBlock"] > div:has([data-testid="stRadio"]) {
             position: -webkit-sticky !important;
             position: sticky !important; 
-            top: 0px !important; 
+            top: -15px !important; /* Sube la barra para tragar el espacio vacío */
             z-index: 99999 !important; 
             background-color: #0E1117 !important; 
-            padding-top: 15px !important; 
+            padding-top: 30px !important; /* Rellena el color oscuro hacia arriba */
             padding-bottom: 15px !important; 
             border-bottom: 1px solid #333 !important;
             box-shadow: 0px 6px 15px rgba(0,0,0,0.6) !important;
+            margin-top: -15px !important;
         }
         
         div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }

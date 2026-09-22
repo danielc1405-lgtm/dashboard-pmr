@@ -24,12 +24,37 @@ st.set_page_config(page_title="Dashboard PMR - Operación", page_icon="📦", la
 st.markdown("""
     <style>
         [data-testid="stDataFrame"] { zoom: 0.95; }
-        .block-container { padding-top: 1rem !important; padding-bottom: 40px; padding-left: 1rem !important; padding-right: 1rem !important; max-width: 100% !important; }
-        header { visibility: hidden; }
         
-        div[data-testid="stVerticalBlock"] > div:has(div.stRadio) {
-            position: sticky; top: 0px; z-index: 999; background-color: #0E1117; padding-top: 15px; padding-bottom: 15px; border-bottom: 1px solid #333;
+        /* Liberar el contenedor principal para que el sticky no se rompa al redibujar tablas */
+        .main .block-container { 
+            padding-top: 1rem !important; 
+            padding-bottom: 40px; 
+            padding-left: 1rem !important; 
+            padding-right: 1rem !important; 
+            max-width: 100% !important; 
+            overflow: visible !important; 
         }
+        
+        div[data-testid="stVerticalBlock"] {
+            overflow: visible !important;
+        }
+        
+        header { visibility: hidden; height: 0px !important; }
+        
+        /* --- CINTURÓN DE SEGURIDAD PARA EL MENÚ SUPERIOR (STICKY) --- */
+        /* Se agregan !important para evitar que Streamlit lo anule durante la edición de celdas */
+        div[data-testid="stVerticalBlock"] > div:has([data-testid="stRadio"]) {
+            position: -webkit-sticky !important;
+            position: sticky !important; 
+            top: 0px !important; 
+            z-index: 99999 !important; 
+            background-color: #0E1117 !important; 
+            padding-top: 15px !important; 
+            padding-bottom: 15px !important; 
+            border-bottom: 1px solid #333 !important;
+            box-shadow: 0px 6px 15px rgba(0,0,0,0.6) !important;
+        }
+        
         div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }
         div.row-widget.stRadio > div > label { background-color: #1E1E24; padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid #333; font-size: 0.95rem; transition: all 0.3s ease; }
         div.row-widget.stRadio > div > label:hover { border-color: #F63366; background-color: #2A2A35;}

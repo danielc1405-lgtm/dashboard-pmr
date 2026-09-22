@@ -97,7 +97,6 @@ permiso_edicion = st.session_state.get('permiso_edicion', True)
 # ==============================================================================
 modo_consulta = False
 
-# SE AGREGÓ "Precios Promedio " A LA LISTA DE NAVEGACIÓN
 opciones_menu = [
     "📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", 
     "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
@@ -116,14 +115,11 @@ with col_aseg:
     if vista_actual in ["📊 Analítico", "⚙️ Panel Operativo"]:
         aseguradora_sel = st.selectbox("Aseguradora", ["Multiasistencias", "GNP"], label_visibility="collapsed")
     else:
-        aseguradora_sel = "MULTI" # Homologado en oculto para liberar espacio
+        aseguradora_sel = "MULTI" 
 
 with col_btn:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
-    # --- CREAMOS EL ESPACIO RESERVADO PARA EL SPINNER ---
     espacio_spinner = st.empty()
-
-st.markdown("---")
 
 # ==============================================================================
 # === [BLOQUE 4: CARGA Y PROCESAMIENTO DE DATOS] ===
@@ -461,10 +457,7 @@ elif vista_actual == "⚙️ Panel Operativo":
     if col_fecha_confi: base_config[col_fecha_confi] = st.column_config.TextColumn("Conf.", width="small")
     if col_cant: base_config[col_cant] = st.column_config.TextColumn("Cant", width="small")
     if col_desc: base_config[col_desc] = st.column_config.TextColumn("Descrip.") 
-    
-    # CORRECCIÓN: AGREGAMOS CONFIGURACIÓN VISUAL PARA ORIGEN
     if col_origen: base_config[col_origen] = st.column_config.TextColumn("Origen", width="small")
-    
     if col_precio: base_config[col_precio] = st.column_config.TextColumn("Precio", width="small")
     if col_estatus: base_config[col_estatus] = st.column_config.TextColumn("Estatus", width="small")
     if col_vencimiento: base_config[col_vencimiento] = st.column_config.TextColumn("Venc.", width="small")
@@ -482,7 +475,6 @@ elif vista_actual == "⚙️ Panel Operativo":
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion: 
                             df_grupo['Confirmar Surtido'] = False; df_grupo['Cancelar'] = False
-                            # CORRECCIÓN: INCLUIMOS col_origen EN LA TABLA EDITABLE
                             cols_conf = [c for c in [col_cant, col_desc, col_origen, col_asignacion, col_vencimiento, col_estatus, col_comentarios, 'Confirmar Surtido', 'Cancelar'] if c in df_grupo.columns]
                             config_conf = base_config.copy()
                             config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False)})
@@ -491,7 +483,6 @@ elif vista_actual == "⚙️ Panel Operativo":
                                 if col in df_grupo.columns and col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
                             dfs_editados_conf.append(df_editado_parcial)
                         else:
-                            # CORRECCIÓN: INCLUIMOS col_origen EN LA TABLA DE SOLO LECTURA
                             cols_conf = [c for c in [col_cant, col_desc, col_origen, col_asignacion, col_vencimiento, col_estatus, col_comentarios] if c in df_grupo.columns]
                             st.dataframe(df_grupo[cols_conf], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
@@ -560,7 +551,6 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_asignados.empty:
             if col_estatus:
                 estatus_upper = df_asignados[col_estatus].astype(str).str.upper()
-                df_asignados['Pedido'] = estatus_upper.str.contains("EN PROCESAMIENTO")
                 df_asignados['Entregado'] = estatus_upper.str.contains("ENTREGADO")
                 df_asignados['Recibido'] = estatus_upper.str.contains("RECIBIDO")
                 df_asignados['Cancelar'] = estatus_upper.str.contains("CANCELADO")
@@ -598,23 +588,22 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby(col_id):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion:
-                            columnas_checkbox = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Cancelar']
-                            # CORRECCIÓN: INCLUIMOS col_origen EN LA TABLA EDITABLE
-                            orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_origen, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_checkbox
+                            columnas_operacion = ['Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Cancelar']
+                            # ELIMINADO EL CHECKBOX "PEDIDO" AQUÍ, SOLO DEJAMOS PROVEEDOR Y COSTO
+                            orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_origen, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_operacion
                             config_pedidos = base_config.copy()
                             config_pedidos.update({ 
                                 col_asignacion: st.column_config.TextColumn("Asig."), col_vencimiento: st.column_config.TextColumn("Venc."),
-                                "Pedido": st.column_config.CheckboxColumn("🛒 Ped"), "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), 
+                                "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), 
                                 "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="$ %.2f"), "ETA (Días)": st.column_config.NumberColumn("⏳ Días", step=1, disabled=True), 
                                 "Entregado": st.column_config.CheckboxColumn("🚚 Ent"), "Recibido": st.column_config.CheckboxColumn("🏁 Rec"), "Cancelar": st.column_config.CheckboxColumn("🚫 Can") 
                             })
-                            columnas_editables = ['Pedido', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Cancelar', col_comentarios, col_guia, col_asignacion, col_vencimiento]
+                            columnas_editables = ['Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Cancelar', col_comentarios, col_guia, col_asignacion, col_vencimiento]
                             df_editado_parcial = st.data_editor(df_grupo[orden_deseado], column_config=config_pedidos, disabled=[c for c in orden_deseado if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                             for col in [col_id, col_taller, col_marca, col_modelo, 'Vehiculo_Info', col_origen]:
                                 if col in df_grupo.columns and col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
                             dfs_editados.append(df_editado_parcial)
                         else:
-                            # CORRECCIÓN: INCLUIMOS col_origen EN LA TABLA DE SOLO LECTURA
                             orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_origen, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns]
                             st.dataframe(df_grupo[orden_deseado], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados: df_editado = pd.concat(dfs_editados, ignore_index=True)
@@ -1295,7 +1284,11 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             for _, row in df_editado.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
-                pedido_bool = row.get('Pedido', False)
+                
+                # LÓGICA AUTOMÁTICA DE PEDIDO: Si hay un proveedor seleccionado, asumimos que ya es un pedido en procesamiento
+                prov_asignado = str(row.get('Proveedor', '')).strip()
+                pedido_bool = True if prov_asignado != '' else False
+                
                 nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN PROCESAMIENTO" if pedido_bool else None
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 guia_actual = str(row.get(col_guia, '')).strip()
@@ -1312,7 +1305,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 
                 if pedido_bool and nuevo_estatus != "CANCELADO":
                     cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
-                    cambios_a_guardar[k]['compra_prov'] = str(row.get('Proveedor', '')).strip()
+                    cambios_a_guardar[k]['compra_prov'] = prov_asignado
                     cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
                     cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
                     cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
@@ -1577,373 +1570,3 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     
                     st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅"); st.cache_data.clear(); st.rerun()
                 except Exception as e: st.error(f"❌ Error guardando: {e}")
-
-
-# ==============================================================================
-# === [BLOQUE 11: MOTOR DE GUARDADO Y SINCRONIZACIÓN] ===
-# ==============================================================================
-trigger_rem = st.session_state.pop('trigger_remision_manual', None)
-
-if (btn_guardar or trigger_rem) and permiso_edicion:
-    st.session_state['pdfs_list'] = []
-    st.session_state['avisos_remision'] = []
-    def generar_llave(id_val, desc_val):
-        id_str = str(id_val).strip().upper()
-        if id_str.endswith('.0'): id_str = id_str[:-2]
-        desc_str = ' '.join(str(desc_val).strip().upper().split())
-        return (id_str if id_str not in ['NAN', 'NONE'] else '', desc_str if desc_str not in ['NAN', 'NONE'] else '')
-    
-    col_id_univ = next((c for c in df_completo.columns if "SINIESTRO" in str(c).upper()), None)
-    col_desc_univ = next((c for c in df_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
-    col_taller_univ = next((c for c in df_completo.columns if "TALLER" in str(c).upper()), None)
-    col_marca_univ = next((c for c in df_completo.columns if "MARCA" in str(c).upper()), None)
-    col_modelo_univ = next((c for c in df_completo.columns if "MODELO" in str(c).upper()), None)
-    col_cant_univ = next((c for c in df_completo.columns if "CANTIDAD" in str(c).upper() or "CANT" == str(c).upper()), None)
-    
-    originales = {}
-    for _, r in df_completo.iterrows():
-        k = generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, ''))
-        originales[k] = {
-            'comentario': str(r.get(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), ''), '')).strip(),
-            'guia': str(r.get(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), ''), '')).strip(),
-            'estatus_db': str(r.get(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), ''), '')).strip().upper(),
-            'remision_bool': str(r.get(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''), '')).strip() != '',
-            'vencimiento_db': str(r.get(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), ''), '')).strip(),
-            'asignacion_db': str(r.get(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), ''), '')).strip()
-        }
-        
-    cambios_a_guardar = {}
-    cambios_bd_compras = {}
-    tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
-    fecha_hoy_sistema = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
-
-    if trigger_rem:
-        for desc in trigger_rem['descripciones']:
-            k = generar_llave(trigger_rem['siniestro'], desc)
-            orig = originales.get(k, {'remision_bool': False})
-            cambios_a_guardar.setdefault(k, {}).update({'estatus': 'EN TRANSITO', 'imprimir_remision': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
-            if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
-
-    if btn_guardar:
-        if not df_editado_conf.empty:
-            for _, row in df_editado_conf.iterrows():
-                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Confirmar Surtido') else None)
-                comentario_actual = str(row.get(col_comentarios, '')).strip()
-                if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                    if nuevo_estatus == "EN PROCESAMIENTO": cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-
-        if not df_editado_venc.empty:
-            for _, row in df_editado_venc.iterrows():
-                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': ''})
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
-                comentario_actual = str(row.get(col_comentarios, '')).strip()
-                guia_actual = str(row.get(col_guia, '')).strip()
-                nueva_fecha = row.get('Nueva Fecha')
-                if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                    try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
-                    except: fecha_str = str(nueva_fecha)
-                    cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
-                    if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                elif row.get('Reasignar') and not nuevo_estatus: nuevo_estatus = "REASIGNAR" 
-                if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-
-        if not df_editado_atrasadas.empty:
-            for _, row in df_editado_atrasadas.iterrows():
-                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
-                comentario_actual = str(row.get(col_comentarios, '')).strip()
-                nueva_fecha = row.get('Nueva Fecha')
-                if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                    try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
-                    except: fecha_str = str(nueva_fecha)
-                    cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
-                    if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                elif row.get('Reasignar') and not nuevo_estatus: nuevo_estatus = "REASIGNAR" 
-                if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-
-        if not df_editado_cobro.empty:
-            for _, row in df_editado_cobro.iterrows():
-                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-                comentario_actual = str(row.get(col_comentarios, '')).strip()
-                if row.get('Marcar Recibido'): 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
-                    cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-
-        if not df_editado_fact.empty:
-            for _, row in df_editado_fact.iterrows():
-                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                if row.get('Facturado'): 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = "FACTURADO"
-                    cambios_a_guardar[k]['fecha_facturacion'] = fecha_hoy_sistema
-
-        if not df_editado.empty:
-            for _, row in df_editado.iterrows():
-                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
-                pedido_bool = row.get('Pedido', False)
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN PROCESAMIENTO" if pedido_bool else None
-                comentario_actual = str(row.get(col_comentarios, '')).strip()
-                guia_actual = str(row.get(col_guia, '')).strip()
-                venc_actual = str(row.get(col_vencimiento, '')).strip()
-                asig_actual = str(row.get(col_asignacion, '')).strip()
-                
-                if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                    if nuevo_estatus == "RECIBIDO": cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-                if venc_actual and venc_actual != orig['vencimiento_db']: cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
-                if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
-                
-                if pedido_bool and nuevo_estatus != "CANCELADO":
-                    cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
-                    cambios_a_guardar[k]['compra_prov'] = str(row.get('Proveedor', '')).strip()
-                    cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
-                    cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
-                    cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
-
-        if vista_actual == "🛒 Compras":
-            df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
-            if not df_editado_compras.empty:
-                for _, row in df_editado_compras.iterrows():
-                    k = generar_llave(row.get('Siniestro', ''), row.get('Descripción Pieza', ''))
-                    orig = originales.get(k, {'estatus_db': '', 'remision_bool': False})
-                    cambios_bd_compras.setdefault(k, {})
-                    if row.get('Cancelar Compra'):
-                        cambios_bd_compras[k]['cancelar_compra'] = True
-                        cambios_a_guardar.setdefault(k, {})['estatus'] = "POR CONFIRMAR"
-                    else:
-                        cambios_bd_compras[k]['costo'] = str(row.get('Costo Compra', '')).replace('$', '').strip()
-                        cambios_bd_compras[k]['tiempo'] = row.get('Tiempo Entrega (Días)', '')
-                        cambios_bd_compras[k]['cond_pago'] = row.get('Condición Pago', '')
-                        cambios_bd_compras[k]['dias_credito'] = row.get('Días Crédito', '')
-                        cambios_bd_compras[k]['estatus_pago'] = row.get('Estatus Pago', '')
-                        cambios_bd_compras[k]['prov'] = row.get('Proveedor', '')
-                        cambios_bd_compras[k]['recibido'] = 'SI' if row.get('Recibido') else 'NO'
-                        if row.get('Recibido'): cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO" 
-
-    if cambios_a_guardar or cambios_bd_compras:
-        with st.spinner("Sincronizando en la nube..."):
-            try:
-                doc = init_connection()
-                if cambios_a_guardar:
-                    ws_uni = doc.worksheet("BD_UNIFICADA")
-                    datos_uni = ws_uni.get_all_values()
-                    headers = [str(h).strip() for h in datos_uni[0]]
-                    idx_id, idx_desc, idx_estatus, idx_rem = headers.index(col_id_univ), headers.index(col_desc_univ), headers.index(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), '')), headers.index(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''))
-                    
-                    idx_usr_rem = headers.index("Usuario Remisión") if "Usuario Remisión" in headers else -1
-                    idx_coment = headers.index(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '')) if next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '') in headers else -1
-                    idx_guia = headers.index(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '') in headers else -1
-                    idx_venc = headers.index(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '') in headers else -1
-                    idx_asig = headers.index(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '') in headers else -1
-                    idx_confi = headers.index(next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '') in headers else -1
-                    
-                    idx_envio = headers.index("Fecha Envío") if "Fecha Envío" in headers else -1
-                    idx_recibido = headers.index("Fecha Recibido") if "Fecha Recibido" in headers else -1
-                    idx_facturacion = headers.index("Fecha Facturación") if "Fecha Facturación" in headers else -1
-                    
-                    max_folio_pmr = 0
-                    numeros = df_completo[next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), '')].astype(str).str.extract(r'(?i)PMR\s*-\s*0*(\d+)', expand=False)
-                    if not numeros.empty: max_folio_pmr = int(pd.to_numeric(numeros, errors='coerce').max() if pd.notna(pd.to_numeric(numeros, errors='coerce').max()) else 0)
-
-                    folios_asignados_en_sesion = {}
-                    for k, v in cambios_a_guardar.items():
-                        if v.get('generar_nuevo_folio'):
-                            siniestro_id = k[0] 
-                            if siniestro_id not in folios_asignados_en_sesion:
-                                max_folio_pmr += 1
-                                folios_asignados_en_sesion[siniestro_id] = f"PMR - {max_folio_pmr:03d}"
-                            v['remision_num'] = folios_asignados_en_sesion[siniestro_id]
-
-                    for i in range(1, len(datos_uni)):
-                        k = generar_llave(datos_uni[i][idx_id], datos_uni[i][idx_desc])
-                        if k in cambios_a_guardar:
-                            c = cambios_a_guardar[k]
-                            if 'estatus' in c: datos_uni[i][idx_estatus] = c['estatus']
-                            if 'remision_num' in c: datos_uni[i][idx_rem] = c['remision_num']
-                            if 'usuario_rem' in c and idx_usr_rem >= 0: datos_uni[i][idx_usr_rem] = c['usuario_rem']
-                            if 'comentario' in c and idx_coment >= 0: datos_uni[i][idx_coment] = c['comentario']
-                            if 'guia' in c and idx_guia >= 0: datos_uni[i][idx_guia] = c['guia']
-                            if 'vencimiento' in c and idx_venc >= 0: datos_uni[i][idx_venc] = c['vencimiento']
-                            if 'asignacion' in c and idx_asig >= 0: datos_uni[i][idx_asig] = c['asignacion']
-                            if 'fecha_confi' in c and idx_confi >= 0: datos_uni[i][idx_confi] = c['fecha_confi']
-                            if 'fecha_envio' in c and idx_envio >= 0: datos_uni[i][idx_envio] = c['fecha_envio']
-                            if 'fecha_recibido' in c and idx_recibido >= 0: datos_uni[i][idx_recibido] = c['fecha_recibido']
-                            if 'fecha_facturacion' in c and idx_facturacion >= 0: datos_uni[i][idx_facturacion] = c['fecha_facturacion']
-                    ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
-
-                if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
-                    try:
-                        ws_comp = doc.worksheet("BD_COMPRAS")
-                        datos_comp_crudos = ws_comp.get_all_values()
-                        if not datos_comp_crudos:
-                            headers_comp = ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Recibido', 'Condición Pago', 'Días Crédito', 'Estatus Pago']
-                            datos_comp = [headers_comp]
-                        else:
-                            headers_comp = [str(h).strip() for h in datos_comp_crudos[0]]
-                            datos_comp = [headers_comp]
-                            for fila in datos_comp_crudos[1:]:
-                                if any(str(celda).strip() for celda in fila): datos_comp.append(fila)
-                            
-                        def get_col_idx(name):
-                            if name in headers_comp: return headers_comp.index(name)
-                            headers_comp.append(name); datos_comp[0] = headers_comp
-                            for r in datos_comp[1:]: r.append("")
-                            return len(headers_comp) - 1
-                            
-                        idx_c_sin = get_col_idx('Siniestro'); idx_c_desc = get_col_idx('Descripción Pieza'); i_tall = get_col_idx('Taller'); i_veh = get_col_idx('Vehículo')
-                        i_prov = get_col_idx('Proveedor'); i_costo = get_col_idx('Costo Compra'); i_fcomp = get_col_idx('Fecha Compra'); i_tiempo = get_col_idx('Tiempo Entrega (Días)')
-                        i_rec = get_col_idx('Recibido'); i_cond_pago = get_col_idx('Condición Pago'); i_dias_cred = get_col_idx('Días Crédito'); i_est_pago = get_col_idx('Estatus Pago')
-                        
-                        llaves_en_compras = set()
-                        nuevos_datos_comp = [headers_comp]
-                        for i in range(1, len(datos_comp)):
-                            while len(datos_comp[i]) < len(headers_comp): datos_comp[i].append("")
-                            k_c = generar_llave(datos_comp[i][idx_c_sin], datos_comp[i][idx_c_desc])
-                            llaves_en_compras.add(k_c)
-                            eliminar_fila = False
-                            if k_c in cambios_bd_compras:
-                                cb = cambios_bd_compras[k_c]
-                                if cb.get('cancelar_compra'): eliminar_fila = True
-                                else:
-                                    if str(cb.get('costo','')).strip(): datos_comp[i][i_costo] = cb['costo']
-                                    if str(cb.get('tiempo','')).strip(): datos_comp[i][i_tiempo] = cb['tiempo']
-                                    if 'cond_pago' in cb and str(cb['cond_pago']).strip() != 'nan': datos_comp[i][i_cond_pago] = cb['cond_pago']
-                                    if 'dias_credito' in cb and str(cb['dias_credito']).strip() != 'nan': datos_comp[i][i_dias_cred] = cb['dias_credito']
-                                    if 'estatus_pago' in cb and str(cb['estatus_pago']).strip() != 'nan': datos_comp[i][i_est_pago] = cb['estatus_pago']
-                                    if 'prov' in cb and str(cb['prov']).strip() and str(cb['prov']).strip() != 'nan': datos_comp[i][i_prov] = cb['prov']
-                                    if 'recibido' in cb: datos_comp[i][i_rec] = cb['recibido']
-                            if not eliminar_fila: nuevos_datos_comp.append(datos_comp[i])
-                                    
-                        fecha_hoy_comp = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
-                        nuevas_filas = []
-                        for k, v in cambios_a_guardar.items():
-                            if v.get('crear_compra') and k not in llaves_en_compras:
-                                n_row = [""] * len(headers_comp)
-                                n_row[idx_c_sin] = k[0]; n_row[idx_c_desc] = k[1]; n_row[i_tall] = v.get('compra_taller', ''); n_row[i_veh] = v.get('compra_vehiculo', '')
-                                n_row[i_fcomp] = fecha_hoy_comp; n_row[i_rec] = 'NO'; n_row[i_costo] = v.get('compra_costo', '0')
-                                
-                                nombre_prov_completo = str(v.get('compra_prov', '')).strip()
-                                eta_calc = "0"; cond_pago_calc = ""; dias_cred_calc = "0"
-                                if nombre_prov_completo and not df_proveedores.empty:
-                                    for _, row_p in df_proveedores.iterrows():
-                                        p_val = str(row_p.get('Proveedor', '')).strip().upper(); s_val = str(row_p.get('Sucursal', '')).strip().upper()
-                                        llave_p = f"{p_val} - {s_val}" if s_val else p_val
-                                        if llave_p == nombre_prov_completo:
-                                            tiempo_str = str(row_p.get('Tiempo de Entrega', '')).upper()
-                                            numeros = re.findall(r'\d+', tiempo_str)
-                                            if numeros: eta_calc = numeros[-1]
-                                            cond_pago_calc = str(row_p.get('Condición Pago', '')).strip().title()
-                                            dias_cred_calc = str(row_p.get('Días Crédito', '0')).strip()
-                                            break
-                                n_row[i_prov] = nombre_prov_completo; n_row[i_tiempo] = eta_calc if eta_calc else '0'
-                                n_row[i_cond_pago] = cond_pago_calc; n_row[i_dias_cred] = dias_cred_calc
-                                nuevas_filas.append(n_row)
-                        
-                        filas_a_escribir = nuevos_datos_comp + nuevas_filas
-                        while len(filas_a_escribir) < len(datos_comp_crudos): filas_a_escribir.append([""] * len(headers_comp))
-                        ws_comp.update(range_name='A1', values=filas_a_escribir, value_input_option='USER_ENTERED')
-                    except Exception as e_comp: st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
-
-                llaves_a_imprimir = [k for k, v in cambios_a_guardar.items() if v.get('imprimir_remision') == True]
-                if llaves_a_imprimir:
-                    marcados_remision = df_completo[df_completo.apply(lambda r: generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, '')) in llaves_a_imprimir, axis=1)]
-                    cols_agrup_univ = [col_id_univ, col_taller_univ, col_marca_univ, col_modelo_univ]
-                    agrupadores = [c for c in cols_agrup_univ if c in marcados_remision.columns]
-                    
-                    avisos_unicos = set()
-                    pdfs_list = []
-                    usuario_print = st.session_state.get('usuario_actual', 'Sistema')
-                    
-                    for keys, df_g in marcados_remision.groupby(agrupadores):
-                        siniestro_v = keys[agrupadores.index(col_id_univ)] if col_id_univ in agrupadores else ""
-                        taller_v = keys[agrupadores.index(col_taller_univ)] if col_taller_univ in agrupadores else ""
-                        marca_v = keys[agrupadores.index(col_marca_univ)] if col_marca_univ in agrupadores else ""
-                        modelo_v = keys[agrupadores.index(col_modelo_univ)] if col_modelo_univ in agrupadores else ""
-                        
-                        folio_str_print = "S/N"
-                        for _, row_rem in df_g.iterrows():
-                            key_rem = generar_llave(row_rem.get(col_id_univ, ''), row_rem.get(col_desc_univ, ''))
-                            if key_rem in cambios_a_guardar and 'remision_num' in cambios_a_guardar[key_rem]:
-                                folio_str_print = cambios_a_guardar[key_rem]['remision_num']; break
-                        
-                        fecha_actual = datetime.datetime.now(tz_mx)
-                        fecha_header = fecha_actual.strftime('%d/%b/%Y').upper()
-                        firma_digital = f"Generado por: {usuario_print}"
-                        
-                        dir_v = ""
-                        col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
-                        if not df_catalogo.empty and col_cat_taller:
-                            match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == str(taller_v).strip().upper()]
-                            if not match_taller.empty:
-                                col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
-                                if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
-                            else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
-                        else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
-
-                        def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
-
-                        pdf = FPDF(orientation='L', unit='mm', format='A4')
-                        pdf.set_auto_page_break(auto=False, margin=0); pdf.add_page()
-                        
-                        def dibujar_bloque_remision(x_offset):
-                            y_offset = 15
-                            if os.path.exists("logo.png"):
-                                try: pdf.image("logo.png", x_offset, y_offset - 3, 30)
-                                except: pass
-                            
-                            pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
-                            pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"))
-                            pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5); pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"))
-                            pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_xy(x_offset + 32, y_offset + 9); pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"))
-                            pdf.set_xy(x_offset + 32, y_offset + 12); pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"))
-
-                            pdf.set_text_color(0, 0, 0); pdf.set_xy(x_offset + 105, y_offset); pdf.set_font("Arial", 'B', 9); pdf.cell(30, 5, "REMISION", border=1, align='C')
-                            pdf.set_text_color(200, 0, 0); pdf.set_font("Arial", 'B', 10); pdf.set_xy(x_offset + 105, y_offset + 5); pdf.cell(30, 6, folio_str_print, border=1, align='C')
-                            pdf.set_text_color(100, 100, 100); pdf.set_font("Arial", '', 7); pdf.set_xy(x_offset + 105, y_offset + 12); pdf.cell(30, 4, f"FECHA: {fecha_header}", align='C')
-                            
-                            y_datos = y_offset + 22; pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
-                            pdf.set_xy(x_offset, y_datos); pdf.cell(20, 5, "TALLER", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {taller_v}")[:75], border=1)
-                            y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "DIRECCION", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}")[:85], border=1)
-                            y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "SINIESTRO", border=1, fill=True); pdf.set_font("Arial", 'B', 8); pdf.cell(45, 5, limpiar_texto(f" {siniestro_v}"), border=1)
-                            pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "VEHICULO", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}")[:35], border=1)
-
-                            y_tabla = y_datos + 10; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0); pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
-                            pdf.cell(15, 6, "CANT", border=1, fill=True, align='C'); pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C')
-
-                            y_item = y_tabla + 6; pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
-                            for _, row_rem in df_g.iterrows():
-                                cant_v = str(row_rem.get(col_cant_univ, 1))
-                                if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
-                                pdf.set_xy(x_offset, y_item); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C'); pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc_univ, '')))[:80], border=1)
-                                y_item += 5
-                                
-                            pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120); pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
-
-                        dibujar_bloque_remision(10)
-                        pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
-                        dibujar_bloque_remision(152)
-
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                            pdf.output(tmp.name)
-                            nombre_archivo = f"Remision_{folio_str_print.replace(' - ', '_')}_{siniestro_v}.pdf"
-                            with open(tmp.name, "rb") as f: pdf_bytes = f.read()
-                            pdfs_list.append({'folio': folio_str_print, 'siniestro': siniestro_v, 'bytes': pdf_bytes, 'nombre': nombre_archivo})
-
-                    st.session_state['pdfs_list'] = pdfs_list
-                    if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
-                
-                st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅"); st.cache_data.clear(); st.rerun()
-            except Exception as e: st.error(f"❌ Error guardando: {e}")

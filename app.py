@@ -1111,9 +1111,23 @@ elif vista_actual == "🔍 Consultas":
             col_id_univ = next((c for c in df_search.columns if "SINIESTRO" in str(c).upper()), None)
             siniestros_encontrados = resultados[col_id_univ].dropna().unique()
             st.success(f"✅ Se encontraron coincidencias en **{len(siniestros_encontrados)}** expediente(s).")
-            if len(siniestros_encontrados) > 1: siniestro_sel = st.selectbox("📂 Múltiples resultados encontrados. Selecciona el expediente a revisar:", siniestros_encontrados)
-            else: siniestro_sel = siniestros_encontrados[0]
-                
+            
+            # --- NUEVA LÓGICA DE SELECCIÓN CON MÁS CONTEXTO ---
+            if len(siniestros_encontrados) > 1: 
+                opciones_display = []
+                for s in siniestros_encontrados:
+                    df_temp_s = resultados[resultados[col_id_univ].astype(str) == str(s)]
+                    m = str(df_temp_s.get(next((c for c in df_temp_s.columns if "MARCA" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
+                    mo = str(df_temp_s.get(next((c for c in df_temp_s.columns if "MODELO" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
+                    ta = str(df_temp_s.get(next((c for c in df_temp_s.columns if "TALLER" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
+                    opciones_display.append(f"{s} | {m} {mo} | {ta}")
+                    
+                siniestro_sel_raw = st.selectbox("📂 Múltiples resultados encontrados. Selecciona el expediente a revisar:", opciones_display)
+                siniestro_sel = siniestro_sel_raw.split(" | ")[0].strip()
+            else: 
+                siniestro_sel = siniestros_encontrados[0]
+            # ----------------------------------------------------
+
             st.markdown("---")
             df_exp = df_search[df_search[col_id_univ].astype(str) == str(siniestro_sel)].copy()
             aseg_exp = str(df_exp.get(next((c for c in df_exp.columns if "ASEGURADORA" in str(c).upper()), df_exp.columns[0])).iloc[0]).upper()
@@ -1131,10 +1145,24 @@ elif vista_actual == "🔍 Consultas":
             st.markdown("<br>", unsafe_allow_html=True)
             
             st.markdown("#### 🛠️ Estatus del Pedido y Remisiones")
-            cols_log_keys = ['CANTIDAD', 'CANT', 'DESCRIPCION', 'DESCRIPCIÓN', 'DESCRIPCION PIEZA', 'PRECIO', 'COSTO', 'ESTATUS', 'STATUS', 'VENCIMIENTO', 'FECHA CONFI', 'ASIGNACION', 'GUIA', 'REMISION', 'REMISIÓN', 'COMENTARIOS', 'OBSERVACIONES']
-            cols_log = [c for c in df_exp.columns if c.upper() in cols_log_keys or "REFACCI" in c.upper()]
-            df_log = df_exp[cols_log].copy()
+            
+            # --- NUEVA LÓGICA DE COLUMNAS DE DETALLE ---
+            col_cant_exp = next((c for c in df_exp.columns if "CANT" in str(c).upper()), None)
+            col_desc_exp = next((c for c in df_exp.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+            col_precio_exp = next((c for c in df_exp.columns if "PRECIO" in str(c).upper()), None)
+            col_estatus_exp = next((c for c in df_exp.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
+            col_asig_exp = next((c for c in df_exp.columns if "ASIGNACI" in str(c).upper()), None)
+            col_conf_exp = next((c for c in df_exp.columns if "FECHA CONFI" in str(c).upper()), None)
+            col_venc_exp = next((c for c in df_exp.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), None)
+            col_guia_exp = next((c for c in df_exp.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), None)
+            col_rem_exp = next((c for c in df_exp.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
+            col_obs_exp = next((c for c in df_exp.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
+
+            cols_a_mostrar = [c for c in [col_cant_exp, col_desc_exp, col_precio_exp, col_estatus_exp, col_asig_exp, col_conf_exp, col_venc_exp, col_guia_exp, col_rem_exp, col_obs_exp] if c is not None]
+            
+            df_log = df_exp[cols_a_mostrar].copy()
             st.dataframe(df_log, hide_index=True, use_container_width=True)
+            # ---------------------------------------------
             
             st.markdown("#### 💰 Salud Financiera y Compras")
             if not df_compras.empty:

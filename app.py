@@ -1099,96 +1099,114 @@ if vista_actual == "Precios Promedio":
         st.warning("La base de datos está vacía.")
 
 elif vista_actual == "🔍 Consultas":
-    st.markdown("## 🔍 Consulta Global")
-    st.info("Buscador global: Ingresa un número de siniestro, VIN, nombre de taller, modelo de auto o refacción. El sistema escaneará todas las aseguradoras y el inventario.")
-    query = st.text_input("🔎 Búsqueda Omnidireccional:", placeholder="Ej. B79816163, RIO 2018, 3KPF...").strip().upper()
-    if len(query) >= 3:
-        df_search = df_completo.copy()
-        df_search['Texto_Busqueda'] = df_search.fillna('').astype(str).apply(lambda x: ' '.join(x).upper(), axis=1)
-        resultados = df_search[df_search['Texto_Busqueda'].str.contains(query, regex=False)]
+    st.markdown("## 🔍 Consulta Global y Filtros de Búsqueda")
+    st.info("Utiliza los filtros desplegables para encontrar refacciones y siniestros específicos en el histórico.")
+    
+    if not df_completo.empty:
+        # 1. Preparar las columnas dinámicas para la búsqueda
+        col_id_univ = next((c for c in df_completo.columns if "SINIESTRO" in str(c).upper()), None)
+        col_taller_univ = next((c for c in df_completo.columns if "TALLER" in str(c).upper()), None)
+        col_estatus_univ = next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
+        col_desc_univ = next((c for c in df_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+        col_marca_univ = next((c for c in df_completo.columns if "MARCA" in str(c).upper()), None)
+        col_modelo_univ = next((c for c in df_completo.columns if "MODELO" in str(c).upper()), None)
+        col_ano_univ = next((c for c in df_completo.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
         
-        if not resultados.empty:
-            col_id_univ = next((c for c in df_search.columns if "SINIESTRO" in str(c).upper()), None)
-            siniestros_encontrados = resultados[col_id_univ].dropna().unique()
-            st.success(f"✅ Se encontraron coincidencias en **{len(siniestros_encontrados)}** expediente(s).")
+        df_busqueda = df_completo.copy()
+        
+        # Crear la columna compuesta de Siniestro - Vehículo para el filtro 3
+        if col_marca_univ and col_modelo_univ and col_id_univ:
+            def armar_vehiculo_filtro(row):
+                m = str(row.get(col_marca_univ, '')).strip().upper()
+                mod = str(row.get(col_modelo_univ, '')).strip().upper()
+                vehiculo = mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
+                if col_ano_univ:
+                    ano = str(row.get(col_ano_univ, '')).strip()
+                    if ano.endswith('.0'): ano = ano[:-2]
+                    if ano not in ['', 'NAN', 'NONE']: vehiculo += f" | {ano}"
+                return vehiculo
             
-            # --- NUEVA LÓGICA DE SELECCIÓN CON MÁS CONTEXTO ---
-            if len(siniestros_encontrados) > 1: 
-                opciones_display = []
-                for s in siniestros_encontrados:
-                    df_temp_s = resultados[resultados[col_id_univ].astype(str) == str(s)]
-                    m = str(df_temp_s.get(next((c for c in df_temp_s.columns if "MARCA" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
-                    mo = str(df_temp_s.get(next((c for c in df_temp_s.columns if "MODELO" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
-                    ta = str(df_temp_s.get(next((c for c in df_temp_s.columns if "TALLER" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
-                    opciones_display.append(f"{s} | {m} {mo} | {ta}")
-                    
-                siniestro_sel_raw = st.selectbox("📂 Múltiples resultados encontrados. Selecciona el expediente a revisar:", opciones_display)
-                siniestro_sel = siniestro_sel_raw.split(" | ")[0].strip()
-            else: 
-                siniestro_sel = siniestros_encontrados[0]
-            # ----------------------------------------------------
+            df_busqueda['Vehiculo_Temp'] = df_busqueda.apply(armar_vehiculo_filtro, axis=1)
+            df_busqueda['Filtro_Siniestro'] = df_busqueda[col_id_univ].astype(str).str.strip() + " | " + df_busqueda['Vehiculo_Temp']
+        else:
+            df_busqueda['Filtro_Siniestro'] = df_busqueda[col_id_univ] if col_id_univ else "S/N"
+            
+        # 2. Renderizar los 4 selectores en cascada
+        filtro_col1, filtro_col2, filtro_col3, filtro_col4 = st.columns(4)
+        with filtro_col1: 
+            taller_sel = st.multiselect("🏢 Taller:", sorted([str(t) for t in df_busqueda[col_taller_univ].dropna().unique() if str(t).strip() != '']) if col_taller_univ else [], placeholder="Todos...")
+        with filtro_col2: 
+            estatus_sel = st.multiselect("📊 Estatus:", sorted([str(e) for e in df_busqueda[col_estatus_univ].dropna().unique() if str(e).strip() != '']) if col_estatus_univ else [], placeholder="Todos...")
+        with filtro_col3:
+            df_temp = df_busqueda.copy()
+            if taller_sel: df_temp = df_temp[df_temp[col_taller_univ].astype(str).isin(taller_sel)]
+            if estatus_sel: df_temp = df_temp[df_temp[col_estatus_univ].astype(str).isin(estatus_sel)]
+            siniestro_sel = st.multiselect("🚗 Siniestro - Vehículo:", sorted(list(df_temp['Filtro_Siniestro'].dropna().unique())), placeholder="Todos...")
+        with filtro_col4:
+            df_temp_desc = df_temp.copy()
+            if siniestro_sel: df_temp_desc = df_temp_desc[df_temp_desc['Filtro_Siniestro'].isin(siniestro_sel)]
+            desc_sel = st.multiselect("⚙️ Refacción:", sorted(list(df_temp_desc[col_desc_univ].dropna().astype(str).unique())) if col_desc_univ else [], placeholder="Todas...")
 
-            st.markdown("---")
-            df_exp = df_search[df_search[col_id_univ].astype(str) == str(siniestro_sel)].copy()
-            aseg_exp = str(df_exp.get(next((c for c in df_exp.columns if "ASEGURADORA" in str(c).upper()), df_exp.columns[0])).iloc[0]).upper()
-            taller_exp = str(df_exp.get(next((c for c in df_exp.columns if "TALLER" in str(c).upper()), df_exp.columns[0])).iloc[0]).upper()
-            marca = str(df_exp.get(next((c for c in df_exp.columns if "MARCA" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
-            modelo = str(df_exp.get(next((c for c in df_exp.columns if "MODELO" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
-            ano = str(df_exp.get(next((c for c in df_exp.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), ''), pd.Series([''])).iloc[0])
-            if ano.endswith('.0'): ano = ano[:-2]
-            vin = str(df_exp.get(next((c for c in df_exp.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), ''), pd.Series([''])).iloc[0]).upper()
-            
-            st.markdown(f"### 📁 Expediente: {siniestro_sel}")
-            col_k1, col_k2, col_k3 = st.columns(3)
-            col_k1.metric("🛡️ Aseguradora", aseg_exp); col_k2.metric("🚗 Vehículo", f"{marca} {modelo} {ano}".strip()); col_k3.metric("🏢 Taller Asignado", taller_exp)
-            st.caption(f"**VIN / Número de Serie:** {vin if vin not in ['NAN', 'NONE', ''] else 'No registrado'}")
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            st.markdown("#### 🛠️ Estatus del Pedido y Remisiones")
-            
-            # --- NUEVA LÓGICA DE COLUMNAS DE DETALLE ---
-            col_cant_exp = next((c for c in df_exp.columns if "CANT" in str(c).upper()), None)
-            col_desc_exp = next((c for c in df_exp.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
-            col_precio_exp = next((c for c in df_exp.columns if "PRECIO" in str(c).upper()), None)
-            col_estatus_exp = next((c for c in df_exp.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
-            col_asig_exp = next((c for c in df_exp.columns if "ASIGNACI" in str(c).upper()), None)
-            col_conf_exp = next((c for c in df_exp.columns if "FECHA CONFI" in str(c).upper()), None)
-            col_venc_exp = next((c for c in df_exp.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), None)
-            col_guia_exp = next((c for c in df_exp.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), None)
-            col_rem_exp = next((c for c in df_exp.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
-            col_obs_exp = next((c for c in df_exp.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
+        # 3. Aplicar los filtros seleccionados
+        df_filtrado_global = df_busqueda.copy()
+        filtros_activos = False
+        
+        if taller_sel: 
+            df_filtrado_global = df_filtrado_global[df_filtrado_global[col_taller_univ].astype(str).isin(taller_sel)]
+            filtros_activos = True
+        if estatus_sel: 
+            df_filtrado_global = df_filtrado_global[df_filtrado_global[col_estatus_univ].astype(str).isin(estatus_sel)]
+            filtros_activos = True
+        if siniestro_sel: 
+            df_filtrado_global = df_filtrado_global[df_filtrado_global['Filtro_Siniestro'].isin(siniestro_sel)]
+            filtros_activos = True
+        if desc_sel: 
+            df_filtrado_global = df_filtrado_global[df_filtrado_global[col_desc_univ].astype(str).isin(desc_sel)]
+            filtros_activos = True
 
-            cols_a_mostrar = [c for c in [col_cant_exp, col_desc_exp, col_precio_exp, col_estatus_exp, col_asig_exp, col_conf_exp, col_venc_exp, col_guia_exp, col_rem_exp, col_obs_exp] if c is not None]
+        st.markdown("---")
+        
+        # 4. Mostrar Resultados Ampliados
+        if filtros_activos:
+            st.success(f"✅ Se encontraron {len(df_filtrado_global)} registro(s) con los filtros seleccionados.")
             
-            df_log = df_exp[cols_a_mostrar].copy()
+            # Recolectar todas las columnas relevantes para mostrar
+            col_cant_exp = next((c for c in df_filtrado_global.columns if "CANT" in str(c).upper()), None)
+            col_precio_exp = next((c for c in df_filtrado_global.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
+            col_asig_exp = next((c for c in df_filtrado_global.columns if "ASIGNACI" in str(c).upper()), None)
+            col_conf_exp = next((c for c in df_filtrado_global.columns if "FECHA CONFI" in str(c).upper()), None)
+            col_venc_exp = next((c for c in df_filtrado_global.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), None)
+            col_guia_exp = next((c for c in df_filtrado_global.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), None)
+            col_rem_exp = next((c for c in df_filtrado_global.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
+            col_obs_exp = next((c for c in df_filtrado_global.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
+
+            cols_a_mostrar = [c for c in [col_id_univ, col_taller_univ, 'Vehiculo_Temp', col_cant_exp, col_desc_exp, col_precio_exp, col_estatus_exp, col_asig_exp, col_conf_exp, col_venc_exp, col_guia_exp, col_rem_exp, col_obs_exp] if c is not None and c in df_filtrado_global.columns]
+            
+            df_log = df_filtrado_global[cols_a_mostrar].copy()
+            if 'Vehiculo_Temp' in df_log.columns: df_log.rename(columns={'Vehiculo_Temp': 'Vehículo'}, inplace=True)
+            
+            st.markdown("#### 🛠️ Expedientes y Remisiones")
             st.dataframe(df_log, hide_index=True, use_container_width=True)
-            # ---------------------------------------------
             
-            st.markdown("#### 💰 Salud Financiera y Compras")
-            if not df_compras.empty:
-                col_sin_comp = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)
-                if col_sin_comp:
-                    df_comp_exp = df_compras[df_compras[col_sin_comp].astype(str) == str(siniestro_sel)].copy()
-                    if not df_comp_exp.empty:
-                        cols_comp = ['Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Recibido']
-                        df_comp_disp = df_comp_exp[[c for c in cols_comp if c in df_comp_exp.columns]].copy()
-                        df_comp_disp.rename(columns={'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'Tiempo Entrega (Días)': 'ETA (Días)'}, inplace=True)
-                        st.dataframe(df_comp_disp, hide_index=True, use_container_width=True)
-                    else: st.info("No existen registros de compras o pagos capturados para este siniestro.")
-            else: st.warning("La base de datos de compras no está disponible.")
-        else: st.warning("No se encontraron siniestros activos ni en el histórico de aseguradoras con ese criterio.")
-            
-        if not df_inventario.empty:
-            df_inv_search = df_inventario.copy()
-            df_inv_search['Texto_Busqueda'] = df_inv_search.fillna('').astype(str).apply(lambda x: ' '.join(x).upper(), axis=1)
-            res_inv = df_inv_search[df_inv_search['Texto_Busqueda'].str.contains(query, regex=False)]
-            if not res_inv.empty:
-                st.markdown("---")
-                st.markdown("#### 📦 Coincidencias en Inventario Físico")
-                cols_inv_target = ['Ubicación Física', 'No. Parte (OEM)', 'Descripción de la Pieza', 'Marca', 'Modelo', 'Cantidad', 'Estado de la Pieza', 'Precio Venta']
-                df_inv_disp = res_inv[[c for c in cols_inv_target if c in res_inv.columns]].copy()
-                st.dataframe(df_inv_disp, hide_index=True, use_container_width=True)
-    elif len(query) > 0: st.caption("Escribe al menos 3 caracteres para activar el motor de búsqueda profunda...")
+            # 5. Mostrar tabla de compras histórica (Opcional, si hay siniestros únicos)
+            siniestros_filtrados = df_filtrado_global[col_id_univ].dropna().unique() if col_id_univ else []
+            if len(siniestros_filtrados) > 0 and len(siniestros_filtrados) <= 10: # Límite para no saturar la vista si buscan "Todos"
+                st.markdown("#### 💰 Histórico Financiero y Compras Relacionadas")
+                if not df_compras.empty:
+                    col_sin_comp = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)
+                    if col_sin_comp:
+                        df_comp_exp = df_compras[df_compras[col_sin_comp].astype(str).isin([str(s) for s in siniestros_filtrados])].copy()
+                        if not df_comp_exp.empty:
+                            cols_comp = ['Siniestro', 'Taller', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Estatus Pago', 'Recibido']
+                            df_comp_disp = df_comp_exp[[c for c in cols_comp if c in df_comp_exp.columns]].copy()
+                            df_comp_disp.rename(columns={'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'Tiempo Entrega (Días)': 'ETA (Días)'}, inplace=True)
+                            st.dataframe(df_comp_disp, hide_index=True, use_container_width=True)
+                        else: st.info("No existen registros de compras o pagos capturados para estos siniestros.")
+                else: st.warning("La base de datos de compras no está disponible.")
+        else:
+            st.info("👆 Selecciona al menos un filtro en la parte superior para mostrar resultados.")
+    else:
+        st.warning("La base de datos está vacía.")
 
 elif vista_actual == "🛠️ Cuartel General":
     st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")

@@ -452,8 +452,8 @@ elif vista_actual == "⚙️ Panel Operativo":
         
     vencen_hoy = len(df_proceso[df_proceso[col_vencimiento] == hoy_str]) if col_vencimiento else 0
     recolecciones = len(df_recoleccion_total)
-    por_confirmar_kpi = len(df_proceso[df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")]) if col_estatus else 0
-    en_proceso = len(df_proceso[~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")]) if col_estatus else len(df_proceso)
+    por_confirmar_kpi = len(df_proceso[df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_proceso[col_estatus].astype(str).str.strip() == "")]) if col_estatus else 0
+    en_proceso = len(df_proceso[~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") & (df_proceso[col_estatus].astype(str).str.strip() != "")]) if col_estatus else len(df_proceso)
     partidas_por_facturar = len(df_trabajo[df_trabajo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"]) if col_estatus else 0
     
     kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
@@ -496,7 +496,10 @@ elif vista_actual == "⚙️ Panel Operativo":
     if col_remision: base_config[col_remision] = st.column_config.TextColumn("Folio Remisión", width="small")
     if col_comentarios: base_config[col_comentarios] = st.column_config.TextColumn("Obs.") 
 
-    df_por_confirmar = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")].copy() if col_estatus else pd.DataFrame()
+    # SHIELD ACTIVADO: Atrapa estatus vacíos o "POR CONFIRMAR"
+    cond_confirmar = df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_filtrado[col_estatus].fillna('').astype(str).str.strip() == "")
+    df_por_confirmar = df_filtrado[cond_confirmar].copy() if col_estatus else pd.DataFrame()
+    
     with st.expander(f"⏳ Piezas por Confirmar | {len(df_por_confirmar)} Partida(s)", expanded=False):
         dfs_editados_conf = []
         if not df_por_confirmar.empty:
@@ -518,7 +521,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_conf], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
 
-    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC"))].copy() if col_vencimiento else pd.DataFrame()
+    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy() if col_vencimiento else pd.DataFrame()
     with st.expander(f"🚨 Vencimientos de Hoy | {len(df_vencimientos)} Partida(s)", expanded=False):
         if not df_vencimientos.empty:
             if not modo_consulta and permiso_edicion:
@@ -537,7 +540,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 
     if col_vencimiento and not df_filtrado.empty:
         fechas_venc_filtro = df_filtrado[col_vencimiento].apply(parse_dt_safe_op)
-        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC"))].copy()
+        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy()
     else: df_atrasadas = pd.DataFrame()
     with st.expander(f"❌ Vencimientos Atrasados | {len(df_atrasadas)} Partida(s)", expanded=False):
         if not df_atrasadas.empty:
@@ -573,7 +576,8 @@ elif vista_actual == "⚙️ Panel Operativo":
                 st.dataframe(df_por_recibir[cols_cobro], column_config=base_config, hide_index=True, use_container_width=True)
 
     if col_estatus and col_estatus in df_filtrado.columns:
-        mask_asignados = ~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO")
+        # SHIELD ACTIVADO: Ignora celdas vacías en Pedidos Asignados para no mezclarlas
+        mask_asignados = (~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")
         df_asignados = df_filtrado[mask_asignados].copy()
     else: df_asignados = df_filtrado.copy()
     
@@ -620,7 +624,6 @@ elif vista_actual == "⚙️ Panel Operativo":
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion:
                             columnas_operacion = ['Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Cancelar']
-                            # ELIMINADO EL CHECKBOX "PEDIDO" AQUÍ, SOLO DEJAMOS PROVEEDOR Y COSTO
                             orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_origen, col_precio, col_estatus, col_vencimiento, col_guia, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_operacion
                             config_pedidos = base_config.copy()
                             config_pedidos.update({ 
@@ -1103,7 +1106,6 @@ elif vista_actual == "🔍 Consultas":
     st.info("Utiliza los filtros desplegables para encontrar refacciones y siniestros específicos en el histórico.")
     
     if not df_completo.empty:
-        # 1. Preparar las columnas dinámicas para la búsqueda
         col_id_univ = next((c for c in df_completo.columns if "SINIESTRO" in str(c).upper()), None)
         col_taller_univ = next((c for c in df_completo.columns if "TALLER" in str(c).upper()), None)
         col_estatus_univ = next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
@@ -1114,7 +1116,6 @@ elif vista_actual == "🔍 Consultas":
         
         df_busqueda = df_completo.copy()
         
-        # Crear la columna compuesta de Siniestro - Vehículo para el filtro 3
         if col_marca_univ and col_modelo_univ and col_id_univ:
             def armar_vehiculo_filtro(row):
                 m = str(row.get(col_marca_univ, '')).strip().upper()
@@ -1131,7 +1132,6 @@ elif vista_actual == "🔍 Consultas":
         else:
             df_busqueda['Filtro_Siniestro'] = df_busqueda[col_id_univ] if col_id_univ else "S/N"
             
-        # 2. Renderizar los 4 selectores en cascada
         filtro_col1, filtro_col2, filtro_col3, filtro_col4 = st.columns(4)
         with filtro_col1: 
             taller_sel = st.multiselect("🏢 Taller:", sorted([str(t) for t in df_busqueda[col_taller_univ].dropna().unique() if str(t).strip() != '']) if col_taller_univ else [], placeholder="Todos...")
@@ -1147,7 +1147,6 @@ elif vista_actual == "🔍 Consultas":
             if siniestro_sel: df_temp_desc = df_temp_desc[df_temp_desc['Filtro_Siniestro'].isin(siniestro_sel)]
             desc_sel = st.multiselect("⚙️ Refacción:", sorted(list(df_temp_desc[col_desc_univ].dropna().astype(str).unique())) if col_desc_univ else [], placeholder="Todas...")
 
-        # 3. Aplicar los filtros seleccionados
         df_filtrado_global = df_busqueda.copy()
         filtros_activos = False
         
@@ -1166,15 +1165,19 @@ elif vista_actual == "🔍 Consultas":
 
         st.markdown("---")
         
-        # 4. Mostrar Resultados Ampliados
         if filtros_activos:
-            # UX MEJORADO: Adiós al cuadro verde estorboso, hola texto limpio
             st.markdown(f"**✅ {len(df_filtrado_global)} registro(s) encontrado(s)** con los filtros seleccionados.")
             
-            # Recolectar todas las columnas relevantes (INCLUYENDO ASEGURADORA, VIN Y CANTIDAD)
             col_aseg_exp = next((c for c in df_filtrado_global.columns if "ASEGURADORA" in str(c).upper()), None)
             col_vin_exp = next((c for c in df_filtrado_global.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
             col_cant_exp = next((c for c in df_filtrado_global.columns if "CANT" in str(c).upper()), None)
+            
+            # --- PARCHE VIRTUAL PARA CANTIDAD ---
+            if not col_cant_exp:
+                df_filtrado_global['Cant.'] = "1"
+                col_cant_exp = 'Cant.'
+            # ------------------------------------
+
             col_precio_exp = next((c for c in df_filtrado_global.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
             col_asig_exp = next((c for c in df_filtrado_global.columns if "ASIGNACI" in str(c).upper()), None)
             col_conf_exp = next((c for c in df_filtrado_global.columns if "FECHA CONFI" in str(c).upper()), None)
@@ -1184,7 +1187,6 @@ elif vista_actual == "🔍 Consultas":
             col_obs_exp = next((c for c in df_filtrado_global.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
             col_origen_exp = next((c for c in df_filtrado_global.columns if "ORIGEN" in str(c).upper()), None)
 
-            # ORDEN LÓGICO DE LA TABLA
             cols_a_mostrar = [c for c in [col_aseg_exp, col_id_univ, col_taller_univ, 'Vehiculo_Temp', col_vin_exp, col_cant_exp, col_desc_univ, col_origen_exp, col_precio_exp, col_estatus_univ, col_asig_exp, col_conf_exp, col_venc_exp, col_guia_exp, col_rem_exp, col_obs_exp] if c is not None and c in df_filtrado_global.columns]
             
             df_log = df_filtrado_global[cols_a_mostrar].copy()
@@ -1193,7 +1195,6 @@ elif vista_actual == "🔍 Consultas":
             st.markdown("#### 🛠️ Expedientes y Remisiones")
             st.dataframe(df_log, hide_index=True, use_container_width=True)
             
-            # 5. Mostrar tabla de compras histórica (Opcional, si hay siniestros únicos)
             siniestros_filtrados = df_filtrado_global[col_id_univ].dropna().unique() if col_id_univ else []
             if len(siniestros_filtrados) > 0 and len(siniestros_filtrados) <= 10: 
                 st.markdown("#### 💰 Histórico Financiero y Compras Relacionadas")

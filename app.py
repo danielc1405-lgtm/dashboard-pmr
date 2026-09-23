@@ -1170,7 +1170,7 @@ elif vista_actual == "🔍 Consultas":
         if filtros_activos:
             st.success(f"✅ Se encontraron {len(df_filtrado_global)} registro(s) con los filtros seleccionados.")
             
-            # Recolectar todas las columnas relevantes para mostrar
+            # Recolectar todas las columnas relevantes para mostrar (CORRECCIÓN APLICADA AQUÍ)
             col_cant_exp = next((c for c in df_filtrado_global.columns if "CANT" in str(c).upper()), None)
             col_precio_exp = next((c for c in df_filtrado_global.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
             col_asig_exp = next((c for c in df_filtrado_global.columns if "ASIGNACI" in str(c).upper()), None)
@@ -1179,8 +1179,10 @@ elif vista_actual == "🔍 Consultas":
             col_guia_exp = next((c for c in df_filtrado_global.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), None)
             col_rem_exp = next((c for c in df_filtrado_global.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
             col_obs_exp = next((c for c in df_filtrado_global.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
+            col_origen_exp = next((c for c in df_filtrado_global.columns if "ORIGEN" in str(c).upper()), None)
 
-            cols_a_mostrar = [c for c in [col_id_univ, col_taller_univ, 'Vehiculo_Temp', col_cant_exp, col_desc_exp, col_precio_exp, col_estatus_exp, col_asig_exp, col_conf_exp, col_venc_exp, col_guia_exp, col_rem_exp, col_obs_exp] if c is not None and c in df_filtrado_global.columns]
+            # Se utilizan las variables globales _univ para Descripción y Estatus
+            cols_a_mostrar = [c for c in [col_id_univ, col_taller_univ, 'Vehiculo_Temp', col_cant_exp, col_desc_univ, col_origen_exp, col_precio_exp, col_estatus_univ, col_asig_exp, col_conf_exp, col_venc_exp, col_guia_exp, col_rem_exp, col_obs_exp] if c is not None and c in df_filtrado_global.columns]
             
             df_log = df_filtrado_global[cols_a_mostrar].copy()
             if 'Vehiculo_Temp' in df_log.columns: df_log.rename(columns={'Vehiculo_Temp': 'Vehículo'}, inplace=True)
@@ -1190,7 +1192,7 @@ elif vista_actual == "🔍 Consultas":
             
             # 5. Mostrar tabla de compras histórica (Opcional, si hay siniestros únicos)
             siniestros_filtrados = df_filtrado_global[col_id_univ].dropna().unique() if col_id_univ else []
-            if len(siniestros_filtrados) > 0 and len(siniestros_filtrados) <= 10: # Límite para no saturar la vista si buscan "Todos"
+            if len(siniestros_filtrados) > 0 and len(siniestros_filtrados) <= 10: 
                 st.markdown("#### 💰 Histórico Financiero y Compras Relacionadas")
                 if not df_compras.empty:
                     col_sin_comp = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)

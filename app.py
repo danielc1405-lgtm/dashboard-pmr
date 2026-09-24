@@ -1,78 +1,16 @@
 # ==============================================================================
-# === [BLOQUE 1: IMPORTS, CONFIGURACIÓN VISUAL Y CSS] ===
+# === [BLOQUE 1: CONFIGURACIÓN Y CONEXIÓN] ===
 # ==============================================================================
 import streamlit as st
-import pandas as pd
-import warnings
-import time
-import os
-import datetime
-import tempfile
-import base64
-from fpdf import FPDF
-import plotly.express as px
 import gspread
-import json
-import re
 from google.oauth2.service_account import Credentials
+import pandas as pd
+import plotly.express as px
+import datetime
+import time
 
-warnings.filterwarnings("ignore")
-
-# ESTA LÍNEA DEBE SER SIEMPRE LA NÚMERO 1 DE STREAMLIT
-st.set_page_config(page_title="Dashboard PMR - Operación", page_icon="📦", layout="wide", initial_sidebar_state="collapsed")
-
-st.markdown("""
-    <style>
-        [data-testid="stDataFrame"] { zoom: 0.95; }
-        
-        /* 1. Matar el padding fantasma del contenedor principal de Streamlit */
-        .main .block-container { 
-            padding-top: 0rem !important; 
-            padding-bottom: 40px; 
-            padding-left: 1rem !important; 
-            padding-right: 1rem !important; 
-            max-width: 100% !important; 
-            overflow: visible !important; 
-        }
-        
-        div[data-testid="stVerticalBlock"] {
-            overflow: visible !important;
-        }
-        
-        /* 2. Destruir el espacio reservado del header nativo */
-        header[data-testid="stHeader"] { 
-            visibility: hidden !important; 
-            height: 0px !important; 
-            padding: 0px !important; 
-            min-height: 0px !important; 
-        }
-        
-        /* --- 3. CINTURÓN DE SEGURIDAD PARA EL MENÚ SUPERIOR (STICKY) --- */
-        div[data-testid="stVerticalBlock"] > div:has([data-testid="stRadio"]) {
-            position: -webkit-sticky !important;
-            position: sticky !important; 
-            top: -15px !important; /* Sube la barra para tragar el espacio vacío */
-            z-index: 99999 !important; 
-            background-color: #0E1117 !important; 
-            padding-top: 30px !important; /* Rellena el color oscuro hacia arriba */
-            padding-bottom: 15px !important; 
-            border-bottom: 1px solid #333 !important;
-            box-shadow: 0px 6px 15px rgba(0,0,0,0.6) !important;
-            margin-top: -15px !important;
-        }
-        
-        div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }
-        div.row-widget.stRadio > div > label { background-color: #1E1E24; padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid #333; font-size: 0.95rem; transition: all 0.3s ease; }
-        div.row-widget.stRadio > div > label:hover { border-color: #F63366; background-color: #2A2A35;}
-        div.row-widget.stRadio > div > label[data-checked="true"] { background-color: #F63366; color: white; border-color: #F63366; }
-        div.row-widget.stRadio > div > label > div:first-child { display: none; }
-        
-        /* ELIMINAR EL PARPADEO GRIS AL EDITAR CELDAS */
-        [data-testid="stDataGrid"] { opacity: 1 !important; }
-        .st-emotion-cache-1kyxreq { display: none !important; }
-        div[data-testid="stAppViewContainer"] { transition: none !important; }
-    </style>
-""", unsafe_allow_html=True)
+# --- MODIFICACIÓN: layout="wide" expande la app al 100% de la pantalla ---
+st.set_page_config(page_title="Dashboard PMR", page_icon="👑", layout="wide")
 
 # ==============================================================================
 # === [BLOQUE 2: CONEXIÓN TEMPRANA Y SISTEMA DE LOGIN] ===

@@ -8,8 +8,9 @@ import pandas as pd
 import plotly.express as px
 import datetime
 import time
+import re  # <--- Esta es la pieza que faltaba
 
-# --- MODIFICACIÓN: layout="wide" expande la app al 100% de la pantalla ---
+# Configuración de pantalla ancha (Wide Mode)
 st.set_page_config(page_title="Dashboard PMR", page_icon="👑", layout="wide")
 
 # ==============================================================================

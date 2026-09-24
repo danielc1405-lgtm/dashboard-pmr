@@ -8,10 +8,14 @@ import pandas as pd
 import plotly.express as px
 import datetime
 import time
-import re  # <--- Esta es la pieza que faltaba
+import re
+from fpdf import FPDF
+import io
+import base64
 
-# Configuración de pantalla ancha (Wide Mode)
+# Configuración de pantalla ancha (Wide Mode) - ¡Adiós a los márgenes amarillos!
 st.set_page_config(page_title="Dashboard PMR", page_icon="👑", layout="wide")
+
 
 # ==============================================================================
 # === [BLOQUE 2: CONEXIÓN TEMPRANA Y SISTEMA DE LOGIN] ===

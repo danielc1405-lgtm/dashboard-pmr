@@ -761,7 +761,7 @@ if vista_actual == "🛒 Compras":
                 df_c['Vehículo_Corto'] = df_c.get('Vehículo', pd.Series([""]*len(df_c))).apply(formato_auto_corto)
                 cols_mostrar = ['Siniestro', 'Vehículo_Corto', 'Taller', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Recibido_Bool', 'Cancelar Compra', 'Alerta Financiera']
                 df_disp = df_c[[c for c in cols_mostrar if c in df_c.columns]].copy()
-                df_disp.rename(columns={'Vehículo_Corto': 'Auto', 'Taller': 'CDR', 'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'ETA (Días)': 'ETA(Días)', 'Recibido_Bool': 'Recibido', 'Estatus Pago': 'Pago', 'Condición Pago': 'Cond. Pago', 'Días Crédito': 'Días Cr.'}, inplace=True)
+                df_disp.rename(columns={'Vehículo_Corto': 'Auto', 'Taller': 'CDR', 'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'ETA (Días)': 'ETA', 'Recibido_Bool': 'Recibido', 'Estatus Pago': 'Pago', 'Condición Pago': 'Cond. Pago', 'Días Crédito': 'Días Cr.'}, inplace=True)
                 
                 if not modo_consulta and permiso_edicion:
                     opciones_pago = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
@@ -772,7 +772,7 @@ if vista_actual == "🛒 Compras":
                         'Pieza': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
                         'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"), 
                         'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f", width="small"),
-                        'ETA(Días)': st.column_config.NumberColumn("ETA(Días)", step=1, width="small"), 
+                        'ETA': st.column_config.NumberColumn("ETA", step=1, width="small"), 
                         'Llegada Est.': st.column_config.TextColumn("Llegada Est.", disabled=True, width="small"),
                         'Cond. Pago': st.column_config.SelectboxColumn("Cond. Pago", options=opciones_pago, width="small"), 
                         'Días Cr.': st.column_config.NumberColumn("Días Cr.", step=1, width="small"),
@@ -782,7 +782,7 @@ if vista_actual == "🛒 Compras":
                         'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True, width="medium")
                     }
                     df_editado_compras = st.data_editor(df_disp, column_config=config_c, hide_index=True, use_container_width=True, key="ed_compras_main")
-                    df_editado_compras.rename(columns={'Auto': 'Vehículo_Corto', 'CDR': 'Taller', 'Pieza': 'Descripción Pieza', 'Costo': 'Costo Compra', 'ETA(Días)': 'Tiempo Entrega (Días)', 'Cond. Pago': 'Condición Pago', 'Días Cr.': 'Días Crédito', 'Pago': 'Estatus Pago'}, inplace=True)
+                    df_editado_compras.rename(columns={'Auto': 'Vehículo_Corto', 'CDR': 'Taller', 'Pieza': 'Descripción Pieza', 'Costo': 'Costo Compra', 'ETA': 'Tiempo Entrega (Días)', 'Cond. Pago': 'Condición Pago', 'Días Cr.': 'Días Crédito', 'Pago': 'Estatus Pago'}, inplace=True)
                     st.session_state['df_editado_compras_temp'] = df_editado_compras
                 else: 
                     st.dataframe(df_disp, hide_index=True, use_container_width=True)
@@ -822,6 +822,133 @@ if vista_actual == "🛒 Compras":
         }
         if permiso_edicion: st.data_editor(df_prov_disp, num_rows="dynamic", column_config=config_prov, use_container_width=True, hide_index=True, key="ed_prov")
         else: st.dataframe(df_prov_disp, column_config=config_prov, use_container_width=True, hide_index=True)
+
+elif vista_actual == "🏢 Talleres":
+    st.markdown("### 🏢 Base de Datos de Talleres")
+    if permiso_edicion:
+        with st.expander("➕ Registrar Nuevo Taller", expanded=False):
+            st.info("Registra un nuevo taller.")
+            mapa_asesores = {"Monterrey": "Oscar Landeros Martinez", "CDMX": "Yessica Vianney Martinez Olivar", "Guadalajara": "Estefany Dayanna Ochoa Aranda"}
+            lista_estados = ["Aguascalientes", "Baja California", "CDMX", "Jalisco", "Nuevo León", "Yucatán", "Coahuila", "Veracruz", "Sinaloa", "Tabasco", "Sonora", "Guanajuato", "Morelos", "Querétaro", "Oaxaca", "Guerrero", "Michoacán", "SLP"]
+            c1, c2, c3 = st.columns([2, 2, 1])
+            nuevo_taller = c1.text_input("Taller * (Obligatorio)")
+            ciudad_sel = c2.selectbox("Ciudad", [""] + sorted(list(mapa_asesores.keys())) + ["➕ OTRA CIUDAD (Escribir manual)"])
+            if ciudad_sel == "➕ OTRA CIUDAD (Escribir manual)": nueva_ciudad = c2.text_input("✍️ Escribe el nombre de la nueva Ciudad:"); asesor_asignado = c3.text_input("Asesor Asignado (Manual)")
+            elif ciudad_sel != "": nueva_ciudad = ciudad_sel; asesor_asignado = mapa_asesores.get(ciudad_sel, ""); c3.text_input("Asesor Asignado", value=asesor_asignado, disabled=True)
+            else: nueva_ciudad = ""; asesor_asignado = ""; c3.text_input("Asesor Asignado", disabled=True)
+            
+            c4, c5, c6, c7 = st.columns(4)
+            nuevo_estado = c4.selectbox("Estado", [""] + sorted(lista_estados)); nuevo_seguro = c5.selectbox("Seguro", ["MULTI", "GNP", "AMBOS", "OTRO"]); nuevo_contacto = c6.text_input("Contacto Taller"); nuevo_tel = c7.text_input("Teléfono Contacto")
+            c8, c9 = st.columns(2); nuevo_wa = c8.text_input("Whatsapp"); nuevo_correo = c9.text_input("Correo")
+            c10, c11, c12 = st.columns([2, 2, 1])
+            nueva_calle = c10.text_input("Calle y Número"); nueva_colonia = c11.text_input("Colonia"); nuevo_cp = c12.text_input("C.P.")
+            
+            if st.button("💾 Guardar en Catálogo", type="primary"):
+                if nuevo_taller.strip() == "": st.error("❌ El 'Nombre del Taller' es obligatorio.")
+                elif nueva_ciudad.strip() == "": st.error("❌ Por favor especifica una Ciudad.")
+                else:
+                    try:
+                        partes_dir = [p.strip() for p in [nueva_calle, nueva_colonia, nuevo_cp] if p.strip() != ""]; nueva_dir = ", ".join(partes_dir)
+                        doc = init_connection(); hojas = [s.title for s in doc.worksheets()]
+                        nombre_hoja_cat = "BD_TALLERES" if "BD_TALLERES" in hojas else "Catálogo"
+                        ws_c = doc.worksheet(nombre_hoja_cat)
+                        ws_c.append_row([nuevo_taller.upper(), nuevo_contacto.upper(), nuevo_tel, nuevo_wa, nuevo_correo, nueva_dir.upper(), nueva_ciudad.strip().upper(), nuevo_estado.strip().upper(), asesor_asignado.upper(), nuevo_seguro.upper()], value_input_option='USER_ENTERED')
+                        st.success(f"✅ Taller '{nuevo_taller}' agregado exitosamente en la nube."); st.cache_data.clear(); time.sleep(1); st.rerun()
+                    except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+
+    st.markdown("---")
+    if not df_catalogo.empty:
+        col_taller_cat = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
+        if col_taller_cat:
+            busqueda_taller = st.multiselect("🔍 Buscar Taller para editar:", options=sorted(list(df_catalogo[col_taller_cat].dropna().astype(str).unique())))
+            df_cat_disp = df_catalogo[df_catalogo[col_taller_cat].astype(str).isin(busqueda_taller)].copy() if busqueda_taller else df_catalogo.copy()
+        else: df_cat_disp = df_catalogo.copy()
+        df_cat_disp = df_cat_disp[[c for c in df_cat_disp.columns if "Unnamed" not in str(c)]]
+        for c in df_cat_disp.columns: df_cat_disp[c] = df_cat_disp[c].fillna("").astype(str).replace(['nan', 'None', '0', '0.0'], '')
+        if permiso_edicion: st.data_editor(df_cat_disp, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_cat")
+        else: st.dataframe(df_cat_disp, use_container_width=True, hide_index=True)
+
+elif vista_actual == "📦 Inventario":
+    if permiso_edicion:
+        with st.expander("➕ Registrar Nueva Pieza", expanded=False):
+            with st.form("form_alta_inv", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                ubicacion_n = c1.text_input("Ubicación Física"); oem_n = c2.text_input("No. Parte (OEM)"); alt_n = c3.text_input("No. Parte Alterno")
+                desc_n = st.text_input("Descripción de la Pieza * (Obligatorio)")
+                c4, c5, c6 = st.columns(3)
+                marca_n = c4.text_input("Marca"); mod_n = c5.text_input("Modelo"); ver_n = c6.text_input("Versión")
+                c7, c8, c9 = st.columns(3)
+                ano_n = c7.text_input("Años Compatibilidad"); pos_n = c8.text_input("Posición / Lado"); cant_n = c9.number_input("Cantidad", min_value=1, step=1)
+                c10, c11, c12 = st.columns(3)
+                est_n = c10.selectbox("Estado de la Pieza", ["NUEVA", "REPARADA", "USADA", "GENÉRICA"]); costo_n = c11.number_input("Costo Adquisición", min_value=0.0, step=10.0); precio_n = c12.number_input("Precio Venta", min_value=0.0, step=10.0)
+                c13, c14 = st.columns(2)
+                sin_n = c13.text_input("No. Siniestro / Lote"); ml_n = c14.text_input("SKU Mercado Libre")
+                if st.form_submit_button("💾 Guardar en Inventario"):
+                    if desc_n.strip() == "": st.error("❌ La 'Descripción de la Pieza' es obligatoria.")
+                    else:
+                        try:
+                            doc = init_connection(); ws_i = doc.worksheet("BD_INVENTARIO")
+                            ws_i.append_row([str(v).upper() if isinstance(v, str) else v for v in [ubicacion_n, oem_n, alt_n, desc_n, marca_n, mod_n, ver_n, ano_n, pos_n, cant_n, est_n, costo_n, precio_n, sin_n, ml_n, "NO"]], value_input_option='USER_ENTERED')
+                            st.success("✅ Pieza agregada exitosamente en la nube."); st.cache_data.clear(); time.sleep(1); st.rerun()
+                        except Exception as e: st.error(f"❌ Error al guardar en la nube: {e}")
+
+        st.markdown("---")
+        with st.expander("📉 Registrar Salida / Venta", expanded=False):
+            if not df_inventario.empty:
+                col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
+                df_inv_act = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
+                df_inv_act['Cantidad_Num'] = pd.to_numeric(df_inv_act['Cantidad'], errors='coerce').fillna(0)
+                df_stock = df_inv_act[(~df_inv_act['Sin Existencia']) & (df_inv_act['Cantidad_Num'] > 0)].copy()
+                if not df_stock.empty:
+                    df_stock['GS_Row'] = df_stock.index + 2
+                    df_stock['Filtro_Venta'] = df_stock.apply(lambda r: f"ID:{r['GS_Row']} - " + " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+                    with st.form("form_salida_inv", clear_on_submit=True):
+                        st.info("Selecciona una pieza para descontar del inventario. Si la cantidad llega a 0, se ocultará automáticamente.")
+                        pieza_sel = st.selectbox("Pieza a descontar:", options=[""] + sorted(list(df_stock['Filtro_Venta'].unique())))
+                        c_cant, c_dest = st.columns([1, 3])
+                        cant_descontar = c_cant.number_input("Cantidad a sacar", min_value=1, step=1); destino_salida = c_dest.text_input("Destino / Comentario (Ej. Venta Mostrador, Siniestro MULTI-123)")
+                        if st.form_submit_button("📉 Confirmar Salida"):
+                            if not pieza_sel: st.error("❌ Por favor selecciona una pieza.")
+                            else:
+                                try:
+                                    fila_encontrada = int(pieza_sel.split(' - ')[0].replace('ID:', '').strip())
+                                    doc = init_connection(); ws_i = doc.worksheet("BD_INVENTARIO")
+                                    datos_i = ws_i.get_all_values()
+                                    headers = [str(h).strip().upper() for h in datos_i[0]]
+                                    idx_cant = headers.index('CANTIDAD') if 'CANTIDAD' in headers else 9; idx_sin = headers.index('NO. SINIESTRO / LOTE') if 'NO. SINIESTRO / LOTE' in headers else 13; idx_sinexist = headers.index('SIN EXISTENCIA') if 'SIN EXISTENCIA' in headers else 15
+                                    cant_actual_str = str(datos_i[fila_encontrada-1][idx_cant]).strip()
+                                    cant_actual = int(float(cant_actual_str)) if cant_actual_str.replace('.','',1).isdigit() else 0
+                                    nueva_cant = cant_actual - cant_descontar
+                                    if nueva_cant <= 0: nueva_cant = 0; ws_i.update_cell(fila_encontrada, idx_sinexist + 1, "SI")
+                                    ws_i.update_cell(fila_encontrada, idx_cant + 1, nueva_cant)
+                                    if destino_salida.strip():
+                                        val_previo = str(datos_i[fila_encontrada-1][idx_sin]) if len(datos_i[fila_encontrada-1]) > idx_sin else ""
+                                        nuevo_dest = f"{val_previo} [Salida: {destino_salida.upper()}]".strip()
+                                        ws_i.update_cell(fila_encontrada, idx_sin + 1, nuevo_dest)
+                                    st.success(f"✅ Salida registrada. Nuevo stock: {nueva_cant}"); st.cache_data.clear(); time.sleep(1); st.rerun()
+                                except Exception as e: st.error(f"❌ Error al conectar con la nube: {e}")
+                else: st.warning("No hay piezas disponibles en stock (Cantidades agotadas).")
+
+        st.markdown("---")
+        if not df_inventario.empty:
+            col_skuint = next((c for c in df_inventario.columns if "SKU INT" in str(c).upper()), None)
+            df_inv_filtrado = df_inventario[df_inventario[col_skuint].astype(str).str.strip().str.upper() != 'PRE-001'].copy() if col_skuint else df_inventario.copy()
+            df_inv_filtrado['Cantidad_Num_Vista'] = pd.to_numeric(df_inv_filtrado['Cantidad'], errors='coerce').fillna(0)
+            df_inv_filtrado = df_inv_filtrado[(~df_inv_filtrado['Sin Existencia']) & (df_inv_filtrado['Cantidad_Num_Vista'] > 0)].copy()
+            if not df_inv_filtrado.empty:
+                df_inv_filtrado['Filtro_Busqueda'] = df_inv_filtrado.apply(lambda r: " | ".join([e.upper() for e in [str(r.get('Número de Parte (OEM)', '')), str(r.get('Marca', '')), str(r.get('Modelo', '')), str(r.get('Descripción de la Pieza', ''))] if str(e).strip() not in ['nan','none','']]), axis=1)
+                busqueda_inv = st.multiselect("🔍 Buscar Pieza:", options=sorted(list(df_inv_filtrado['Filtro_Busqueda'].dropna().unique())))
+                df_inv_disp = df_inv_filtrado[df_inv_filtrado['Filtro_Busqueda'].isin(busqueda_inv)].copy() if busqueda_inv else df_inv_filtrado.copy()
+                if 'Filtro_Busqueda' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Filtro_Busqueda'])
+                if 'Cantidad_Num_Vista' in df_inv_disp.columns: df_inv_disp = df_inv_disp.drop(columns=['Cantidad_Num_Vista'])
+                for c in df_inv_disp.columns:
+                    if c != 'Sin Existencia': df_inv_disp[c] = df_inv_disp[c].fillna("").astype(str).replace(['nan', 'None', '0.0'], '').str.upper()
+                df_inv_disp.insert(0, 'Nº', range(1, len(df_inv_disp) + 1)); st.markdown(f"**🔢 Total de piezas listadas:** {len(df_inv_disp)}")
+                if permiso_edicion:
+                    config_inv = {'Nº': st.column_config.NumberColumn("Nº", disabled=True), 'Sin Existencia': st.column_config.CheckboxColumn("Sin Existencia", default=False)}
+                    st.data_editor(df_inv_disp, num_rows="dynamic", column_config=config_inv, use_container_width=True, hide_index=True, key="ed_inv")
+                else: st.dataframe(df_inv_disp, use_container_width=True, hide_index=True)
+            else: st.info("El inventario está vacío o todas las piezas están agotadas.")
 
 # ==============================================================================
 # === [BLOQUE 8: VISTAS - FACTURACIÓN Y REMISIONES] ===

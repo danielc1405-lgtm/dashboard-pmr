@@ -459,20 +459,50 @@ elif vista_actual == "⚙️ Panel Operativo":
     kpi4.metric("❌ Vencidos", vencidas_pasadas_kpi); kpi5.metric("↩️ En Recolección", recolecciones); kpi6.metric("🧾 Por Facturar", partidas_por_facturar)
 
     st.markdown("### 🎛️ Filtros de Búsqueda")
-    filtro_col1, filtro_col2, filtro_col3, filtro_col4 = st.columns(4)
-    with filtro_col1: taller_sel = st.multiselect("🏢 Taller:", sorted([str(t) for t in df_proceso[col_taller].dropna().unique() if str(t).strip() != '']) if col_taller else [], placeholder="Todos...")
-    with filtro_col2: estatus_sel = st.multiselect("📊 Estatus:", sorted([str(e) for e in df_proceso[col_estatus].dropna().unique() if str(e).strip() != '']) if col_estatus else [], placeholder="Todos...")
+    
+    # -------------------------------------------------------------
+    # MOTOR DE CRUCE: TALLERES -> ESTADOS
+    # -------------------------------------------------------------
+    dict_estados = {}
+    if not df_catalogo.empty and col_taller:
+        col_cat_tall = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
+        col_cat_est = next((c for c in df_catalogo.columns if "ESTADO" in str(c).upper()), None)
+        if col_cat_tall and col_cat_est:
+            dict_estados = dict(zip(df_catalogo[col_cat_tall].astype(str).str.strip().str.upper(), df_catalogo[col_cat_est].astype(str).str.strip().str.upper()))
+    
+    df_proceso['Estado_CDR'] = df_proceso[col_taller].astype(str).str.strip().str.upper().map(dict_estados).fillna("S/D") if col_taller else "S/D"
+    if not df_recoleccion_total.empty:
+        df_recoleccion_total['Estado_CDR'] = df_recoleccion_total[col_taller].astype(str).str.strip().str.upper().map(dict_estados).fillna("S/D") if col_taller else "S/D"
+    # -------------------------------------------------------------
+
+    # FILTROS EN CASCADA (5 Columnas)
+    filtro_col0, filtro_col1, filtro_col2, filtro_col3, filtro_col4 = st.columns([1, 1.2, 1, 1.5, 1.5])
+    
+    with filtro_col0: 
+        estado_sel = st.multiselect("🌎 Estado:", sorted([str(e) for e in df_proceso['Estado_CDR'].dropna().unique() if str(e).strip() != '']), placeholder="Todos...")
+    
+    with filtro_col1: 
+        df_t1 = df_proceso.copy()
+        if estado_sel: df_t1 = df_t1[df_t1['Estado_CDR'].astype(str).isin(estado_sel)]
+        taller_sel = st.multiselect("🏢 Taller:", sorted([str(t) for t in df_t1[col_taller].dropna().unique() if str(t).strip() != '']) if col_taller else [], placeholder="Todos...")
+        
+    with filtro_col2: 
+        df_t2 = df_t1.copy()
+        if taller_sel: df_t2 = df_t2[df_t2[col_taller].astype(str).isin(taller_sel)]
+        estatus_sel = st.multiselect("📊 Estatus:", sorted([str(e) for e in df_t2[col_estatus].dropna().unique() if str(e).strip() != '']) if col_estatus else [], placeholder="Todos...")
+        
     with filtro_col3:
-        df_temp = df_proceso.copy()
-        if taller_sel: df_temp = df_temp[df_temp[col_taller].astype(str).isin(taller_sel)]
-        if estatus_sel: df_temp = df_temp[df_temp[col_estatus].astype(str).isin(estatus_sel)]
-        siniestro_sel = st.multiselect(f"🚗 Siniestro - Vehículo:", sorted(list(df_temp['Filtro_Siniestro'].dropna().unique())) if 'Filtro_Siniestro' in df_temp.columns else [], placeholder="Todos...")
+        df_t3 = df_t2.copy()
+        if estatus_sel: df_t3 = df_t3[df_t3[col_estatus].astype(str).isin(estatus_sel)]
+        siniestro_sel = st.multiselect(f"🚗 Siniestro - Vehículo:", sorted(list(df_t3['Filtro_Siniestro'].dropna().unique())) if 'Filtro_Siniestro' in df_t3.columns else [], placeholder="Todos...")
+        
     with filtro_col4:
-        df_temp_desc = df_temp.copy()
-        if siniestro_sel: df_temp_desc = df_temp_desc[df_temp_desc['Filtro_Siniestro'].isin(siniestro_sel)]
-        desc_sel = st.multiselect(f"⚙️ Refacción:", sorted(list(df_temp_desc[col_desc].dropna().astype(str).unique())) if col_desc in df_temp_desc.columns else [], placeholder="Todas...")
+        df_t4 = df_t3.copy()
+        if siniestro_sel: df_t4 = df_t4[df_t4['Filtro_Siniestro'].isin(siniestro_sel)]
+        desc_sel = st.multiselect(f"⚙️ Refacción:", sorted(list(df_t4[col_desc].dropna().astype(str).unique())) if col_desc in df_t4.columns else [], placeholder="Todas...")
 
     df_filtrado = df_proceso.copy()
+    if estado_sel: df_filtrado = df_filtrado[df_filtrado['Estado_CDR'].astype(str).isin(estado_sel)]
     if taller_sel: df_filtrado = df_filtrado[df_filtrado[col_taller].astype(str).isin(taller_sel)]
     if estatus_sel: df_filtrado = df_filtrado[df_filtrado[col_estatus].astype(str).isin(estatus_sel)]
     if siniestro_sel: df_filtrado = df_filtrado[df_filtrado['Filtro_Siniestro'].isin(siniestro_sel)]
@@ -495,6 +525,7 @@ elif vista_actual == "⚙️ Panel Operativo":
     if col_remision: base_config[col_remision] = st.column_config.TextColumn("Folio Remisión", width="small")
     if col_comentarios: base_config[col_comentarios] = st.column_config.TextColumn("Obs.") 
 
+    # SHIELD ACTIVADO: Atrapa estatus vacíos o "POR CONFIRMAR"
     cond_confirmar = df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_filtrado[col_estatus].fillna('').astype(str).str.strip() == "")
     df_por_confirmar = df_filtrado[cond_confirmar].copy() if col_estatus else pd.DataFrame()
     
@@ -638,6 +669,9 @@ elif vista_actual == "⚙️ Panel Operativo":
         if dfs_editados: df_editado = pd.concat(dfs_editados, ignore_index=True)
 
     df_recoleccion = df_recoleccion_total.copy()
+    if 'Estado_CDR' in df_proceso.columns: 
+        df_recoleccion['Estado_CDR'] = df_recoleccion[col_taller].astype(str).str.strip().str.upper().map(dict_estados).fillna("S/D") if col_taller else "S/D"
+    if estado_sel: df_recoleccion = df_recoleccion[df_recoleccion['Estado_CDR'].astype(str).isin(estado_sel)]
     if taller_sel: df_recoleccion = df_recoleccion[df_recoleccion[col_taller].astype(str).isin(taller_sel)]
     if siniestro_sel:
         ids_sel = [s.split(" - ")[0] for s in siniestro_sel]

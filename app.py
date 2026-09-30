@@ -1336,6 +1336,10 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             orig = originales.get(k, {'remision_bool': False})
             cambios_a_guardar.setdefault(k, {}).update({'estatus': 'EN TRANSITO', 'imprimir_remision': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
             if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
+            
+            # --- AUTO-LIMPIEZA DE COMPRAS ---
+            # Envía la señal silenciosa a BD_COMPRAS para marcar la casilla como "SI"
+            cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
     if btn_guardar:
         if not df_editado_conf.empty:

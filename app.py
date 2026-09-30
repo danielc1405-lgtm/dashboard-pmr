@@ -454,6 +454,19 @@ elif vista_actual == "⚙️ Panel Operativo":
         try: return pd.to_datetime(val_str, dayfirst=True)
         except: return pd.NaT
 
+    # --- NUEVO MOTOR DE AGRUPACIÓN INTELIGENTE (FUSIONA POR SINIESTRO RELACIONADO) ---
+    col_sin_rel = next((c for c in df_proceso.columns if "RELACIONADO" in str(c).upper()), None)
+    def get_agrupador(row):
+        rel = str(row.get(col_sin_rel, '')).strip() if col_sin_rel else ''
+        if rel and rel.upper() not in ['NAN', 'NONE', '']: return rel
+        return str(row.get(col_id, '')).strip()
+        
+    if not df_proceso.empty: 
+        df_proceso['Agrupador_Visual'] = df_proceso.apply(get_agrupador, axis=1)
+    if not df_recoleccion_total.empty: 
+        df_recoleccion_total['Agrupador_Visual'] = df_recoleccion_total.apply(get_agrupador, axis=1)
+    # ---------------------------------------------------------------------------------
+
     if col_vencimiento:
         fechas_venc_dt = df_proceso[col_vencimiento].apply(parse_dt_safe_op)
         vencidas_pasadas_kpi = len(df_proceso[(fechas_venc_dt < hoy_dt) & (df_proceso[col_vencimiento] != '') & (~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR"))])
@@ -515,7 +528,7 @@ elif vista_actual == "⚙️ Panel Operativo":
     if desc_sel: df_filtrado = df_filtrado[df_filtrado[col_desc].astype(str).isin(desc_sel)]
 
     base_config = {}
-    if col_id and col_id in df_filtrado.columns: base_config[col_id] = st.column_config.TextColumn("Siniestro")
+    if col_id and col_id in df_filtrado.columns: base_config[col_id] = st.column_config.TextColumn("Pedido / Siniestro", width="medium", disabled=True)
     if 'Vehiculo_Info' in df_filtrado.columns: base_config['Vehiculo_Info'] = st.column_config.TextColumn("Vehículo")
     if col_taller: base_config[col_taller] = st.column_config.TextColumn("Taller", width="small")
     if col_asignacion: base_config[col_asignacion] = st.column_config.TextColumn("Asig.", width="small")
@@ -528,7 +541,6 @@ elif vista_actual == "⚙️ Panel Operativo":
     if col_vencimiento: base_config[col_vencimiento] = st.column_config.TextColumn("Venc.", width="small")
     if col_paqueteria: base_config[col_paqueteria] = st.column_config.SelectboxColumn("Paquetería", options=["", "PAQUETEXPRESS", "FEDEX", "DHL", "ESTAFETA", "AFIMEX"], width="small")
     if col_guia: base_config[col_guia] = st.column_config.TextColumn("Guía", width="small")
-    # AQUÍ CONFIGURAMOS LA NUEVA COLUMNA DE ESTATUS ENVÍO
     if col_estatus_envio: base_config[col_estatus_envio] = st.column_config.TextColumn("Estatus Envío", width="medium", disabled=True)
     if col_remision: base_config[col_remision] = st.column_config.TextColumn("Folio Remisión", width="small")
     if col_comentarios: base_config[col_comentarios] = st.column_config.TextColumn("Obs.") 
@@ -541,11 +553,11 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_por_confirmar.empty:
             for taller, df_taller in df_por_confirmar.groupby(col_taller):
                 with st.expander(f"🏢 {taller}", expanded=False):
-                    for siniestro_auto, df_grupo in df_taller.groupby(col_id):
+                    for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion: 
                             df_grupo['Confirmar Surtido'] = False; df_grupo['Cancelar'] = False
-                            cols_conf = [c for c in [col_cant, col_desc, col_origen, col_asignacion, col_vencimiento, col_estatus, col_comentarios, 'Confirmar Surtido', 'Cancelar'] if c in df_grupo.columns]
+                            cols_conf = [c for c in [col_id, col_cant, col_desc, col_origen, col_asignacion, col_vencimiento, col_estatus, col_comentarios, 'Confirmar Surtido', 'Cancelar'] if c in df_grupo.columns]
                             config_conf = base_config.copy()
                             config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False)})
                             df_editado_parcial = st.data_editor(df_grupo[cols_conf], column_config=config_conf, disabled=[c for c in cols_conf if c not in ['Confirmar Surtido', 'Cancelar', col_comentarios]], hide_index=True, use_container_width=True, key=f"ed_conf_{taller}_{siniestro_auto}")
@@ -553,7 +565,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                                 if col in df_grupo.columns and col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
                             dfs_editados_conf.append(df_editado_parcial)
                         else:
-                            cols_conf = [c for c in [col_cant, col_desc, col_origen, col_asignacion, col_vencimiento, col_estatus, col_comentarios] if c in df_grupo.columns]
+                            cols_conf = [c for c in [col_id, col_cant, col_desc, col_origen, col_asignacion, col_vencimiento, col_estatus, col_comentarios] if c in df_grupo.columns]
                             st.dataframe(df_grupo[cols_conf], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
 
@@ -653,12 +665,11 @@ elif vista_actual == "⚙️ Panel Operativo":
             
             for taller, df_taller in df_asignados.groupby(col_taller):
                 with st.expander(f"🏢 {taller}", expanded=False):
-                    for siniestro_auto, df_grupo in df_taller.groupby(col_id):
+                    for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if not modo_consulta and permiso_edicion:
                             columnas_operacion = ['Proveedor', 'Costo Compra', 'ETA (Días)', 'Entregado', 'Recibido', 'Cancelar']
-                            # AQUÍ INYECTAMOS LA COLUMNA DE ESTATUS ENVÍO JUSTO DESPUÉS DE LA GUÍA
-                            orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_origen, col_precio, col_estatus, col_vencimiento, col_paqueteria, col_guia, col_estatus_envio, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_operacion
+                            orden_deseado = [c for c in [col_id, col_asignacion, col_fecha_confi, col_cant, col_desc, col_origen, col_precio, col_estatus, col_vencimiento, col_paqueteria, col_guia, col_estatus_envio, col_remision, col_comentarios] if c in df_grupo.columns] + columnas_operacion
                             config_pedidos = base_config.copy()
                             config_pedidos.update({ 
                                 col_asignacion: st.column_config.TextColumn("Asig."), col_vencimiento: st.column_config.TextColumn("Venc."),
@@ -672,7 +683,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                                 if col in df_grupo.columns and col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
                             dfs_editados.append(df_editado_parcial)
                         else:
-                            orden_deseado = [c for c in [col_asignacion, col_fecha_confi, col_cant, col_desc, col_origen, col_precio, col_estatus, col_vencimiento, col_paqueteria, col_guia, col_estatus_envio, col_remision, col_comentarios] if c in df_grupo.columns]
+                            orden_deseado = [c for c in [col_id, col_asignacion, col_fecha_confi, col_cant, col_desc, col_origen, col_precio, col_estatus, col_vencimiento, col_paqueteria, col_guia, col_estatus_envio, col_remision, col_comentarios] if c in df_grupo.columns]
                             st.dataframe(df_grupo[orden_deseado], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados: df_editado = pd.concat(dfs_editados, ignore_index=True)
 

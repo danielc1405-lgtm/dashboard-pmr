@@ -169,9 +169,15 @@ def obtener_dataframe(nombre_hoja, silent=False):
         if not silent: st.error(f"Error cargando hoja {nombre_hoja}: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=600)  # <-- Ajuste de caché a 10 minutos para máxima velocidad
 def cargar_datos():
     df_uni = obtener_dataframe("BD_UNIFICADA")
+    df_hist = obtener_dataframe("BD_HISTORICO", silent=True)
+    
+    # Fusionamos ambas bases en la memoria para no perder el radar global
+    if not df_hist.empty:
+        df_uni = pd.concat([df_uni, df_hist], ignore_index=True)
+        
     df_comp = obtener_dataframe("BD_COMPRAS", silent=True)
     df_cat = obtener_dataframe("BD_TALLERES", silent=True)
     if df_cat.empty: df_cat = obtener_dataframe("Catálogo", silent=True)
@@ -181,7 +187,10 @@ def cargar_datos():
             df_inv['Sin Existencia'] = df_inv['Sin Existencia'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'X', 'V', 'VERDADERO'])
     except: df_inv = pd.DataFrame()
     df_prov = obtener_dataframe("BD_PROVEEDORES", silent=True)
-    if not df_uni.empty and 'Siniestro Relacionado' in df_uni.columns: df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
+    
+    if not df_uni.empty and 'Siniestro Relacionado' in df_uni.columns: 
+        df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
+        
     return df_uni, df_comp, df_cat, df_inv, df_prov
 
 df_completo, df_compras, df_catalogo, df_inventario, df_proveedores = cargar_datos()
@@ -219,7 +228,6 @@ if not df_trabajo_completo.empty:
     col_fecha_confi = next((c for c in df_trabajo_completo.columns if "FECHA CONFI" in str(c).upper()), None)
     col_paqueteria = next((c for c in df_trabajo_completo.columns if "PAQUETERIA" in str(c).upper() or "PAQUETERÍA" in str(c).upper()), None)
     col_guia = next((c for c in df_trabajo_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), None)
-    # NUEVA COLUMNA DETECTADA
     col_estatus_envio = next((c for c in df_trabajo_completo.columns if "ESTATUS ENV" in str(c).upper() or "RASTREO" in str(c).upper()), None)
     col_remision = next((c for c in df_trabajo_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
     col_comentarios = next((c for c in df_trabajo_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
@@ -266,6 +274,7 @@ if not df_trabajo_completo.empty:
     df_trabajo_completo['Filtro_Siniestro'] = df_trabajo_completo[col_id].astype(str).str.strip() + " | " + df_trabajo_completo['Vehiculo_Info']
     df_trabajo = df_trabajo_completo.copy()
     
+    # El corazón del radar: en modo consulta lee todo, en operación ignora los estatus cerrados
     if modo_consulta: df_proceso = df_trabajo.copy()
     else: df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|RECIBIDO|FACTURADO|RECOLEC")].copy() if col_estatus else df_trabajo.copy()
         

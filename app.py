@@ -999,20 +999,21 @@ elif vista_actual == "🔍 Consultas":
         with st.expander("👑 Editor Maestro (Modo Dios)", expanded=False):
             st.info("Control total: Edita cualquier dato histórico o activo. Para logística inversa, selecciona 'EN PROCESO DE REEMBOLSO' en la columna de Estatus.")
             
-            if not df_completo.empty and 'Filtro_Siniestro' in df_completo.columns:
+            # CORRECCIÓN: Usar df_trabajo que contiene los datos enriquecidos
+            if not df_trabajo.empty and 'Filtro_Siniestro' in df_trabajo.columns:
                 # Buscador con lista desplegable enriquecida (Siniestro + Vehículo)
-                siniestros_lista = sorted(list(df_completo['Filtro_Siniestro'].dropna().astype(str).unique()))
+                siniestros_lista = sorted(list(df_trabajo['Filtro_Siniestro'].dropna().astype(str).unique()))
                 sin_sel = st.selectbox("🔍 Buscar Siniestro a intervenir:", [""] + siniestros_lista)
                 
                 if sin_sel:
                     # Aislar solo el siniestro elegido usando el filtro enriquecido
-                    df_edit = df_completo[df_completo['Filtro_Siniestro'].astype(str) == sin_sel].copy()
+                    df_edit = df_trabajo[df_trabajo['Filtro_Siniestro'].astype(str) == sin_sel].copy()
                     
                     # Añadimos 'Vehiculo_Info' a las columnas visibles
                     cols_dios = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_edit.columns]
                     
                     # --- CREACIÓN DE LA LISTA DESPLEGABLE ANTIFALLOS ---
-                    estatus_bd = list(df_completo[col_estatus].dropna().astype(str).unique()) if col_estatus else []
+                    estatus_bd = list(df_trabajo[col_estatus].dropna().astype(str).unique()) if col_estatus else []
                     estatus_base = ["EN PROCESO DE REEMBOLSO", "REEMBOLSADO", "POR CONFIRMAR", "EN PROCESAMIENTO", "EN TRANSITO", "ENTREGADO", "RECIBIDO", "FACTURADO", "CANCELADO"]
                     opciones_estatus = sorted(list(set(estatus_bd + estatus_base)))
                     
@@ -1022,7 +1023,7 @@ elif vista_actual == "🔍 Consultas":
                     if 'Vehiculo_Info' in df_edit.columns:
                         config_dios['Vehiculo_Info'] = st.column_config.TextColumn("Vehículo", disabled=True)
                     if col_id:
-                        config_dios[col_id] = st.column_config.TextColumn("Siniestro", disabled=True) # Protegemos el ID para evitar romper enlaces
+                        config_dios[col_id] = st.column_config.TextColumn("Siniestro", disabled=True)
                     
                     st.caption("Modifica directamente en la tabla y presiona Guardar.")
                     
@@ -1096,17 +1097,17 @@ elif vista_actual == "🔍 Consultas":
     
     fil_col1, fil_col2, fil_col3, fil_col4 = st.columns(4)
     with fil_col1:
-        talleres_disp = sorted([str(t) for t in df_completo[col_taller].dropna().unique() if str(t).strip() != '']) if col_taller else []
+        talleres_disp = sorted([str(t) for t in df_trabajo[col_taller].dropna().unique() if str(t).strip() != '']) if col_taller else []
         taller_busca = st.multiselect("🏢 Filtrar por Taller:", talleres_disp)
     with fil_col2:
-        estatus_disp = sorted([str(e) for e in df_completo[col_estatus].dropna().unique() if str(e).strip() != '']) if col_estatus else []
+        estatus_disp = sorted([str(e) for e in df_trabajo[col_estatus].dropna().unique() if str(e).strip() != '']) if col_estatus else []
         estatus_busca = st.multiselect("📊 Filtrar por Estatus:", estatus_disp)
     with fil_col3:
         sin_busca = st.text_input("🚗 Buscar Siniestro / VIN:")
     with fil_col4:
-        desc_busca = st.text_input("⚙️ Buscar Refacción:")
+        desc_busca = st.text_input("⚙️️ Buscar Refacción:")
 
-    df_resultados = df_completo.copy()
+    df_resultados = df_trabajo.copy()
     if taller_busca: df_resultados = df_resultados[df_resultados[col_taller].astype(str).isin(taller_busca)]
     if estatus_busca: df_resultados = df_resultados[df_resultados[col_estatus].astype(str).isin(estatus_busca)]
     if sin_busca: df_resultados = df_resultados[df_resultados['Filtro_Siniestro'].astype(str).str.contains(sin_busca, case=False, na=False)]

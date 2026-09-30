@@ -995,7 +995,8 @@ elif vista_actual == "🔍 Consultas":
     # ==============================================================================
     # 👑 EDITOR MAESTRO (MODO DIOS)
     # ==============================================================================
-    if not modo_consulta and permiso_edicion:
+    # CANDADO APLICADO: Solo visible si el usuario actual es Daniel (o el nombre de tu usuario administrador)
+    if not modo_consulta and permiso_edicion and "Daniel" in st.session_state.get("usuario_actual", ""):
         with st.expander("👑 Editor Maestro (Modo Dios)", expanded=False):
             st.info("Control total: Edita cualquier dato histórico o activo. Para logística inversa, selecciona 'EN PROCESO DE REEMBOLSO' en la columna de Estatus.")
             
@@ -1105,7 +1106,7 @@ elif vista_actual == "🔍 Consultas":
     with fil_col3:
         sin_busca = st.text_input("🚗 Buscar Siniestro / VIN:")
     with fil_col4:
-        desc_busca = st.text_input("⚙️️ Buscar Refacción:")
+        desc_busca = st.text_input("⚙ Buscar Refacción:")
 
     df_resultados = df_trabajo.copy()
     if taller_busca: df_resultados = df_resultados[df_resultados[col_taller].astype(str).isin(taller_busca)]

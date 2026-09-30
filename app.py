@@ -999,15 +999,17 @@ elif vista_actual == "🔍 Consultas":
         with st.expander("👑 Editor Maestro (Modo Dios)", expanded=False):
             st.info("Control total: Edita cualquier dato histórico o activo. Para logística inversa, selecciona 'EN PROCESO DE REEMBOLSO' en la columna de Estatus.")
             
-            if not df_completo.empty and col_id:
-                # Buscador con lista desplegable
-                siniestros_lista = sorted(list(df_completo[col_id].dropna().astype(str).unique()))
+            if not df_completo.empty and 'Filtro_Siniestro' in df_completo.columns:
+                # Buscador con lista desplegable enriquecida (Siniestro + Vehículo)
+                siniestros_lista = sorted(list(df_completo['Filtro_Siniestro'].dropna().astype(str).unique()))
                 sin_sel = st.selectbox("🔍 Buscar Siniestro a intervenir:", [""] + siniestros_lista)
                 
                 if sin_sel:
-                    # Aislar solo el siniestro elegido
-                    df_edit = df_completo[df_completo[col_id].astype(str) == sin_sel].copy()
-                    cols_dios = [c for c in [col_id, col_taller, col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_edit.columns]
+                    # Aislar solo el siniestro elegido usando el filtro enriquecido
+                    df_edit = df_completo[df_completo['Filtro_Siniestro'].astype(str) == sin_sel].copy()
+                    
+                    # Añadimos 'Vehiculo_Info' a las columnas visibles
+                    cols_dios = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_edit.columns]
                     
                     # --- CREACIÓN DE LA LISTA DESPLEGABLE ANTIFALLOS ---
                     estatus_bd = list(df_completo[col_estatus].dropna().astype(str).unique()) if col_estatus else []
@@ -1017,6 +1019,10 @@ elif vista_actual == "🔍 Consultas":
                     config_dios = {}
                     if col_estatus:
                         config_dios[col_estatus] = st.column_config.SelectboxColumn("Estatus", options=opciones_estatus)
+                    if 'Vehiculo_Info' in df_edit.columns:
+                        config_dios['Vehiculo_Info'] = st.column_config.TextColumn("Vehículo", disabled=True)
+                    if col_id:
+                        config_dios[col_id] = st.column_config.TextColumn("Siniestro", disabled=True) # Protegemos el ID para evitar romper enlaces
                     
                     st.caption("Modifica directamente en la tabla y presiona Guardar.")
                     

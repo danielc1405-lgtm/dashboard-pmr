@@ -455,7 +455,8 @@ elif vista_actual == "⚙️ Panel Operativo":
         except: return pd.NaT
 
     # --- NUEVO MOTOR DE AGRUPACIÓN INTELIGENTE (FUSIONA POR SINIESTRO RELACIONADO) ---
-    col_sin_rel = next((c for c in df_proceso.columns if "RELACIONADO" in str(c).upper()), None)
+    col_sin_rel = next((c for c in df_proceso.columns if str(c).strip().upper() in ["SINIESTRO RELACIONADO", "SINIESTRO"]), None)
+    
     def get_agrupador(row):
         rel = str(row.get(col_sin_rel, '')).strip() if col_sin_rel else ''
         if rel and rel.upper() not in ['NAN', 'NONE', '']: return rel

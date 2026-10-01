@@ -115,7 +115,6 @@ permiso_edicion = st.session_state.get('permiso_edicion', True)
 # ==============================================================================
 modo_consulta = False
 
-# SE RESTAURAN LAS OPCIONES FALTANTES AL MENÚ
 opciones_menu = [
     "📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", 
     "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
@@ -137,7 +136,6 @@ with col_aseg:
         aseguradora_sel = "MULTI" 
 
 with col_btn_ref:
-    # BOTÓN PARA ROMPER LA CACHÉ MANUAlMENTE
     if st.button("🔄", help="Forzar recarga de datos desde Google Sheets"):
         st.cache_data.clear()
         st.rerun()
@@ -443,6 +441,7 @@ elif vista_actual == "⚙️ Panel Operativo":
         try: return pd.to_datetime(val_str, dayfirst=True)
         except: return pd.NaT
 
+    # --- MOTOR DE AGRUPACIÓN INTELIGENTE ---
     col_sin_rel = next((c for c in df_proceso.columns if str(c).strip().upper() in ["SINIESTRO RELACIONADO", "SINIESTRO"]), None)
     
     def get_agrupador(row):
@@ -899,7 +898,7 @@ elif vista_actual == "🏢 Talleres":
             c1, c2, c3 = st.columns([2, 2, 1])
             nuevo_taller = c1.text_input("Taller * (Obligatorio)")
             ciudad_sel = c2.selectbox("Ciudad", [""] + sorted(list(mapa_asesores.keys())) + ["➕ OTRA CIUDAD (Escribir manual)"])
-            if ciudad_sel == "➕ OTRA CIUDAD (Escribir manual)": nueva_ciudad = c2.text_input("✍️️ Escribe el nombre de la nueva Ciudad:"); asesor_asignado = c3.text_input("Asesor Asignado (Manual)")
+            if ciudad_sel == "➕ OTRA CIUDAD (Escribir manual)": nueva_ciudad = c2.text_input("✍️ Escribe el nombre de la nueva Ciudad:"); asesor_asignado = c3.text_input("Asesor Asignado (Manual)")
             elif ciudad_sel != "": nueva_ciudad = ciudad_sel; asesor_asignado = mapa_asesores.get(ciudad_sel, ""); c3.text_input("Asesor Asignado", value=asesor_asignado, disabled=True)
             else: nueva_ciudad = ""; asesor_asignado = ""; c3.text_input("Asesor Asignado", disabled=True)
             
@@ -1017,16 +1016,83 @@ elif vista_actual == "📦 Inventario":
             else: st.info("El inventario está vacío o todas las piezas están agotadas.")
 
 # ==============================================================================
-# === [BLOQUE 8: VISTAS - REMISIONES Y FACTURACIÓN (RESTAURADOS)] ===
+# === [BLOQUE 8: VISTAS - REMISIONES Y FACTURACIÓN] ===
 # ==============================================================================
 elif vista_actual == "📝 Remisiones":
-    st.info("Pega aquí tu código de Remisiones. Lo preparé para que solo copies y pegues el bloque exacto de tu respaldo.")
+    st.markdown("### 📝 Generación de Remisiones (Envío a Taller)")
     
+    if col_estatus and not df_trabajo.empty:
+        df_listos = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper() == "EN TRANSITO"].copy()
+    else: df_listos = pd.DataFrame()
+
+    if not df_listos.empty:
+        col_id_r = next((c for c in df_listos.columns if "SINIESTRO" in str(c).upper()), None)
+        col_taller_r = next((c for c in df_listos.columns if "TALLER" in str(c).upper()), None)
+        col_marca_r = next((c for c in df_listos.columns if "MARCA" in str(c).upper()), None)
+        col_modelo_r = next((c for c in df_listos.columns if "MODELO" in str(c).upper()), None)
+        col_desc_r = next((c for c in df_listos.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+        
+        st.info("Selecciona las refacciones que deseas incluir en la nueva remisión para cada taller.")
+        
+        for taller, df_taller_rem in df_listos.groupby(col_taller_r):
+            with st.expander(f"🏢 {taller} | {len(df_taller_rem)} Piezas en Tránsito", expanded=False):
+                agrupadores = [c for c in [col_id_r, col_marca_r, col_modelo_r] if c in df_taller_rem.columns]
+                
+                for keys, df_sin_rem in df_taller_rem.groupby(agrupadores):
+                    siniestro_v = keys[agrupadores.index(col_id_r)] if col_id_r in agrupadores else "S/N"
+                    marca_v = keys[agrupadores.index(col_marca_r)] if col_marca_r in agrupadores else ""
+                    modelo_v = keys[agrupadores.index(col_modelo_r)] if col_modelo_r in agrupadores else ""
+                    
+                    st.markdown(f"**🚗 Siniestro: {siniestro_v} | {marca_v} {modelo_v}**")
+                    
+                    with st.form(f"form_rem_{taller}_{siniestro_v}"):
+                        piezas_a_remisionar = []
+                        for _, row_p in df_sin_rem.iterrows():
+                            desc_val = str(row_p.get(col_desc_r, ''))
+                            if st.checkbox(desc_val, value=True, key=f"chk_{siniestro_v}_{desc_val}"):
+                                piezas_a_remisionar.append(desc_val)
+                                
+                        if st.form_submit_button("📄 Generar Remisión PDF"):
+                            if piezas_a_remisionar:
+                                st.session_state['trigger_remision_manual'] = {'siniestro': siniestro_v, 'taller': taller, 'descripciones': piezas_a_remisionar}
+                                st.rerun()
+                            else: st.warning("Debes seleccionar al menos una pieza para generar la remisión.")
+    else:
+        st.success("✅ No hay piezas marcadas como 'EN TRANSITO' esperando remisión.")
+
 elif vista_actual == "🧾 Facturación":
-    st.info("Pega aquí tu código de Facturación. Lo preparé para que solo copies y pegues el bloque exacto de tu respaldo.")
+    st.markdown("### 🧾 Control de Facturación a Aseguradoras")
+    
+    if col_estatus and not df_trabajo.empty:
+        df_por_facturar = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper() == "RECIBIDO"].copy()
+    else: df_por_facturar = pd.DataFrame()
+
+    st.markdown(f"**📦 Total de partidas esperando facturación:** {len(df_por_facturar)}")
+    
+    if not df_por_facturar.empty:
+        if permiso_edicion:
+            df_por_facturar['Facturado'] = False
+            
+            # --- Corrección en el renderizado de Facturación ---
+            cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_facturar.columns] + ['Facturado']
+            config_fact = {}
+            if col_id in df_por_facturar.columns: config_fact[col_id] = st.column_config.TextColumn("Siniestro", disabled=True)
+            if 'Vehiculo_Info' in df_por_facturar.columns: config_fact['Vehiculo_Info'] = st.column_config.TextColumn("Vehículo", disabled=True)
+            config_fact["Facturado"] = st.column_config.CheckboxColumn("🧾 Facturar", default=False)
+            
+            df_editado_fact = st.data_editor(df_por_facturar[cols_visibles], column_config=config_fact, hide_index=True, use_container_width=True, disabled=[c for c in cols_visibles if c != 'Facturado'], key="ed_facturacion")
+            
+            # Recuperar columnas originales para el guardado
+            for col in df_por_facturar.columns:
+                if col not in df_editado_fact.columns: df_editado_fact[col] = df_por_facturar[col].values
+        else:
+            cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_facturar.columns]
+            st.dataframe(df_por_facturar[cols_visibles], hide_index=True, use_container_width=True)
+    else:
+        st.success("✅ Todo está al día. No hay partidas pendientes de facturación.")
 
 # ==============================================================================
-# === [BLOQUE 9: VISTAS - PRECIOS, CONSULTAS GLOBALES Y CUARTEL] ===
+# === [BLOQUE 9: VISTAS - PRECIOS, CONSULTAS GLOBALES Y CUARTEL GENERAL] ===
 # ==============================================================================
 elif vista_actual == "Precios Promedio":
     st.markdown("## 💲 Precios Promedio Históricos")
@@ -1035,6 +1101,7 @@ elif vista_actual == "Precios Promedio":
     if not df_completo.empty:
         df_cot = df_completo.copy()
         
+        # Mapeo dinámico de columnas
         col_marca_cot = next((c for c in df_cot.columns if "MARCA" in str(c).upper()), None)
         col_modelo_cot = next((c for c in df_cot.columns if "MODELO" in str(c).upper()), None)
         col_ano_cot = next((c for c in df_cot.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
@@ -1043,6 +1110,7 @@ elif vista_actual == "Precios Promedio":
         col_precio_cot = next((c for c in df_cot.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
 
         if col_marca_cot and col_precio_cot and col_desc_cot:
+            # Limpieza crucial: Quitar símbolos y convertir a número para las métricas matemáticas
             df_cot['Precio_Num'] = df_cot[col_precio_cot].astype(str).replace({r'\$': '', r',': '', r' ': ''}, regex=True)
             df_cot['Precio_Num'] = pd.to_numeric(df_cot['Precio_Num'], errors='coerce')
             df_cot = df_cot.dropna(subset=['Precio_Num']) 
@@ -1064,6 +1132,7 @@ elif vista_actual == "Precios Promedio":
             with col_p:
                 filtro_pieza = st.text_input("Buscar Pieza (Ej. Salpicadera)", value="")
 
+            # Motor de filtrado
             if filtro_marca != "Todas":
                 df_cot = df_cot[df_cot[col_marca_cot] == filtro_marca]
             if filtro_modelo != "Todos":
@@ -1280,7 +1349,7 @@ elif vista_actual == "🔍 Consultas":
             df_log = df_filtrado_global[cols_a_mostrar].copy()
             if 'Vehiculo_Temp' in df_log.columns: df_log.rename(columns={'Vehiculo_Temp': 'Vehículo'}, inplace=True)
             
-            st.markdown("#### 🛠️️ Expedientes y Remisiones")
+            st.markdown("#### 🛠️ Expedientes y Remisiones")
             st.dataframe(df_log, hide_index=True, use_container_width=True)
             
             siniestros_filtrados = df_filtrado_global[col_id_univ].dropna().unique() if col_id_univ else []
@@ -1705,7 +1774,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                     col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
                                     if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
                                 else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
-                            else: avisos_unicos.add(f"⚠️️ AVISO: El CDR '{taller_v}' no está registrado.")
+                            else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
 
                             def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
 

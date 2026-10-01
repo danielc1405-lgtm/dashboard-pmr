@@ -307,6 +307,7 @@ df_editado_atrasadas = pd.DataFrame()
 df_editado_cobro = pd.DataFrame()
 df_editado_fact = pd.DataFrame()
 df_editado = pd.DataFrame()
+df_editado_reemb = pd.DataFrame() # <--- Variable nueva para atrapar los reembolsos
 
 lista_proveedores = [""]
 if not df_proveedores.empty:
@@ -583,7 +584,6 @@ elif vista_actual == "⚙️ Panel Operativo":
                         if permiso_edicion: 
                             df_grupo['Confirmar Surtido'] = False; df_grupo['Cancelar'] = False
                             
-                            # UX: Se integran Compras en un solo paso
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + \
                                             ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar'] + \
                                             [c for c in [col_comentarios] if c in df_grupo.columns]
@@ -607,7 +607,8 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
 
-    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy() if col_vencimiento else pd.DataFrame()
+    # --- SE OMITEN LOS REEMBOLSOS DE VENCIMIENTOS Y ATRASOS PARA NO ENSUCIAR LA OPERACIÓN ---
+    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy() if col_vencimiento else pd.DataFrame()
     with st.expander(f"🚨 Vencimientos de Hoy | {len(df_vencimientos)} Partida(s)", expanded=False):
         if not df_vencimientos.empty:
             if permiso_edicion:
@@ -632,7 +633,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 
     if col_vencimiento and not df_filtrado.empty:
         fechas_venc_filtro = df_filtrado[col_vencimiento].apply(parse_dt_safe_op)
-        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy()
+        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy()
     else: df_atrasadas = pd.DataFrame()
     with st.expander(f"❌ Vencimientos Atrasados | {len(df_atrasadas)} Partida(s)", expanded=False):
         if not df_atrasadas.empty:
@@ -676,8 +677,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                 cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_paqueteria, col_guia, col_comentarios] if c in df_por_recibir.columns]
                 st.dataframe(df_por_recibir[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
 
+    # --- SE EXCLUYEN LOS REEMBOLSOS DE LA VISTA GENERAL DE PEDIDOS ---
     if col_estatus and col_estatus in df_filtrado.columns:
-        mask_asignados = (~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")
+        mask_asignados = (~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REEMBOLSO")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")
         df_asignados = df_filtrado[mask_asignados].copy()
     else: df_asignados = df_filtrado.copy()
     
@@ -695,7 +697,6 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion:
-                            # UX: Orden quirúrgico y ocultamiento de columnas muertas (Asig, Conf, Estatus, Días)
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + \
                                             ['Proveedor', 'Costo Compra'] + \
                                             [c for c in [col_paqueteria, col_guia, col_remision] if c in df_grupo.columns] + \
@@ -722,6 +723,30 @@ elif vista_actual == "⚙️ Panel Operativo":
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento, col_paqueteria, col_guia, col_remision, col_comentarios] if c in df_grupo.columns]
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados: df_editado = pd.concat(dfs_editados, ignore_index=True)
+
+    # ==============================================================================================
+    # --- NUEVA SECCIÓN: LOGÍSTICA INVERSA (REEMBOLSOS) ---
+    # ==============================================================================================
+    df_reembolsos = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("REEMBOLSO")].copy() if col_estatus else pd.DataFrame()
+    with st.expander(f"💸 Reembolsos | {len(df_reembolsos)} Partida(s)", expanded=False):
+        if not df_reembolsos.empty:
+            if permiso_edicion:
+                df_reembolsos['Marcar Reembolsado'] = False
+                
+                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_estatus] if c in df_reembolsos.columns] + \
+                                ['Marcar Reembolsado'] + \
+                                [c for c in ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_comentarios] if c in df_reembolsos.columns]
+                
+                config_reemb = base_config.copy()
+                config_reemb.update({"Marcar Reembolsado": st.column_config.CheckboxColumn("✅ Reembolsado", default=False)})
+                
+                df_editado_reemb = st.data_editor(df_reembolsos[cols_visibles], column_config=config_reemb, disabled=[c for c in cols_visibles if c not in ['Marcar Reembolsado', col_comentarios]], hide_index=True, use_container_width=True, key="ed_reemb")
+                
+                for col in df_reembolsos.columns: 
+                    if col not in df_editado_reemb.columns: df_editado_reemb[col] = df_reembolsos[col].values
+            else:
+                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_estatus, 'Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_comentarios] if c in df_reembolsos.columns]
+                st.dataframe(df_reembolsos[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
 
     df_recoleccion = df_recoleccion_total.copy()
     if 'Estado_CDR' in df_proceso.columns: 

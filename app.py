@@ -1050,34 +1050,59 @@ elif vista_actual == "📝 Remisiones":
         col_modelo_r = next((c for c in df_listos.columns if "MODELO" in str(c).upper()), None)
         col_desc_r = next((c for c in df_listos.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
         
-        st.info("Selecciona las refacciones que deseas incluir en la nueva remisión para cada taller.")
+        # --- NUEVO SISTEMA DE FILTRADO PARA REMISIONES ---
+        st.markdown("#### 🎛️ Filtros de Búsqueda para Envío")
+        filtro_r1, filtro_r2, filtro_r3 = st.columns([1.5, 1.5, 1.5])
+
+        with filtro_r1:
+            taller_sel_r = st.multiselect("🏢 Filtrar por Taller:", sorted([str(t) for t in df_listos[col_taller_r].dropna().unique() if str(t).strip() != '']) if col_taller_r else [], placeholder="Todos...")
+        with filtro_r2:
+            df_t_r = df_listos.copy()
+            if taller_sel_r: df_t_r = df_t_r[df_t_r[col_taller_r].astype(str).isin(taller_sel_r)]
+            siniestro_sel_r = st.multiselect("🚗 Siniestro - Vehículo:", sorted(list(df_t_r['Filtro_Siniestro'].dropna().unique())), placeholder="Todos...")
+        with filtro_r3:
+            df_t_desc_r = df_t_r.copy()
+            if siniestro_sel_r: df_t_desc_r = df_t_desc_r[df_t_desc_r['Filtro_Siniestro'].isin(siniestro_sel_r)]
+            desc_sel_r = st.multiselect("⚙️ Refacción:", sorted(list(df_t_desc_r[col_desc_r].dropna().astype(str).unique())) if col_desc_r else [], placeholder="Todas...")
+
+        # Aplicar filtros
+        df_filtrado_rem = df_listos.copy()
+        if taller_sel_r: df_filtrado_rem = df_filtrado_rem[df_filtrado_rem[col_taller_r].astype(str).isin(taller_sel_r)]
+        if siniestro_sel_r: df_filtrado_rem = df_filtrado_rem[df_filtrado_rem['Filtro_Siniestro'].isin(siniestro_sel_r)]
+        if desc_sel_r: df_filtrado_rem = df_filtrado_rem[df_filtrado_rem[col_desc_r].astype(str).isin(desc_sel_r)]
         
-        for taller, df_taller_rem in df_listos.groupby(col_taller_r):
-            with st.expander(f"🏢 {taller} | {len(df_taller_rem)} Piezas en Tránsito", expanded=False):
-                agrupadores = [c for c in [col_id_r, col_marca_r, col_modelo_r] if c in df_taller_rem.columns]
-                
-                for keys, df_sin_rem in df_taller_rem.groupby(agrupadores):
-                    siniestro_v = keys[agrupadores.index(col_id_r)] if col_id_r in agrupadores else "S/N"
-                    marca_v = keys[agrupadores.index(col_marca_r)] if col_marca_r in agrupadores else ""
-                    modelo_v = keys[agrupadores.index(col_modelo_r)] if col_modelo_r in agrupadores else ""
+        st.markdown("---")
+        # -------------------------------------------------
+
+        if not df_filtrado_rem.empty:
+            st.info("Selecciona las refacciones que deseas incluir en la nueva remisión para cada taller.")
+            for taller, df_taller_rem in df_filtrado_rem.groupby(col_taller_r):
+                with st.expander(f"🏢 {taller} | {len(df_taller_rem)} Piezas en Tránsito", expanded=False):
+                    agrupadores = [c for c in [col_id_r, col_marca_r, col_modelo_r] if c in df_taller_rem.columns]
                     
-                    # --- CORRECCIÓN KIA KIA ---
-                    vehiculo_str = modelo_v if modelo_v.startswith(marca_v) and marca_v != "" else f"{marca_v} {modelo_v}".strip()
-                    st.markdown(f"**🚗 Siniestro: {siniestro_v} | {vehiculo_str}**")
-                    # -------------------------
-                    
-                    with st.form(f"form_rem_{taller}_{siniestro_v}"):
-                        piezas_a_remisionar = []
-                        for _, row_p in df_sin_rem.iterrows():
-                            desc_val = str(row_p.get(col_desc_r, ''))
-                            if st.checkbox(desc_val, value=True, key=f"chk_{siniestro_v}_{desc_val}"):
-                                piezas_a_remisionar.append(desc_val)
-                                
-                        if st.form_submit_button("📄 Generar Remisión PDF"):
-                            if piezas_a_remisionar:
-                                st.session_state['trigger_remision_manual'] = {'siniestro': siniestro_v, 'taller': taller, 'descripciones': piezas_a_remisionar}
-                                st.rerun()
-                            else: st.warning("Debes seleccionar al menos una pieza para generar la remisión.")
+                    for keys, df_sin_rem in df_taller_rem.groupby(agrupadores):
+                        siniestro_v = keys[agrupadores.index(col_id_r)] if col_id_r in agrupadores else "S/N"
+                        marca_v = keys[agrupadores.index(col_marca_r)] if col_marca_r in agrupadores else ""
+                        modelo_v = keys[agrupadores.index(col_modelo_r)] if col_modelo_r in agrupadores else ""
+                        
+                        # Seguro Anti-Duplicados de Marca
+                        vehiculo_str = modelo_v if modelo_v.startswith(marca_v) and marca_v != "" else f"{marca_v} {modelo_v}".strip()
+                        st.markdown(f"**🚗 Siniestro: {siniestro_v} | {vehiculo_str}**")
+                        
+                        with st.form(f"form_rem_{taller}_{siniestro_v}"):
+                            piezas_a_remisionar = []
+                            for _, row_p in df_sin_rem.iterrows():
+                                desc_val = str(row_p.get(col_desc_r, ''))
+                                if st.checkbox(desc_val, value=True, key=f"chk_{siniestro_v}_{desc_val}"):
+                                    piezas_a_remisionar.append(desc_val)
+                                    
+                            if st.form_submit_button("📄 Generar Remisión PDF"):
+                                if piezas_a_remisionar:
+                                    st.session_state['trigger_remision_manual'] = {'siniestro': siniestro_v, 'taller': taller, 'descripciones': piezas_a_remisionar}
+                                    st.rerun()
+                                else: st.warning("Debes seleccionar al menos una pieza para generar la remisión.")
+        else:
+            st.warning("No hay refacciones que coincidan con los filtros actuales.")
     else:
         st.success("✅ No hay piezas marcadas como 'EN TRANSITO' esperando remisión.")
 

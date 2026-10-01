@@ -454,8 +454,8 @@ elif vista_actual == "⚙️ Panel Operativo":
         try: return pd.to_datetime(val_str, dayfirst=True)
         except: return pd.NaT
 
-    # --- NUEVO MOTOR DE AGRUPACIÓN INTELIGENTE (FUSIONA POR SINIESTRO RELACIONADO) ---
     col_sin_rel = next((c for c in df_proceso.columns if str(c).strip().upper() in ["SINIESTRO RELACIONADO", "SINIESTRO"]), None)
+    
     def get_agrupador(row):
         rel = str(row.get(col_sin_rel, '')).strip() if col_sin_rel else ''
         if rel and rel.upper() not in ['NAN', 'NONE', '']: return rel
@@ -465,7 +465,6 @@ elif vista_actual == "⚙️ Panel Operativo":
         df_proceso['Agrupador_Visual'] = df_proceso.apply(get_agrupador, axis=1)
     if not df_recoleccion_total.empty: 
         df_recoleccion_total['Agrupador_Visual'] = df_recoleccion_total.apply(get_agrupador, axis=1)
-    # ---------------------------------------------------------------------------------
 
     if col_vencimiento:
         fechas_venc_dt = df_proceso[col_vencimiento].apply(parse_dt_safe_op)
@@ -527,15 +526,18 @@ elif vista_actual == "⚙️ Panel Operativo":
     if siniestro_sel: df_filtrado = df_filtrado[df_filtrado['Filtro_Siniestro'].isin(siniestro_sel)]
     if desc_sel: df_filtrado = df_filtrado[df_filtrado[col_desc].astype(str).isin(desc_sel)]
 
-    # --- CONFIGURACIÓN ESTRICTA DE ANCHOS (width="small") PARA EVITAR DESPLAZAMIENTO ---
+    # --- CONFIGURACIÓN DE ANCHOS (COLUMNAS "ESPONJA" PARA LLENAR EL VACÍO) ---
     base_config = {}
     if col_id and col_id in df_filtrado.columns: base_config[col_id] = st.column_config.TextColumn("Pedido / Siniestro", width="small", disabled=True)
-    if 'Vehiculo_Info' in df_filtrado.columns: base_config['Vehiculo_Info'] = st.column_config.TextColumn("Vehículo")
+    if 'Vehiculo_Info' in df_filtrado.columns: base_config['Vehiculo_Info'] = st.column_config.TextColumn("Vehículo", width="medium")
     if col_taller: base_config[col_taller] = st.column_config.TextColumn("Taller", width="small")
     if col_asignacion: base_config[col_asignacion] = st.column_config.TextColumn("Asig.", width="small")
     if col_fecha_confi: base_config[col_fecha_confi] = st.column_config.TextColumn("Conf.", width="small")
     if col_cant: base_config[col_cant] = st.column_config.TextColumn("Cant", width="small")
-    if col_desc: base_config[col_desc] = st.column_config.TextColumn("Descrip.") 
+    
+    # 🧽 Columna Esponja 1
+    if col_desc: base_config[col_desc] = st.column_config.TextColumn("Descrip.", width="large") 
+    
     if col_origen: base_config[col_origen] = st.column_config.TextColumn("Origen", width="small")
     if col_precio: base_config[col_precio] = st.column_config.TextColumn("Precio", width="small")
     if col_estatus: base_config[col_estatus] = st.column_config.TextColumn("Estatus", width="small")
@@ -544,8 +546,10 @@ elif vista_actual == "⚙️ Panel Operativo":
     if col_guia: base_config[col_guia] = st.column_config.TextColumn("Guía", width="small")
     if col_estatus_envio: base_config[col_estatus_envio] = st.column_config.TextColumn("Estatus Envío", width="small", disabled=True)
     if col_remision: base_config[col_remision] = st.column_config.TextColumn("Folio Remisión", width="small")
-    if col_comentarios: base_config[col_comentarios] = st.column_config.TextColumn("Obs.") 
-    # -----------------------------------------------------------------------------------
+    
+    # 🧽 Columna Esponja 2
+    if col_comentarios: base_config[col_comentarios] = st.column_config.TextColumn("Obs.", width="large") 
+    # -------------------------------------------------------------------------
 
     cond_confirmar = df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_filtrado[col_estatus].fillna('').astype(str).str.strip() == "")
     df_por_confirmar = df_filtrado[cond_confirmar].copy() if col_estatus else pd.DataFrame()

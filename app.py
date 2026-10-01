@@ -18,11 +18,14 @@ from google.oauth2.service_account import Credentials
 
 warnings.filterwarnings("ignore")
 
+# ESTA LÍNEA DEBE SER SIEMPRE LA NÚMERO 1 DE STREAMLIT
 st.set_page_config(page_title="Dashboard PMR - Operación", page_icon="📦", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
         [data-testid="stDataFrame"] { zoom: 0.95; }
+        
+        /* 1. Matar el padding fantasma del contenedor principal de Streamlit */
         .main .block-container { 
             padding-top: 0rem !important; 
             padding-bottom: 40px; 
@@ -31,13 +34,20 @@ st.markdown("""
             max-width: 100% !important; 
             overflow: visible !important; 
         }
-        div[data-testid="stVerticalBlock"] { overflow: visible !important; }
+        
+        div[data-testid="stVerticalBlock"] {
+            overflow: visible !important;
+        }
+        
+        /* 2. Destruir el espacio reservado del header nativo */
         header[data-testid="stHeader"] { 
             visibility: hidden !important; 
             height: 0px !important; 
             padding: 0px !important; 
             min-height: 0px !important; 
         }
+        
+        /* --- 3. CINTURÓN DE SEGURIDAD PARA EL MENÚ SUPERIOR (STICKY) --- */
         div[data-testid="stVerticalBlock"] > div:has([data-testid="stRadio"]) {
             position: -webkit-sticky !important;
             position: sticky !important; 
@@ -50,16 +60,20 @@ st.markdown("""
             box-shadow: 0px 6px 15px rgba(0,0,0,0.6) !important;
             margin-top: -15px !important;
         }
+        
         div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }
         div.row-widget.stRadio > div > label { background-color: #1E1E24; padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid #333; font-size: 0.95rem; transition: all 0.3s ease; }
         div.row-widget.stRadio > div > label:hover { border-color: #F63366; background-color: #2A2A35;}
         div.row-widget.stRadio > div > label[data-checked="true"] { background-color: #F63366; color: white; border-color: #F63366; }
         div.row-widget.stRadio > div > label > div:first-child { display: none; }
+        
+        /* ELIMINAR EL PARPADEO GRIS AL EDITAR CELDAS */
         [data-testid="stDataGrid"] { opacity: 1 !important; }
         .st-emotion-cache-1kyxreq { display: none !important; }
         div[data-testid="stAppViewContainer"] { transition: none !important; }
     </style>
 """, unsafe_allow_html=True)
+
 
 # ==============================================================================
 # === [BLOQUE 2: CONEXIÓN TEMPRANA Y SISTEMA DE LOGIN] ===
@@ -78,7 +92,7 @@ if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
 
 if not st.session_state['autenticado']:
-    st.markdown("<h1 style='text-align: center; color: #FF4B4B;'>🛡 Acceso al Sistema PMR</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #FF4B4B;'>🛡️ Acceso al Sistema PMR</h1>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         with st.form("login_form"):
@@ -120,7 +134,7 @@ opciones_menu = [
     "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
 ]
 
-col_logo, col_menu, col_aseg, col_btn_ref, col_btn_save = st.columns([1.5, 6.0, 1.5, 0.5, 1])
+col_logo, col_menu, col_aseg, col_btn_ref, col_btn = st.columns([1.5, 5.5, 1.5, 0.5, 1])
 
 with col_logo:
     try: st.image("logo.png", width=120)
@@ -140,7 +154,7 @@ with col_btn_ref:
         st.cache_data.clear()
         st.rerun()
 
-with col_btn_save:
+with col_btn:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
     espacio_spinner = st.empty()
 
@@ -160,7 +174,7 @@ def obtener_dataframe(nombre_hoja, silent=False):
         if not silent: st.error(f"Error cargando hoja {nombre_hoja}: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=600)  
 def cargar_datos():
     df_uni = obtener_dataframe("BD_UNIFICADA")
     df_hist = obtener_dataframe("BD_HISTORICO", silent=True)
@@ -178,6 +192,9 @@ def cargar_datos():
     except: df_inv = pd.DataFrame()
     df_prov = obtener_dataframe("BD_PROVEEDORES", silent=True)
     
+    if not df_uni.empty and 'Siniestro Relacionado' in df_uni.columns: 
+        df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
+        
     return df_uni, df_comp, df_cat, df_inv, df_prov
 
 df_completo, df_compras, df_catalogo, df_inventario, df_proveedores = cargar_datos()
@@ -194,8 +211,7 @@ if not df_completo.empty:
 else: df_trabajo_completo = pd.DataFrame()
 
 if not df_trabajo_completo.empty:
-    col_id = next((c for c in df_trabajo_completo.columns if "SINIESTRO" in str(c).upper() and "RELACIONADO" not in str(c).upper()), None)
-    if not col_id: col_id = next((c for c in df_trabajo_completo.columns if "SINIESTRO" in str(c).upper()), None)
+    col_id = next((c for c in df_trabajo_completo.columns if "SINIESTRO" in str(c).upper()), None)
     col_taller = next((c for c in df_trabajo_completo.columns if "TALLER" in str(c).upper()), None)
     if col_id and col_taller:
         df_trabajo_completo = df_trabajo_completo[df_trabajo_completo[col_id].astype(str).str.strip() != '']
@@ -441,7 +457,6 @@ elif vista_actual == "⚙️ Panel Operativo":
         try: return pd.to_datetime(val_str, dayfirst=True)
         except: return pd.NaT
 
-    # --- MOTOR DE AGRUPACIÓN INTELIGENTE ---
     col_sin_rel = next((c for c in df_proceso.columns if str(c).strip().upper() in ["SINIESTRO RELACIONADO", "SINIESTRO"]), None)
     
     def get_agrupador(row):
@@ -515,7 +530,7 @@ elif vista_actual == "⚙️ Panel Operativo":
     if desc_sel: df_filtrado = df_filtrado[df_filtrado[col_desc].astype(str).isin(desc_sel)]
 
     # ==============================================================================================
-    # --- INYECCIÓN GLOBAL DE DATOS DE COMPRAS ---
+    # --- INYECCIÓN GLOBAL DE DATOS DE COMPRAS (Permite usar Proveedor/Costo en cualquier panel) ---
     # ==============================================================================================
     def generar_llave_temp(id_val, desc_val):
         id_str = str(id_val).strip().upper()
@@ -568,6 +583,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                         if permiso_edicion: 
                             df_grupo['Confirmar Surtido'] = False; df_grupo['Cancelar'] = False
                             
+                            # UX: Se integran Compras en un solo paso
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + \
                                             ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar'] + \
                                             [c for c in [col_comentarios] if c in df_grupo.columns]
@@ -679,6 +695,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion:
+                            # UX: Orden quirúrgico y ocultamiento de columnas muertas (Asig, Conf, Estatus, Días)
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + \
                                             ['Proveedor', 'Costo Compra'] + \
                                             [c for c in [col_paqueteria, col_guia, col_remision] if c in df_grupo.columns] + \
@@ -695,6 +712,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                             })
                             
                             columnas_editables = ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_remision, 'Entregado', 'Recibido', 'Cancelar', col_comentarios, col_vencimiento]
+                            
                             df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_pedidos, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                             
                             for col in df_grupo.columns:
@@ -1043,7 +1061,10 @@ elif vista_actual == "📝 Remisiones":
                     marca_v = keys[agrupadores.index(col_marca_r)] if col_marca_r in agrupadores else ""
                     modelo_v = keys[agrupadores.index(col_modelo_r)] if col_modelo_r in agrupadores else ""
                     
-                    st.markdown(f"**🚗 Siniestro: {siniestro_v} | {marca_v} {modelo_v}**")
+                    # --- CORRECCIÓN KIA KIA ---
+                    vehiculo_str = modelo_v if modelo_v.startswith(marca_v) and marca_v != "" else f"{marca_v} {modelo_v}".strip()
+                    st.markdown(f"**🚗 Siniestro: {siniestro_v} | {vehiculo_str}**")
+                    # -------------------------
                     
                     with st.form(f"form_rem_{taller}_{siniestro_v}"):
                         piezas_a_remisionar = []
@@ -1072,8 +1093,6 @@ elif vista_actual == "🧾 Facturación":
     if not df_por_facturar.empty:
         if permiso_edicion:
             df_por_facturar['Facturado'] = False
-            
-            # --- Corrección en el renderizado de Facturación ---
             cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_facturar.columns] + ['Facturado']
             config_fact = {}
             if col_id in df_por_facturar.columns: config_fact[col_id] = st.column_config.TextColumn("Siniestro", disabled=True)
@@ -1082,7 +1101,6 @@ elif vista_actual == "🧾 Facturación":
             
             df_editado_fact = st.data_editor(df_por_facturar[cols_visibles], column_config=config_fact, hide_index=True, use_container_width=True, disabled=[c for c in cols_visibles if c != 'Facturado'], key="ed_facturacion")
             
-            # Recuperar columnas originales para el guardado
             for col in df_por_facturar.columns:
                 if col not in df_editado_fact.columns: df_editado_fact[col] = df_por_facturar[col].values
         else:
@@ -1170,14 +1188,13 @@ elif vista_actual == "🔍 Consultas":
     st.info("Utiliza los filtros desplegables para encontrar refacciones y siniestros específicos en el histórico.")
     
     # ==============================================================================
-    # 👑 EDITOR MAESTRO (MODO DIOS) - CORREGIDO PARA EVITAR DUPLICADOS
+    # 👑 EDITOR MAESTRO (MODO DIOS) - BUSCADOR ESTRICTO
     # ==============================================================================
-    if permiso_edicion and "Daniel" in st.session_state.get("usuario_actual", ""):
+    if not modo_consulta and permiso_edicion and "Daniel" in st.session_state.get("usuario_actual", ""):
         with st.expander("👑 Editor Maestro (Modo Dios)", expanded=False):
             st.info("Control total: Edita cualquier dato histórico o activo. Para logística inversa, selecciona 'EN PROCESO DE REEMBOLSO' en la columna de Estatus.")
             
             if not df_trabajo.empty and col_id in df_trabajo.columns:
-                # --- SOLUCIÓN AL PROBLEMA DEL BUSCADOR: BUSCAR SOLO POR ID DEL SINIESTRO ---
                 siniestros_unicos = sorted(list(df_trabajo[col_id].dropna().astype(str).unique()))
                 texto_busqueda = st.text_input("🔍 Escribe el Siniestro a intervenir (Coincidencia exacta):")
                 
@@ -1186,10 +1203,8 @@ elif vista_actual == "🔍 Consultas":
                     sin_sel = st.selectbox("Selecciona el Siniestro:", [""] + opciones_filtradas)
                 else:
                     sin_sel = ""
-                # -------------------------------------------------------------------------
                 
                 if sin_sel:
-                    # Filtra estrictamente por el col_id, trayendo todas las partidas (viejas o nuevas)
                     df_edit = df_trabajo[df_trabajo[col_id].astype(str) == sin_sel].copy()
                     cols_dios = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_edit.columns]
                     
@@ -1698,8 +1713,8 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                                 llave_p = f"{p_val} - {s_val}" if s_val else p_val
                                                 if llave_p == po_prov:
                                                     t_str = str(row_p.get('Tiempo de Entrega', '')).upper()
-                                                    nums = re.findall(r'\d+', t_str)
-                                                    if nums: datos_comp[i][i_tiempo] = nums[-1]
+                                                    numeros = re.findall(r'\d+', t_str)
+                                                    if numeros: eta_calc = numeros[-1]
                                                     cond_p = str(row_p.get('Condición Pago', '')).strip().title()
                                                     if cond_p: datos_comp[i][i_cond_pago] = cond_p
                                                     dias_c = str(row_p.get('Días Crédito', '0')).strip()
@@ -1774,7 +1789,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                     col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
                                     if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
                                 else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
-                            else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
+                            else: avisos_unicos.add(f"⚠️️ AVISO: El CDR '{taller_v}' no está registrado.")
 
                             def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
 

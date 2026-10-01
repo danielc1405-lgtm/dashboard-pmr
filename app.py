@@ -1039,9 +1039,13 @@ elif vista_actual == "📦 Inventario":
 elif vista_actual == "📝 Remisiones":
     st.markdown("### 📝 Generación de Remisiones (Envío a Taller)")
     
-    if col_estatus and not df_trabajo.empty:
-        df_listos = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper() == "EN TRANSITO"].copy()
-    else: df_listos = pd.DataFrame()
+    # --- CORRECCIÓN LÓGICA: Solo piezas EN PROCESAMIENTO que NO tengan folio ---
+    if col_estatus and col_remision and not df_trabajo.empty:
+        cond_proceso = df_trabajo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"
+        cond_sin_folio = df_trabajo[col_remision].astype(str).str.strip() == ""
+        df_listos = df_trabajo[cond_proceso & cond_sin_folio].copy()
+    else: 
+        df_listos = pd.DataFrame()
 
     if not df_listos.empty:
         col_id_r = next((c for c in df_listos.columns if "SINIESTRO" in str(c).upper()), None)
@@ -1050,7 +1054,6 @@ elif vista_actual == "📝 Remisiones":
         col_modelo_r = next((c for c in df_listos.columns if "MODELO" in str(c).upper()), None)
         col_desc_r = next((c for c in df_listos.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
         
-        # --- NUEVO SISTEMA DE FILTRADO PARA REMISIONES ---
         st.markdown("#### 🎛️ Filtros de Búsqueda para Envío")
         filtro_r1, filtro_r2, filtro_r3 = st.columns([1.5, 1.5, 1.5])
 
@@ -1065,19 +1068,17 @@ elif vista_actual == "📝 Remisiones":
             if siniestro_sel_r: df_t_desc_r = df_t_desc_r[df_t_desc_r['Filtro_Siniestro'].isin(siniestro_sel_r)]
             desc_sel_r = st.multiselect("⚙️ Refacción:", sorted(list(df_t_desc_r[col_desc_r].dropna().astype(str).unique())) if col_desc_r else [], placeholder="Todas...")
 
-        # Aplicar filtros
         df_filtrado_rem = df_listos.copy()
         if taller_sel_r: df_filtrado_rem = df_filtrado_rem[df_filtrado_rem[col_taller_r].astype(str).isin(taller_sel_r)]
         if siniestro_sel_r: df_filtrado_rem = df_filtrado_rem[df_filtrado_rem['Filtro_Siniestro'].isin(siniestro_sel_r)]
         if desc_sel_r: df_filtrado_rem = df_filtrado_rem[df_filtrado_rem[col_desc_r].astype(str).isin(desc_sel_r)]
         
         st.markdown("---")
-        # -------------------------------------------------
 
         if not df_filtrado_rem.empty:
             st.info("Selecciona las refacciones que deseas incluir en la nueva remisión para cada taller.")
             for taller, df_taller_rem in df_filtrado_rem.groupby(col_taller_r):
-                with st.expander(f"🏢 {taller} | {len(df_taller_rem)} Piezas en Tránsito", expanded=False):
+                with st.expander(f"🏢 {taller} | {len(df_taller_rem)} Pieza(s) lista(s)", expanded=False):
                     agrupadores = [c for c in [col_id_r, col_marca_r, col_modelo_r] if c in df_taller_rem.columns]
                     
                     for keys, df_sin_rem in df_taller_rem.groupby(agrupadores):
@@ -1104,7 +1105,7 @@ elif vista_actual == "📝 Remisiones":
         else:
             st.warning("No hay refacciones que coincidan con los filtros actuales.")
     else:
-        st.success("✅ No hay piezas marcadas como 'EN TRANSITO' esperando remisión.")
+        st.success("✅ No hay piezas marcadas listas para remisionar (EN PROCESAMIENTO sin folio asignado).")
 
 elif vista_actual == "🧾 Facturación":
     st.markdown("### 🧾 Control de Facturación a Aseguradoras")
@@ -1498,6 +1499,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             orig = originales.get(k, {'remision_bool': False})
             cambios_a_guardar.setdefault(k, {}).update({'estatus': 'EN TRANSITO', 'imprimir_remision': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
             if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
+            
             cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
     if btn_guardar:
@@ -1507,16 +1509,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
                 nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Confirmar Surtido') else None)
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
-                
-                prov_asignado = str(row.get('Proveedor', '')).strip()
-                costo_asignado = str(row.get('Costo Compra', '0')).strip()
-                if prov_asignado and nuevo_estatus != "CANCELADO":
-                    cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
-                    cambios_a_guardar[k]['compra_prov'] = prov_asignado
-                    cambios_a_guardar[k]['compra_costo'] = costo_asignado
-                    cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
-                    cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
-
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                     if nuevo_estatus == "EN PROCESAMIENTO": cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
@@ -1738,8 +1730,8 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                                 llave_p = f"{p_val} - {s_val}" if s_val else p_val
                                                 if llave_p == po_prov:
                                                     t_str = str(row_p.get('Tiempo de Entrega', '')).upper()
-                                                    numeros = re.findall(r'\d+', t_str)
-                                                    if numeros: eta_calc = numeros[-1]
+                                                    nums = re.findall(r'\d+', t_str)
+                                                    if nums: datos_comp[i][i_tiempo] = nums[-1]
                                                     cond_p = str(row_p.get('Condición Pago', '')).strip().title()
                                                     if cond_p: datos_comp[i][i_cond_pago] = cond_p
                                                     dias_c = str(row_p.get('Días Crédito', '0')).strip()
@@ -1814,7 +1806,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                     col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
                                     if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
                                 else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
-                            else: avisos_unicos.add(f"⚠️️ AVISO: El CDR '{taller_v}' no está registrado.")
+                            else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
 
                             def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
 
@@ -1822,6 +1814,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             pdf.set_auto_page_break(auto=False, margin=0); pdf.add_page()
                             
                             def dibujar_bloque_remision(x_offset):
+                                import os # INYECCION: Para evitar el error de librería del sistema
                                 y_offset = 15
                                 if os.path.exists("logo.png"):
                                     try: pdf.image("logo.png", x_offset, y_offset - 3, 30)

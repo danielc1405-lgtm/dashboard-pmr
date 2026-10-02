@@ -3,7 +3,7 @@ name: Radar Paquetexpress Automático
 on:
   schedule:
     # La hora en GitHub es UTC. 14:00 UTC = 8:00 AM CST. 22:00 UTC = 4:00 PM CST.
-    - cron: '0 14,22 * * 1-5'
+    - cron: '0 14,19,00 * * 1-5'
   workflow_dispatch: # Esto te agrega un botón para correrlo manual cuando quieras desde GitHub
 
 jobs:

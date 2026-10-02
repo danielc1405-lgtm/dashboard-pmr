@@ -291,6 +291,10 @@ else:
 # ==============================================================================
 if 'pdfs_list' in st.session_state and st.session_state['pdfs_list']:
     st.success("🎉 ¡Remisión(es) generada(s) exitosamente!")
+    if 'avisos_remision' in st.session_state and st.session_state['avisos_remision']:
+        for aviso in st.session_state['avisos_remision']:
+            st.warning(aviso)
+        st.session_state['avisos_remision'] = [] # Limpiamos para que no se quede pegado
     c_pdfs = st.columns(len(st.session_state['pdfs_list']) + 1)
     for i, pdf_data in enumerate(st.session_state['pdfs_list']):
         with c_pdfs[i]:

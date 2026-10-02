@@ -577,7 +577,6 @@ elif vista_actual == "⚙️ Panel Operativo":
     else:
         df_filtrado['Proveedor'] = ""; df_filtrado['Costo Compra'] = 0.0; df_filtrado['Llegada Est.'] = "-"
     # ==============================================================================================
-    # ==============================================================================================
 
     base_config = {}
     if col_id and col_id in df_filtrado.columns: base_config[col_id] = st.column_config.TextColumn("Pedido / Siniestro", disabled=True)
@@ -590,7 +589,7 @@ elif vista_actual == "⚙️ Panel Operativo":
     if col_vencimiento: base_config[col_vencimiento] = st.column_config.TextColumn("Venc.")
     if col_paqueteria: base_config[col_paqueteria] = st.column_config.SelectboxColumn("Paquetería", options=["", "PAQUETEXPRESS", "FEDEX", "DHL", "ESTAFETA", "AFIMEX"])
     if col_guia: base_config[col_guia] = st.column_config.TextColumn("Guía")
-    if col_estatus_envio: base_config[col_estatus_envio] = st.column_config.TextColumn("Estatus Envío", disabled=True)
+    if col_estatus_envio: base_config[col_estatus_envio] = st.column_config.TextColumn("📍 Rastreo", disabled=True)
     if col_remision: base_config[col_remision] = st.column_config.TextColumn("Folio Remis")
     if col_comentarios: base_config[col_comentarios] = st.column_config.TextColumn("Obs.") 
 
@@ -718,10 +717,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion:
-                            # UX: Orden lineal quirúrgico sin columnas muertas
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + \
                                             ['Proveedor', 'Costo Compra', 'Llegada Est.'] + \
-                                            [c for c in [col_paqueteria, col_guia, col_remision] if c in df_grupo.columns] + \
+                                            [c for c in [col_paqueteria, col_guia, col_estatus_envio, col_remision] if c in df_grupo.columns] + \
                                             ['Entregado', 'Recibido', 'Cancelar'] + \
                                             [c for c in [col_comentarios] if c in df_grupo.columns]
                             
@@ -730,6 +728,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                                 "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), 
                                 "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="$ %.2f"), 
                                 "Llegada Est.": st.column_config.TextColumn("📅 Llegada", disabled=True),
+                                col_estatus_envio: st.column_config.TextColumn("📍 Rastreo", disabled=True),
                                 "Entregado": st.column_config.CheckboxColumn("🚚 Ent", default=False), 
                                 "Recibido": st.column_config.CheckboxColumn("🏁 Rec", default=False), 
                                 "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False) 
@@ -743,7 +742,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                                 if col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
                             dfs_editados.append(df_editado_parcial)
                         else:
-                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento, col_paqueteria, col_guia, col_remision, col_comentarios] if c in df_grupo.columns]
+                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento, col_paqueteria, col_guia, col_estatus_envio, col_remision, col_comentarios] if c in df_grupo.columns]
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados: df_editado = pd.concat(dfs_editados, ignore_index=True)
 

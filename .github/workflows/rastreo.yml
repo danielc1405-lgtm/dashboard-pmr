@@ -1,0 +1,36 @@
+name: Radar Paquetexpress Automático
+
+on:
+  schedule:
+    # La hora en GitHub es UTC. 14:00 UTC = 8:00 AM CST. 22:00 UTC = 4:00 PM CST.
+    - cron: '0 14,22 * * 1-5'
+  workflow_dispatch: # Esto te agrega un botón para correrlo manual cuando quieras desde GitHub
+
+jobs:
+  ejecutar-rastreo:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 📥 Descargar código del repositorio
+      uses: actions/checkout@v3
+
+    - name: 🐍 Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 📦 Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas gspread google-auth playwright
+        playwright install chromium
+
+    - name: 🔑 Crear archivo de credenciales de Google
+      env:
+        # Aquí inyecta el secreto que creaste en el Paso 1
+        GCP_CREDS: ${{ secrets.GCP_CREDENTIALS }}
+      run: |
+        echo "$GCP_CREDS" > credentials.json
+
+    - name: 🚀 Ejecutar Motor de Rastreo
+      run: python motor_rastreo.py

@@ -531,7 +531,7 @@ elif vista_actual == "⚙️ Panel Operativo":
     if desc_sel: df_filtrado = df_filtrado[df_filtrado[col_desc].astype(str).isin(desc_sel)]
 
     # ==============================================================================================
-    # --- INYECCIÓN GLOBAL DE DATOS DE COMPRAS (Permite usar Proveedor/Costo en cualquier panel) ---
+    # --- INYECCIÓN GLOBAL DE DATOS DE COMPRAS (Permite usar Proveedor/Costo/ETA en cualquier panel) ---
     # ==============================================================================================
     def generar_llave_temp(id_val, desc_val):
         id_str = str(id_val).strip().upper()
@@ -540,10 +540,27 @@ elif vista_actual == "⚙️ Panel Operativo":
         return f"{id_str}_{desc_str}"
 
     if not df_compras.empty:
+        def parse_spanish_date_comp(d_str):
+            if pd.isna(d_str) or str(d_str).strip() == '': return pd.NaT
+            d_str = str(d_str).lower().replace('-', '/') 
+            meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+            for text, num in meses.items():
+                if text in d_str: d_str = d_str.replace(text, num); break
+            try: return pd.to_datetime(d_str, format='%d/%m/%y', errors='coerce')
+            except: return pd.NaT
+
         df_compras_temp = df_compras.copy()
         df_compras_temp['LLAVE_COMP'] = df_compras_temp.apply(lambda r: generar_llave_temp(r.get('Siniestro',''), r.get('Descripción Pieza','')), axis=1)
+        
+        # Calcular fecha de llegada estimada dinámicamente
+        df_compras_temp['F_Compra_Dt'] = df_compras_temp['Fecha Compra'].apply(parse_spanish_date_comp)
+        df_compras_temp['ETA_Num'] = pd.to_numeric(df_compras_temp['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
+        df_compras_temp['Llegada_Calc'] = df_compras_temp['F_Compra_Dt'] + pd.to_timedelta(df_compras_temp['ETA_Num'], unit='d')
+        df_compras_temp['Fecha Llegada'] = df_compras_temp['Llegada_Calc'].dt.strftime('%d/%b/%y').fillna('-')
+        
         dict_prov = dict(zip(df_compras_temp['LLAVE_COMP'], df_compras_temp['Proveedor']))
         dict_costo = dict(zip(df_compras_temp['LLAVE_COMP'], df_compras_temp['Costo Compra']))
+        dict_llegada = dict(zip(df_compras_temp['LLAVE_COMP'], df_compras_temp['Fecha Llegada']))
         
         df_filtrado['LLAVE_TEMP'] = df_filtrado.apply(lambda r: generar_llave_temp(r.get(col_id,''), r.get(col_desc,'')), axis=1)
         df_filtrado['Proveedor'] = df_filtrado['LLAVE_TEMP'].map(dict_prov).fillna("")
@@ -552,8 +569,10 @@ elif vista_actual == "⚙️ Panel Operativo":
             try: return float(str(v).replace('$', '').replace(',', '').strip())
             except: return 0.0
         df_filtrado['Costo Compra'] = df_filtrado['LLAVE_TEMP'].map(dict_costo).apply(safe_float)
+        df_filtrado['Llegada Est.'] = df_filtrado['LLAVE_TEMP'].map(dict_llegada).fillna("-")
     else:
-        df_filtrado['Proveedor'] = ""; df_filtrado['Costo Compra'] = 0.0
+        df_filtrado['Proveedor'] = ""; df_filtrado['Costo Compra'] = 0.0; df_filtrado['Llegada Est.'] = "-"
+    # ==============================================================================================
     # ==============================================================================================
 
     base_config = {}
@@ -695,8 +714,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion:
+                            # UX: Orden lineal quirúrgico sin columnas muertas
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + \
-                                            ['Proveedor', 'Costo Compra'] + \
+                                            ['Proveedor', 'Costo Compra', 'Llegada Est.'] + \
                                             [c for c in [col_paqueteria, col_guia, col_remision] if c in df_grupo.columns] + \
                                             ['Entregado', 'Recibido', 'Cancelar'] + \
                                             [c for c in [col_comentarios] if c in df_grupo.columns]
@@ -705,6 +725,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                             config_pedidos.update({ 
                                 "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), 
                                 "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="$ %.2f"), 
+                                "Llegada Est.": st.column_config.TextColumn("📅 Llegada", disabled=True),
                                 "Entregado": st.column_config.CheckboxColumn("🚚 Ent", default=False), 
                                 "Recibido": st.column_config.CheckboxColumn("🏁 Rec", default=False), 
                                 "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False) 

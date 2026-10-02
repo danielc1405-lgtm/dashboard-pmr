@@ -607,7 +607,6 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
 
-    # --- SE OMITEN LOS REEMBOLSOS DE VENCIMIENTOS Y ATRASOS PARA NO ENSUCIAR LA OPERACIÓN ---
     df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy() if col_vencimiento else pd.DataFrame()
     with st.expander(f"🚨 Vencimientos de Hoy | {len(df_vencimientos)} Partida(s)", expanded=False):
         if not df_vencimientos.empty:
@@ -616,7 +615,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 df_vencimientos['Reasignar'] = df_vencimientos[col_estatus].astype(str).str.upper() == "REASIGNAR" 
                 df_vencimientos['Nueva Fecha'] = pd.NaT
                 
-                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_precio, col_vencimiento] if c in df_vencimientos.columns] + \
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento] if c in df_vencimientos.columns] + \
                                 ['Cancelar', 'Reasignar', 'Nueva Fecha'] + \
                                 [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_vencimientos.columns]
                 
@@ -628,7 +627,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 for col in df_vencimientos.columns:
                     if col not in df_editado_venc.columns: df_editado_venc[col] = df_vencimientos[col].values
             else:
-                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_precio, col_vencimiento, col_paqueteria, col_guia, col_comentarios] if c in df_vencimientos.columns]
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento, col_paqueteria, col_guia, col_comentarios] if c in df_vencimientos.columns]
                 st.dataframe(df_vencimientos[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
                 
     if col_vencimiento and not df_filtrado.empty:
@@ -642,7 +641,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 df_atrasadas['Reasignar'] = df_atrasadas[col_estatus].astype(str).str.upper() == "REASIGNAR" 
                 df_atrasadas['Nueva Fecha'] = pd.NaT
                 
-                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_precio, col_vencimiento] if c in df_atrasadas.columns] + \
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento] if c in df_atrasadas.columns] + \
                                 ['Cancelar', 'Reasignar', 'Nueva Fecha'] + \
                                 [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_atrasadas.columns]
                 
@@ -654,7 +653,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 for col in df_atrasadas.columns:
                     if col not in df_editado_atrasadas.columns: df_editado_atrasadas[col] = df_atrasadas[col].values
             else:
-                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_precio, col_vencimiento, col_paqueteria, col_guia, col_comentarios] if c in df_atrasadas.columns]
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento, col_paqueteria, col_guia, col_comentarios] if c in df_atrasadas.columns]
                 st.dataframe(df_atrasadas[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
 
     df_por_recibir = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper() == "ENTREGADO"].copy() if col_estatus else pd.DataFrame()
@@ -662,7 +661,7 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_por_recibir.empty:
             if permiso_edicion:
                 df_por_recibir['Marcar Recibido'] = False
-                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio] if c in df_por_recibir.columns] + \
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_recibir.columns] + \
                                 ['Marcar Recibido'] + \
                                 [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_por_recibir.columns]
                 
@@ -674,10 +673,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                 for col in df_por_recibir.columns: 
                     if col not in df_editado_cobro.columns: df_editado_cobro[col] = df_por_recibir[col].values
             else:
-                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_paqueteria, col_guia, col_comentarios] if c in df_por_recibir.columns]
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio, col_paqueteria, col_guia, col_comentarios] if c in df_por_recibir.columns]
                 st.dataframe(df_por_recibir[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
 
-    # --- SE EXCLUYEN LOS REEMBOLSOS DE LA VISTA GENERAL DE PEDIDOS ---
     if col_estatus and col_estatus in df_filtrado.columns:
         mask_asignados = (~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REEMBOLSO")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")
         df_asignados = df_filtrado[mask_asignados].copy()
@@ -724,9 +722,6 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados: df_editado = pd.concat(dfs_editados, ignore_index=True)
 
-    # ==============================================================================================
-    # --- NUEVA SECCIÓN: LOGÍSTICA INVERSA (REEMBOLSOS) ---
-    # ==============================================================================================
     df_reembolsos = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("REEMBOLSO")].copy() if col_estatus else pd.DataFrame()
     with st.expander(f"💸 Reembolsos | {len(df_reembolsos)} Partida(s)", expanded=False):
         if not df_reembolsos.empty:

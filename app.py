@@ -354,7 +354,8 @@ if not modo_consulta:
                 df_en_proceso_notif['tmp_key'] = df_en_proceso_notif.apply(gen_key_notif, axis=1)
                 comprados_mask = df_en_proceso_notif['tmp_key'].isin(keys_compras)
                 
-                pendientes_surtido = len(df_en_proceso_notif[~comprados_mask])
+                df_por_comprar = df_en_proceso_notif[~comprados_mask]
+                pendientes_surtido = len(df_por_comprar)
                 en_espera_prov = len(df_en_proceso_notif[comprados_mask])
                 
                 primer_nombre = str(usuario_activo).split()[0] if usuario_activo else "Usuario"
@@ -365,6 +366,13 @@ if not modo_consulta:
                 if texto_alertas:
                     mensaje_final = f"🎯 <strong>¡Hola {primer_nombre}!</strong> Tienes " + " y ".join(texto_alertas) + "."
                     st.markdown(f'<div class="alerta-flash alerta-info">{mensaje_final}</div>', unsafe_allow_html=True)
+                    
+                    if pendientes_surtido > 0:
+                        with st.expander(f"👀 Ver detalle de los {pendientes_surtido} pedidos pendientes de compra", expanded=False):
+                            cols_to_show = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_desc] if c in df_por_comprar.columns]
+                            df_muestra = df_por_comprar[cols_to_show].copy()
+                            df_muestra.rename(columns={col_id: 'Siniestro', 'Vehiculo_Info': 'Vehículo', col_taller: 'Taller', col_desc: 'Pieza'}, inplace=True)
+                            st.dataframe(df_muestra, hide_index=True, use_container_width=True)
 
 # ==============================================================================
 # === [BLOQUE 6: VISTAS - ANALÍTICO & OPERATIVO] ===
@@ -1175,33 +1183,55 @@ elif vista_actual == "📝 Remisiones":
     # -------------------------------------------------------------------------
     st.markdown("---")
     st.markdown("### 🖨️ Bóveda de Reimpresión")
-    st.info("Busca un folio de remisión histórico para volver a generar el documento PDF.")
+    st.info("Utiliza los filtros para encontrar rápidamente el folio de remisión histórico que deseas volver a generar.")
     
     if col_remision and not df_completo.empty:
         df_con_folio = df_completo[df_completo[col_remision].astype(str).str.strip() != ''].copy()
         df_con_folio = df_con_folio[df_con_folio[col_remision].astype(str).str.upper().str.contains("PMR")]
         
         if not df_con_folio.empty:
-            df_con_folio['Filtro_Reimpresion'] = df_con_folio[col_remision].astype(str).str.strip() + " | Siniestro: " + df_con_folio[col_id].astype(str).str.strip() + " | Taller: " + df_con_folio[col_taller].astype(str).str.strip()
-            lista_folios_unicos = sorted(list(df_con_folio['Filtro_Reimpresion'].unique()), reverse=True)
+            col_id_reimp = next((c for c in df_con_folio.columns if "SINIESTRO" in str(c).upper()), None)
+            col_taller_reimp = next((c for c in df_con_folio.columns if "TALLER" in str(c).upper()), None)
             
-            col_b1, col_b2 = st.columns([3, 1])
-            with col_b1:
-                folio_a_reimprimir = st.selectbox("🔍 Selecciona o escribe el folio a reimprimir:", [""] + lista_folios_unicos)
+            st.markdown("#### 🎛️ Filtros para Reimpresión")
+            f_reimp1, f_reimp2, f_reimp3 = st.columns([1.5, 1.5, 1.5])
+            
+            with f_reimp1:
+                taller_sel_reimp = st.multiselect("🏢 Filtrar por Taller:", sorted([str(t) for t in df_con_folio[col_taller_reimp].dropna().unique() if str(t).strip() != '']) if col_taller_reimp else [], placeholder="Todos...", key="taller_reimp")
+            with f_reimp2:
+                df_t_reimp = df_con_folio.copy()
+                if taller_sel_reimp: df_t_reimp = df_t_reimp[df_t_reimp[col_taller_reimp].astype(str).isin(taller_sel_reimp)]
+                
+                siniestro_sel_reimp = st.multiselect(
+                    "🚗 Siniestro / Vehículo:", 
+                    sorted(list(df_t_reimp['Filtro_Siniestro'].dropna().unique()) if 'Filtro_Siniestro' in df_t_reimp.columns else list(df_t_reimp[col_id_reimp].dropna().unique())), 
+                    placeholder="Todos...", 
+                    key="sin_reimp"
+                )
+            with f_reimp3:
+                df_t_folio = df_t_reimp.copy()
+                if siniestro_sel_reimp:
+                    if 'Filtro_Siniestro' in df_t_folio.columns:
+                        df_t_folio = df_t_folio[df_t_folio['Filtro_Siniestro'].isin(siniestro_sel_reimp)]
+                    else:
+                        df_t_folio = df_t_folio[df_t_folio[col_id_reimp].astype(str).isin(siniestro_sel_reimp)]
+                
+                folios_disponibles = sorted(list(df_t_folio[col_remision].dropna().astype(str).unique()), reverse=True)
+                folio_a_reimprimir = st.selectbox("📄 Seleccionar Folio a Reimprimir:", [""] + folios_disponibles)
             
             if folio_a_reimprimir:
                 folio_puro = folio_a_reimprimir.split(" | ")[0].strip()
                 df_reimp = df_con_folio[df_con_folio[col_remision].astype(str).str.strip() == folio_puro].copy()
                 
                 st.markdown(f"**Piezas incluidas en el folio {folio_puro}:**")
-                cols_mostrar_reimp = [c for c in [col_id, col_taller, col_desc, col_cant, col_marca, col_modelo] if c in df_reimp.columns]
+                cols_mostrar_reimp = [c for c in [col_id_reimp, col_taller_reimp, col_desc, col_cant, col_marca, col_modelo] if c in df_reimp.columns]
                 st.dataframe(df_reimp[cols_mostrar_reimp], hide_index=True, use_container_width=True)
                 
                 if st.button("📄 Generar PDF de Reimpresión", type="primary"):
                     with st.spinner("Construyendo documento histórico..."):
                         fila_0 = df_reimp.iloc[0]
-                        siniestro_v = str(fila_0.get(col_id, '')).strip()
-                        taller_v = str(fila_0.get(col_taller, '')).strip()
+                        siniestro_v = str(fila_0.get(col_id_reimp, '')).strip()
+                        taller_v = str(fila_0.get(col_taller_reimp, '')).strip()
                         marca_v = str(fila_0.get(col_marca, '')).strip()
                         modelo_v = str(fila_0.get(col_modelo, '')).strip()
                         
@@ -1218,7 +1248,7 @@ elif vista_actual == "📝 Remisiones":
                         dir_v = ""
                         col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
                         if not df_catalogo.empty and col_cat_taller:
-                            match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == taller_v.upper()]
+                            match_taller = df_catalogo[df_catalogo[df_catalogo.columns[df_catalogo.columns.get_loc(col_cat_taller)]].astype(str).str.strip().str.upper() == taller_v.upper()]
                             if not match_taller.empty:
                                 col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
                                 if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
@@ -1581,7 +1611,7 @@ elif vista_actual == "🔍 Consultas":
         st.warning("La base de datos está vacía.")
 
 elif vista_actual == "🛠️ Cuartel General":
-    st.markdown("### 🛠️️ Cuartel General PMR (Solo Administración)")
+    st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")
     st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, reimpresiones y rutas locales.")
     col_c1, col_c2 = st.columns(2)
     with col_c1:

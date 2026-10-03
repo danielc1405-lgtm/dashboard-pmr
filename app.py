@@ -1521,8 +1521,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
     originales = {}
     for _, r in df_completo.iterrows():
         k = generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, ''))
-        
-        # Homologación crucial de la fecha base para evitar falsas diferencias
         raw_venc = str(r.get(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), ''), '')).strip()
         venc_formateada = estandarizar_fechas_mx(raw_venc) if raw_venc else ""
 
@@ -1550,111 +1548,116 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
     if btn_guardar:
+        
+        # 1. PIEZAS POR CONFIRMAR
         if not df_editado_conf.empty:
             for _, row in df_editado_conf.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Confirmar Surtido') else None)
+                
+                if row.get('Cancelar'): cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
+                elif row.get('Confirmar Surtido'): 
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO"
+                    cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
+                    
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
-                if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                    if nuevo_estatus == "EN PROCESAMIENTO": cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
-        if not df_editado_venc.empty:
-            for _, row in df_editado_venc.iterrows():
-                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
-                comentario_actual = str(row.get(col_comentarios, '')).strip()
-                paq_actual = str(row.get(col_paqueteria, '')).strip()
-                guia_actual = str(row.get(col_guia, '')).strip()
-                
-                nueva_fecha = row.get('Nueva Fecha')
-                if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                    try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
-                    except: fecha_str = str(nueva_fecha)
-                    cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
-                    if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                
-                if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-                if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+        # 2. VENCIMIENTOS Y ATRASADAS
+        for df_venc in [df_editado_venc, df_editado_atrasadas]:
+            if not df_venc.empty:
+                for _, row in df_venc.iterrows():
+                    k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+                    orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
+                    
+                    if row.get('Cancelar'): cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
+                    
+                    nueva_fecha = row.get('Nueva Fecha')
+                    if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
+                        try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
+                        except: fecha_str = str(nueva_fecha)
+                        cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
+                        
+                    comentario_actual = str(row.get(col_comentarios, '')).strip()
+                    paq_actual = str(row.get(col_paqueteria, '')).strip()
+                    guia_actual = str(row.get(col_guia, '')).strip()
+                    
+                    if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+                    if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
+                    if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
 
-        if not df_editado_atrasadas.empty:
-            for _, row in df_editado_atrasadas.iterrows():
-                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
-                comentario_actual = str(row.get(col_comentarios, '')).strip()
-                paq_actual = str(row.get(col_paqueteria, '')).strip()
-                guia_actual = str(row.get(col_guia, '')).strip()
-                
-                nueva_fecha = row.get('Nueva Fecha')
-                if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                    try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
-                    except: fecha_str = str(nueva_fecha)
-                    cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
-                    if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                
-                if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-                if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-
+        # 3. POR RECIBIR
         if not df_editado_cobro.empty:
             for _, row in df_editado_cobro.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-                comentario_actual = str(row.get(col_comentarios, '')).strip()
-                if row.get('Marcar Recibido'): 
+                
+                if row.get('Marcar Recibido') and cambios_a_guardar.get(k, {}).get('estatus') != "CANCELADO": 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
                     cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
+                    
+                comentario_actual = str(row.get(col_comentarios, '')).strip()
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
+        # 4. POR FACTURAR
         if not df_editado_fact.empty:
             for _, row in df_editado_fact.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                if row.get('Facturado'): 
+                if row.get('Facturado') and cambios_a_guardar.get(k, {}).get('estatus') != "CANCELADO": 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "FACTURADO"
                     cambios_a_guardar[k]['fecha_facturacion'] = fecha_hoy_sistema
 
+        # 5. REEMBOLSOS
+        if not df_editado_reemb.empty:
+            for _, row in df_editado_reemb.iterrows():
+                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+                orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
+                
+                if row.get('Marcar Reembolsado'): 
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = "REEMBOLSADO"
+                    
+                comentario_actual = str(row.get(col_comentarios, '')).strip()
+                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+
+        # 6. PEDIDOS ASIGNADOS (GENERAL)
         if not df_editado.empty:
             for _, row in df_editado.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
                 
-                prov_asignado = str(row.get('Proveedor', '')).strip()
-                pedido_bool = True if prov_asignado != '' else False
+                # Asignación segura y condicional (evita re-sobrescribir si se canceló arriba)
+                if row.get('Cancelar') and 'estatus' not in cambios_a_guardar.get(k, {}): 
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
+                elif row.get('Recibido') and 'estatus' not in cambios_a_guardar.get(k, {}): 
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
+                    cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
+                elif row.get('Entregado') and 'estatus' not in cambios_a_guardar.get(k, {}): 
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = "ENTREGADO"
                 
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN PROCESAMIENTO" if pedido_bool else None
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 paq_actual = str(row.get(col_paqueteria, '')).strip()
                 guia_actual = str(row.get(col_guia, '')).strip()
                 venc_actual = str(row.get(col_vencimiento, '')).strip()
                 asig_actual = str(row.get(col_asignacion, '')).strip()
                 
-                if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                    if nuevo_estatus == "RECIBIDO": cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                 if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
                 if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-                
-                # Evita aplastar la Nueva Fecha si ya se editó en los páneles de arriba
-                if venc_actual and venc_actual != orig['vencimiento_db'] and 'vencimiento' not in cambios_a_guardar.get(k, {}): 
-                    cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
-                    
+                if venc_actual and venc_actual != orig['vencimiento_db'] and 'vencimiento' not in cambios_a_guardar.get(k, {}): cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
                 if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
                 
-                if pedido_bool and nuevo_estatus != "CANCELADO":
+                prov_asignado = str(row.get('Proveedor', '')).strip()
+                pedido_bool = True if prov_asignado != '' else False
+                
+                # Si se ingresó proveedor, se manda a compras, pero sin afectar el estatus operativo
+                if pedido_bool and cambios_a_guardar.get(k, {}).get('estatus', orig['estatus_db']) != "CANCELADO":
                     cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
                     cambios_a_guardar[k]['compra_prov'] = prov_asignado
                     cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
                     cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
                     cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
 
+        # 7. TABLA DE COMPRAS
         if vista_actual == "🛒 Compras":
             df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
             if not df_editado_compras.empty:

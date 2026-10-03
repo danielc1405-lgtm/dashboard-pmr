@@ -634,17 +634,16 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_vencimientos.empty:
             if permiso_edicion:
                 df_vencimientos['Cancelar'] = False
-                df_vencimientos['Reasignar'] = df_vencimientos[col_estatus].astype(str).str.upper() == "REASIGNAR" 
                 df_vencimientos['Nueva Fecha'] = pd.NaT
                 
                 cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento] if c in df_vencimientos.columns] + \
-                                ['Cancelar', 'Reasignar', 'Nueva Fecha'] + \
+                                ['Cancelar', 'Nueva Fecha'] + \
                                 [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_vencimientos.columns]
                 
                 config_venc = base_config.copy()
-                config_venc.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig"), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
+                config_venc.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
                 
-                df_editado_venc = st.data_editor(df_vencimientos[cols_visibles], column_config=config_venc, disabled=[c for c in cols_visibles if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios, col_paqueteria, col_guia]], hide_index=True, use_container_width=True, key="ed_venc")
+                df_editado_venc = st.data_editor(df_vencimientos[cols_visibles], column_config=config_venc, disabled=[c for c in cols_visibles if c not in ['Cancelar', 'Nueva Fecha', col_comentarios, col_paqueteria, col_guia]], hide_index=True, use_container_width=True, key="ed_venc")
                 
                 for col in df_vencimientos.columns:
                     if col not in df_editado_venc.columns: df_editado_venc[col] = df_vencimientos[col].values
@@ -660,17 +659,16 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_atrasadas.empty:
             if permiso_edicion:
                 df_atrasadas['Cancelar'] = False
-                df_atrasadas['Reasignar'] = df_atrasadas[col_estatus].astype(str).str.upper() == "REASIGNAR" 
                 df_atrasadas['Nueva Fecha'] = pd.NaT
                 
                 cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento] if c in df_atrasadas.columns] + \
-                                ['Cancelar', 'Reasignar', 'Nueva Fecha'] + \
+                                ['Cancelar', 'Nueva Fecha'] + \
                                 [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_atrasadas.columns]
                 
                 config_atr = base_config.copy()
-                config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Reasignar": st.column_config.CheckboxColumn("🔄 Reasig"), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
+                config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
                 
-                df_editado_atrasadas = st.data_editor(df_atrasadas[cols_visibles], column_config=config_atr, disabled=[c for c in cols_visibles if c not in ['Cancelar', 'Reasignar', 'Nueva Fecha', col_comentarios, col_paqueteria, col_guia]], hide_index=True, use_container_width=True, key="ed_atr")
+                df_editado_atrasadas = st.data_editor(df_atrasadas[cols_visibles], column_config=config_atr, disabled=[c for c in cols_visibles if c not in ['Cancelar', 'Nueva Fecha', col_comentarios, col_paqueteria, col_guia]], hide_index=True, use_container_width=True, key="ed_atr")
                 
                 for col in df_atrasadas.columns:
                     if col not in df_editado_atrasadas.columns: df_editado_atrasadas[col] = df_atrasadas[col].values
@@ -1505,6 +1503,7 @@ trigger_rem = st.session_state.pop('trigger_remision_manual', None)
 if (btn_guardar or trigger_rem) and permiso_edicion:
     st.session_state['pdfs_list'] = []
     st.session_state['avisos_remision'] = []
+    
     def generar_llave(id_val, desc_val):
         id_str = str(id_val).strip().upper()
         if id_str.endswith('.0'): id_str = id_str[:-2]
@@ -1522,13 +1521,18 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
     originales = {}
     for _, r in df_completo.iterrows():
         k = generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, ''))
+        
+        # Homologación crucial de la fecha base para evitar falsas diferencias
+        raw_venc = str(r.get(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), ''), '')).strip()
+        venc_formateada = estandarizar_fechas_mx(raw_venc) if raw_venc else ""
+
         originales[k] = {
             'comentario': str(r.get(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), ''), '')).strip(),
             'paqueteria': str(r.get(col_paqueteria_univ, '')).strip(),
             'guia': str(r.get(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), ''), '')).strip(),
             'estatus_db': str(r.get(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), ''), '')).strip().upper(),
             'remision_bool': str(r.get(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''), '')).strip() != '',
-            'vencimiento_db': str(r.get(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), ''), '')).strip(),
+            'vencimiento_db': venc_formateada,
             'asignacion_db': str(r.get(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), ''), '')).strip()
         }
         
@@ -1543,7 +1547,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             orig = originales.get(k, {'remision_bool': False})
             cambios_a_guardar.setdefault(k, {}).update({'estatus': 'EN TRANSITO', 'imprimir_remision': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
             if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
-            
             cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
     if btn_guardar:
@@ -1566,13 +1569,14 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 paq_actual = str(row.get(col_paqueteria, '')).strip()
                 guia_actual = str(row.get(col_guia, '')).strip()
+                
                 nueva_fecha = row.get('Nueva Fecha')
                 if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
                     try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
                     except: fecha_str = str(nueva_fecha)
                     cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                     if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                elif row.get('Reasignar') and not nuevo_estatus: nuevo_estatus = "REASIGNAR" 
+                
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                 if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
@@ -1586,13 +1590,14 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 paq_actual = str(row.get(col_paqueteria, '')).strip()
                 guia_actual = str(row.get(col_guia, '')).strip()
+                
                 nueva_fecha = row.get('Nueva Fecha')
                 if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
                     try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
                     except: fecha_str = str(nueva_fecha)
                     cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
                     if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                elif row.get('Reasignar') and not nuevo_estatus: nuevo_estatus = "REASIGNAR" 
+                
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                 if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
@@ -1623,7 +1628,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 prov_asignado = str(row.get('Proveedor', '')).strip()
                 pedido_bool = True if prov_asignado != '' else False
                 
-                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "REASIGNAR" if row.get('Reasignacion') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN PROCESAMIENTO" if pedido_bool else None
+                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else "RECIBIDO" if row.get('Recibido') else "ENTREGADO" if row.get('Entregado') else "EN PROCESAMIENTO" if pedido_bool else None
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 paq_actual = str(row.get(col_paqueteria, '')).strip()
                 guia_actual = str(row.get(col_guia, '')).strip()
@@ -1636,7 +1641,11 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                 if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
                 if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-                if venc_actual and venc_actual != orig['vencimiento_db']: cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
+                
+                # Evita aplastar la Nueva Fecha si ya se editó en los páneles de arriba
+                if venc_actual and venc_actual != orig['vencimiento_db'] and 'vencimiento' not in cambios_a_guardar.get(k, {}): 
+                    cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
+                    
                 if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
                 
                 if pedido_bool and nuevo_estatus != "CANCELADO":
@@ -1858,7 +1867,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             pdf.set_auto_page_break(auto=False, margin=0); pdf.add_page()
                             
                             def dibujar_bloque_remision(x_offset):
-                                import os # INYECCION: Para evitar el error de librería del sistema
+                                import os
                                 y_offset = 15
                                 if os.path.exists("logo.png"):
                                     try: pdf.image("logo.png", x_offset, y_offset - 3, 30)

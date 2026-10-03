@@ -1509,29 +1509,46 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
         if id_str.endswith('.0'): id_str = id_str[:-2]
         desc_str = ' '.join(str(desc_val).strip().upper().split())
         return (id_str if id_str not in ['NAN', 'NONE'] else '', desc_str if desc_str not in ['NAN', 'NONE'] else '')
-    
-    col_id_univ = next((c for c in df_completo.columns if "SINIESTRO" in str(c).upper()), None)
-    col_desc_univ = next((c for c in df_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
-    col_taller_univ = next((c for c in df_completo.columns if "TALLER" in str(c).upper()), None)
-    col_marca_univ = next((c for c in df_completo.columns if "MARCA" in str(c).upper()), None)
-    col_modelo_univ = next((c for c in df_completo.columns if "MODELO" in str(c).upper()), None)
-    col_cant_univ = next((c for c in df_completo.columns if "CANTIDAD" in str(c).upper() or "CANT" == str(c).upper()), None)
-    col_paqueteria_univ = next((c for c in df_completo.columns if "PAQUETERIA" in str(c).upper() or "PAQUETERÍA" in str(c).upper()), None)
+
+    # --- MOTOR DE BÚSQUEDA ESTRICTA DE COLUMNAS (ANTIFALLOS) ---
+    def buscar_columna(df_o_lista, exactos, parciales, excluidos=["ENV", "PAGO"]):
+        cols = df_o_lista.columns if hasattr(df_o_lista, 'columns') else df_o_lista
+        cols_up = [str(c).strip().upper() for c in cols]
+        for ex in exactos:
+            if ex in cols_up: return cols[cols_up.index(ex)]
+        for i, c_up in enumerate(cols_up):
+            for p in parciales:
+                if p in c_up and not any(exc in c_up for exc in excluidos): return cols[i]
+        return None
+
+    col_id_univ = buscar_columna(df_completo, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+    col_desc_univ = buscar_columna(df_completo, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
+    col_estatus_univ = buscar_columna(df_completo, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])
+    col_taller_univ = buscar_columna(df_completo, ["TALLER", "CDR"], ["TALLER"])
+    col_marca_univ = buscar_columna(df_completo, ["MARCA"], ["MARCA"])
+    col_modelo_univ = buscar_columna(df_completo, ["MODELO"], ["MODELO"])
+    col_cant_univ = buscar_columna(df_completo, ["CANTIDAD", "CANT"], ["CANTIDAD", "CANT"])
+    col_paqueteria_univ = buscar_columna(df_completo, ["PAQUETERIA", "PAQUETERÍA"], ["PAQUETER"])
+    col_guia_univ = buscar_columna(df_completo, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"])
+    col_rem_univ = buscar_columna(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
+    col_coment_univ = buscar_columna(df_completo, ["COMENTARIOS", "OBSERVACIONES", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])
+    col_venc_univ = buscar_columna(df_completo, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"])
+    col_asig_univ = buscar_columna(df_completo, ["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"])
     
     originales = {}
     for _, r in df_completo.iterrows():
         k = generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, ''))
-        raw_venc = str(r.get(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), ''), '')).strip()
+        raw_venc = str(r.get(col_venc_univ, '')).strip() if col_venc_univ else ""
         venc_formateada = estandarizar_fechas_mx(raw_venc) if raw_venc else ""
 
         originales[k] = {
-            'comentario': str(r.get(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), ''), '')).strip(),
-            'paqueteria': str(r.get(col_paqueteria_univ, '')).strip(),
-            'guia': str(r.get(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), ''), '')).strip(),
-            'estatus_db': str(r.get(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), ''), '')).strip().upper(),
-            'remision_bool': str(r.get(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''), '')).strip() != '',
+            'comentario': str(r.get(col_coment_univ, '')).strip() if col_coment_univ else '',
+            'paqueteria': str(r.get(col_paqueteria_univ, '')).strip() if col_paqueteria_univ else '',
+            'guia': str(r.get(col_guia_univ, '')).strip() if col_guia_univ else '',
+            'estatus_db': str(r.get(col_estatus_univ, '')).strip().upper() if col_estatus_univ else '',
+            'remision_bool': str(r.get(col_rem_univ, '')).strip() != '' if col_rem_univ else False,
             'vencimiento_db': venc_formateada,
-            'asignacion_db': str(r.get(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), ''), '')).strip()
+            'asignacion_db': str(r.get(col_asig_univ, '')).strip() if col_asig_univ else ''
         }
         
     cambios_a_guardar = {}
@@ -1548,58 +1565,50 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
     if btn_guardar:
-        
-        # 1. PIEZAS POR CONFIRMAR
         if not df_editado_conf.empty:
             for _, row in df_editado_conf.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-                
-                if row.get('Cancelar'): cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
-                elif row.get('Confirmar Surtido'): 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO"
-                    cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
-                    
+                nuevo_estatus = "CANCELADO" if row.get('Cancelar') else ("EN PROCESAMIENTO" if row.get('Confirmar Surtido') else None)
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
+                if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+                    if nuevo_estatus == "EN PROCESAMIENTO": cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
-        # 2. VENCIMIENTOS Y ATRASADAS
         for df_venc in [df_editado_venc, df_editado_atrasadas]:
             if not df_venc.empty:
                 for _, row in df_venc.iterrows():
                     k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                     orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
                     
-                    if row.get('Cancelar'): cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
-                    
+                    nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
+                    comentario_actual = str(row.get(col_comentarios, '')).strip()
+                    paq_actual = str(row.get(col_paqueteria, '')).strip()
+                    guia_actual = str(row.get(col_guia, '')).strip()
                     nueva_fecha = row.get('Nueva Fecha')
+                    
                     if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
                         try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
                         except: fecha_str = str(nueva_fecha)
                         cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
-                        
-                    comentario_actual = str(row.get(col_comentarios, '')).strip()
-                    paq_actual = str(row.get(col_paqueteria, '')).strip()
-                    guia_actual = str(row.get(col_guia, '')).strip()
+                        if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
                     
+                    if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                     if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                     if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
                     if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
 
-        # 3. POR RECIBIR
         if not df_editado_cobro.empty:
             for _, row in df_editado_cobro.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-                
                 if row.get('Marcar Recibido') and cambios_a_guardar.get(k, {}).get('estatus') != "CANCELADO": 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
                     cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
-                    
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
-        # 4. POR FACTURAR
         if not df_editado_fact.empty:
             for _, row in df_editado_fact.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
@@ -1607,25 +1616,20 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "FACTURADO"
                     cambios_a_guardar[k]['fecha_facturacion'] = fecha_hoy_sistema
 
-        # 5. REEMBOLSOS
         if not df_editado_reemb.empty:
             for _, row in df_editado_reemb.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-                
                 if row.get('Marcar Reembolsado'): 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "REEMBOLSADO"
-                    
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
-        # 6. PEDIDOS ASIGNADOS (GENERAL)
         if not df_editado.empty:
             for _, row in df_editado.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
                 
-                # Asignación segura y condicional (evita re-sobrescribir si se canceló arriba)
                 if row.get('Cancelar') and 'estatus' not in cambios_a_guardar.get(k, {}): 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
                 elif row.get('Recibido') and 'estatus' not in cambios_a_guardar.get(k, {}): 
@@ -1647,23 +1651,18 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
                 
                 prov_asignado = str(row.get('Proveedor', '')).strip()
-                pedido_bool = True if prov_asignado != '' else False
-                
-                # Si se ingresó proveedor, se manda a compras, pero sin afectar el estatus operativo
-                if pedido_bool and cambios_a_guardar.get(k, {}).get('estatus', orig['estatus_db']) != "CANCELADO":
+                if prov_asignado != '' and cambios_a_guardar.get(k, {}).get('estatus', orig['estatus_db']) != "CANCELADO":
                     cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
                     cambios_a_guardar[k]['compra_prov'] = prov_asignado
                     cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
                     cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
                     cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
 
-        # 7. TABLA DE COMPRAS
         if vista_actual == "🛒 Compras":
             df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
             if not df_editado_compras.empty:
                 for _, row in df_editado_compras.iterrows():
                     k = generar_llave(row.get('Siniestro', ''), row.get('Descripción Pieza', ''))
-                    orig = originales.get(k, {'estatus_db': '', 'remision_bool': False})
                     cambios_bd_compras.setdefault(k, {})
                     if row.get('Cancelar Compra'):
                         cambios_bd_compras[k]['cancelar_compra'] = True
@@ -1680,27 +1679,48 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
 
     if cambios_a_guardar or cambios_bd_compras:
         with espacio_spinner:
-            with st.spinner("Sincronizando..."):
+            with st.spinner("Sincronizando con BD_UNIFICADA y BD_HISTORICO..."):
                 try:
                     doc = init_connection()
+                    
                     if cambios_a_guardar:
                         ws_uni = doc.worksheet("BD_UNIFICADA")
                         datos_uni = ws_uni.get_all_values()
-                        headers = [str(h).strip() for h in datos_uni[0]]
-                        idx_id, idx_desc, idx_estatus, idx_rem = headers.index(col_id_univ), headers.index(col_desc_univ), headers.index(next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), '')), headers.index(next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), ''))
-                        idx_usr_rem = headers.index("Usuario Remisión") if "Usuario Remisión" in headers else -1
-                        idx_coment = headers.index(next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '')) if next((c for c in df_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), '') in headers else -1
-                        idx_paq = headers.index(col_paqueteria_univ) if col_paqueteria_univ in headers else -1
-                        idx_guia = headers.index(next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), '') in headers else -1
-                        idx_venc = headers.index(next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '')) if next((c for c in df_completo.columns if "VENCIMIENTO" in str(c).upper() or "PROMESA" in str(c).upper()), '') in headers else -1
-                        idx_asig = headers.index(next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "ASIGNACI" in str(c).upper()), '') in headers else -1
-                        idx_confi = headers.index(next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '')) if next((c for c in df_completo.columns if "FECHA CONFI" in str(c).upper()), '') in headers else -1
-                        idx_envio = headers.index("Fecha Envío") if "Fecha Envío" in headers else -1
-                        idx_recibido = headers.index("Fecha Recibido") if "Fecha Recibido" in headers else -1
-                        idx_facturacion = headers.index("Fecha Facturación") if "Fecha Facturación" in headers else -1
+                        headers_uni = [str(h).strip() for h in datos_uni[0]]
                         
+                        try:
+                            ws_hist = doc.worksheet("BD_HISTORICO")
+                            datos_hist = ws_hist.get_all_values()
+                            headers_hist = [str(h).strip() for h in datos_hist[0]] if datos_hist else []
+                        except:
+                            datos_hist = []; headers_hist = []
+
+                        # --- Mapeo Automático BÍPEDO ---
+                        def mapear_columnas(headers):
+                            if not headers: return {}
+                            return {
+                                'id': headers.index(buscar_columna(headers, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])) if buscar_columna(headers, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"]) else -1,
+                                'desc': headers.index(buscar_columna(headers, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])) if buscar_columna(headers, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"]) else -1,
+                                'estatus': headers.index(buscar_columna(headers, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])) if buscar_columna(headers, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"]) else -1,
+                                'rem': headers.index(buscar_columna(headers, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])) if buscar_columna(headers, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"]) else -1,
+                                'usr_rem': headers.index(buscar_columna(headers, ["USUARIO REMISION", "USUARIO REMISIÓN"], ["USUARIO REM"])) if buscar_columna(headers, ["USUARIO REMISION", "USUARIO REMISIÓN"], ["USUARIO REM"]) else -1,
+                                'coment': headers.index(buscar_columna(headers, ["COMENTARIOS", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])) if buscar_columna(headers, ["COMENTARIOS", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"]) else -1,
+                                'paq': headers.index(buscar_columna(headers, ["PAQUETERIA", "PAQUETERÍA"], ["PAQUETER"])) if buscar_columna(headers, ["PAQUETERIA", "PAQUETERÍA"], ["PAQUETER"]) else -1,
+                                'guia': headers.index(buscar_columna(headers, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"])) if buscar_columna(headers, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"]) else -1,
+                                'venc': headers.index(buscar_columna(headers, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"])) if buscar_columna(headers, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"]) else -1,
+                                'asig': headers.index(buscar_columna(headers, ["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"])) if buscar_columna(headers, ["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"]) else -1,
+                                'confi': headers.index(buscar_columna(headers, ["CONFIRMACION", "FECHA CONFIRMACION"], ["FECHA CONFI"])) if buscar_columna(headers, ["CONFIRMACION", "FECHA CONFIRMACION"], ["FECHA CONFI"]) else -1,
+                                'envio': headers.index(buscar_columna(headers, ["FECHA ENVIO", "FECHA ENVÍO"], ["FECHA ENV"])) if buscar_columna(headers, ["FECHA ENVIO", "FECHA ENVÍO"], ["FECHA ENV"]) else -1,
+                                'recibido': headers.index(buscar_columna(headers, ["FECHA RECIBIDO"], ["FECHA REC"])) if buscar_columna(headers, ["FECHA RECIBIDO"], ["FECHA REC"]) else -1,
+                                'fact': headers.index(buscar_columna(headers, ["FECHA FACTURACION", "FECHA FACTURACIÓN"], ["FECHA FAC"])) if buscar_columna(headers, ["FECHA FACTURACION", "FECHA FACTURACIÓN"], ["FECHA FAC"]) else -1
+                            }
+
+                        mapa_uni = mapear_columnas(headers_uni)
+                        mapa_hist = mapear_columnas(headers_hist)
+
+                        # Generador de Folios
                         max_folio_pmr = 0
-                        numeros = df_completo[next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), '')].astype(str).str.extract(r'(?i)PMR\s*-\s*0*(\d+)', expand=False)
+                        numeros = df_completo[col_rem_univ].astype(str).str.extract(r'(?i)PMR\s*-\s*0*(\d+)', expand=False) if col_rem_univ else pd.Series()
                         if not numeros.empty: max_folio_pmr = int(pd.to_numeric(numeros, errors='coerce').max() if pd.notna(pd.to_numeric(numeros, errors='coerce').max()) else 0)
 
                         folios_asignados_en_sesion = {}
@@ -1712,23 +1732,35 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                     folios_asignados_en_sesion[siniestro_id] = f"PMR - {max_folio_pmr:03d}"
                                 v['remision_num'] = folios_asignados_en_sesion[siniestro_id]
 
-                        for i in range(1, len(datos_uni)):
-                            k = generar_llave(datos_uni[i][idx_id], datos_uni[i][idx_desc])
-                            if k in cambios_a_guardar:
-                                c = cambios_a_guardar[k]
-                                if 'estatus' in c: datos_uni[i][idx_estatus] = c['estatus']
-                                if 'remision_num' in c: datos_uni[i][idx_rem] = c['remision_num']
-                                if 'usuario_rem' in c and idx_usr_rem >= 0: datos_uni[i][idx_usr_rem] = c['usuario_rem']
-                                if 'comentario' in c and idx_coment >= 0: datos_uni[i][idx_coment] = c['comentario']
-                                if 'paqueteria' in c and idx_paq >= 0: datos_uni[i][idx_paq] = c['paqueteria']
-                                if 'guia' in c and idx_guia >= 0: datos_uni[i][idx_guia] = c['guia']
-                                if 'vencimiento' in c and idx_venc >= 0: datos_uni[i][idx_venc] = c['vencimiento']
-                                if 'asignacion' in c and idx_asig >= 0: datos_uni[i][idx_asig] = c['asignacion']
-                                if 'fecha_confi' in c and idx_confi >= 0: datos_uni[i][idx_confi] = c['fecha_confi']
-                                if 'fecha_envio' in c and idx_envio >= 0: datos_uni[i][idx_envio] = c['fecha_envio']
-                                if 'fecha_recibido' in c and idx_recibido >= 0: datos_uni[i][idx_recibido] = c['fecha_recibido']
-                                if 'fecha_facturacion' in c and idx_facturacion >= 0: datos_uni[i][idx_facturacion] = c['fecha_facturacion']
-                        ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
+                        # Función para inyectar datos en una lista de hojas
+                        def actualizar_datos_hoja(datos_hoja, mapa_hoja):
+                            if not datos_hoja or not mapa_hoja or mapa_hoja['id'] == -1 or mapa_hoja['desc'] == -1: return False
+                            cambio_realizado = False
+                            for i in range(1, len(datos_hoja)):
+                                k = generar_llave(datos_hoja[i][mapa_hoja['id']], datos_hoja[i][mapa_hoja['desc']])
+                                if k in cambios_a_guardar:
+                                    c = cambios_a_guardar[k]
+                                    cambio_realizado = True
+                                    if 'estatus' in c and mapa_hoja['estatus'] >= 0: datos_hoja[i][mapa_hoja['estatus']] = c['estatus']
+                                    if 'remision_num' in c and mapa_hoja['rem'] >= 0: datos_hoja[i][mapa_hoja['rem']] = c['remision_num']
+                                    if 'usuario_rem' in c and mapa_hoja['usr_rem'] >= 0: datos_hoja[i][mapa_hoja['usr_rem']] = c['usuario_rem']
+                                    if 'comentario' in c and mapa_hoja['coment'] >= 0: datos_hoja[i][mapa_hoja['coment']] = c['comentario']
+                                    if 'paqueteria' in c and mapa_hoja['paq'] >= 0: datos_hoja[i][mapa_hoja['paq']] = c['paqueteria']
+                                    if 'guia' in c and mapa_hoja['guia'] >= 0: datos_hoja[i][mapa_hoja['guia']] = c['guia']
+                                    if 'vencimiento' in c and mapa_hoja['venc'] >= 0: datos_hoja[i][mapa_hoja['venc']] = c['vencimiento']
+                                    if 'asignacion' in c and mapa_hoja['asig'] >= 0: datos_hoja[i][mapa_hoja['asig']] = c['asignacion']
+                                    if 'fecha_confi' in c and mapa_hoja['confi'] >= 0: datos_hoja[i][mapa_hoja['confi']] = c['fecha_confi']
+                                    if 'fecha_envio' in c and mapa_hoja['envio'] >= 0: datos_hoja[i][mapa_hoja['envio']] = c['fecha_envio']
+                                    if 'fecha_recibido' in c and mapa_hoja['recibido'] >= 0: datos_hoja[i][mapa_hoja['recibido']] = c['fecha_recibido']
+                                    if 'fecha_facturacion' in c and mapa_hoja['fact'] >= 0: datos_hoja[i][mapa_hoja['fact']] = c['fecha_facturacion']
+                            return cambio_realizado
+
+                        # Ejecutar la inyección en ambas bases de datos
+                        hay_cambios_uni = actualizar_datos_hoja(datos_uni, mapa_uni)
+                        hay_cambios_hist = actualizar_datos_hoja(datos_hist, mapa_hist)
+
+                        if hay_cambios_uni: ws_uni.update(range_name='A1', values=datos_uni, value_input_option='USER_ENTERED')
+                        if hay_cambios_hist and datos_hist: ws_hist.update(range_name='A1', values=datos_hist, value_input_option='USER_ENTERED')
 
                     if any(v.get('crear_compra') for v in cambios_a_guardar.values()) or cambios_bd_compras:
                         try:

@@ -25,9 +25,9 @@ st.markdown("""
     <style>
         [data-testid="stDataFrame"] { zoom: 0.95; }
         
-        /* 1. Aniquilar el padding fantasma superior de Streamlit */
+        /* 1. Aniquilar por completo el padding fantasma superior de Streamlit */
         .main .block-container, div[data-testid="stAppViewBlockContainer"] { 
-            padding-top: 1.5rem !important; 
+            padding-top: 0rem !important; 
             padding-bottom: 40px !important; 
             padding-left: 1rem !important; 
             padding-right: 1rem !important; 
@@ -51,11 +51,11 @@ st.markdown("""
             top: 0px !important; 
             z-index: 99999 !important; 
             background-color: #0E1117 !important; 
-            padding-top: 15px !important; 
-            padding-bottom: 15px !important; 
+            padding-top: 10px !important; 
+            padding-bottom: 10px !important; 
             border-bottom: 1px solid #333 !important;
             box-shadow: 0px 6px 15px rgba(0,0,0,0.6) !important;
-            margin-top: -15px !important;
+            margin-top: -15px !important; 
         }
         
         div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }
@@ -131,11 +131,14 @@ opciones_menu = [
     "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
 ]
 
-col_logo, col_menu, col_aseg, col_btn_ref, col_btn = st.columns([1.5, 5.5, 1.5, 0.5, 1])
+# El parámetro vertical_alignment="center" alinea todo a la misma altura
+col_logo, col_menu, col_aseg, col_btn_ref, col_btn = st.columns([1.2, 5.5, 1.5, 0.4, 1.2], vertical_alignment="center")
 
 with col_logo:
-    try: st.image("logo.png", width=120)
-    except: st.markdown("**PREMIER**")
+    try: 
+        st.image("logo.png", use_column_width=True)
+    except: 
+        st.markdown("**PREMIER**")
 
 with col_menu:
     vista_actual = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")

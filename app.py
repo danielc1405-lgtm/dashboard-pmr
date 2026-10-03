@@ -326,7 +326,7 @@ if not modo_consulta:
     if vista_actual == "⚙️ Panel Operativo":
         if col_estatus and not df_trabajo_completo.empty:
             pendientes_bot = len(df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")])
-            if pendientes_bot > 0: st.markdown(f'<div class="alerta-flash alerta-warning">🚨 <strong>¡ATENCIÓN!</strong> Han ingresado <strong>{pendientes_bot}</strong> partida(s) / pieza(s) nueva(s) por confirmar.</div>', unsafe_allow_html=True)
+            if pendientes_bot > 0: st.markdown(f'<div class="alerta-flash alerta-warning">🚨 <strong>¡ATENCIÓN!</strong> Han ingresado <strong>{pendientes_bot}</strong> partida(s) nueva(s) por confirmar.</div>', unsafe_allow_html=True)
 
     if vista_actual in ["⚙️ Panel Operativo", "🛒 Compras"]:
         if col_estatus and not df_trabajo_completo.empty:

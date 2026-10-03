@@ -401,6 +401,19 @@ if vista_actual == "📊 Analítico":
             category_orders={col_estatus: orden_estatus}
         )
         
+        # --- REPOSICIONAMIENTO DE LA LEYENDA ABAJO ---
+        fig.update_layout(
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.25,
+                xanchor="center",
+                x=0.5,
+                title_text=""
+            ),
+            margin=dict(b=80) # Damos margen inferior para que no se corte el texto
+        )
+        
         col_graf, col_det = st.columns([2, 1])
         with col_graf: graf_sel = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
         with col_det:

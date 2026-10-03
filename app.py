@@ -25,10 +25,10 @@ st.markdown("""
     <style>
         [data-testid="stDataFrame"] { zoom: 0.95; }
         
-        /* 1. Matar el padding fantasma del contenedor principal de Streamlit */
-        .main .block-container { 
-            padding-top: 0rem !important; 
-            padding-bottom: 40px; 
+        /* 1. Aniquilar el padding fantasma superior de Streamlit */
+        .main .block-container, div[data-testid="stAppViewBlockContainer"] { 
+            padding-top: 1.5rem !important; 
+            padding-bottom: 40px !important; 
             padding-left: 1rem !important; 
             padding-right: 1rem !important; 
             max-width: 100% !important; 
@@ -41,20 +41,17 @@ st.markdown("""
         
         /* 2. Destruir el espacio reservado del header nativo */
         header[data-testid="stHeader"] { 
-            visibility: hidden !important; 
-            height: 0px !important; 
-            padding: 0px !important; 
-            min-height: 0px !important; 
+            display: none !important;
         }
         
         /* --- 3. CINTURÓN DE SEGURIDAD PARA EL MENÚ SUPERIOR (STICKY) --- */
         div[data-testid="stVerticalBlock"] > div:has([data-testid="stRadio"]) {
             position: -webkit-sticky !important;
             position: sticky !important; 
-            top: -15px !important; 
+            top: 0px !important; 
             z-index: 99999 !important; 
             background-color: #0E1117 !important; 
-            padding-top: 30px !important; 
+            padding-top: 15px !important; 
             padding-bottom: 15px !important; 
             border-bottom: 1px solid #333 !important;
             box-shadow: 0px 6px 15px rgba(0,0,0,0.6) !important;
@@ -383,7 +380,27 @@ if vista_actual == "📊 Analítico":
     if col_estatus and col_vencimiento and not df_proceso.empty:
         df_grafico = df_proceso.copy()
         df_agrupado = df_grafico.groupby([col_vencimiento, col_estatus]).size().reset_index(name='Cantidad')
-        fig = px.bar(df_agrupado, x=col_vencimiento, y='Cantidad', color=col_estatus, barmode='stack', color_discrete_sequence=["#1E88E5", "#64B5F6", "#0D47A1", "#1976D2", "#90CAF9"])
+        
+        # --- MAPA DE COLORES TIPO SEMÁFORO ---
+        mapa_colores = {
+            "POR CONFIRMAR": "#FF4B4B",       # Rojo
+            "EN PROCESAMIENTO": "#FF9800",    # Naranja
+            "EN TRANSITO": "#FFEB3B",         # Amarillo
+            "ENTREGADO": "#4CAF50",           # Verde
+            "EN PROCESO DE REEMBOLSO": "#757575" # Gris
+        }
+        orden_estatus = ["POR CONFIRMAR", "EN PROCESAMIENTO", "EN TRANSITO", "ENTREGADO", "EN PROCESO DE REEMBOLSO"]
+        
+        fig = px.bar(
+            df_agrupado, 
+            x=col_vencimiento, 
+            y='Cantidad', 
+            color=col_estatus, 
+            barmode='stack', 
+            color_discrete_map=mapa_colores,
+            category_orders={col_estatus: orden_estatus}
+        )
+        
         col_graf, col_det = st.columns([2, 1])
         with col_graf: graf_sel = st.plotly_chart(fig, use_container_width=True, on_select="rerun")
         with col_det:

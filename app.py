@@ -1167,13 +1167,19 @@ elif vista_actual == "📝 Remisiones":
         col_taller_r = next((c for c in df_listos.columns if "TALLER" in str(c).upper()), None)
         col_marca_r = next((c for c in df_listos.columns if "MARCA" in str(c).upper()), None)
         col_modelo_r = next((c for c in df_listos.columns if "MODELO" in str(c).upper()), None)
+        col_ano_r = next((c for c in df_listos.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
         col_desc_r = next((c for c in df_listos.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
         
         # Formatear el vehículo y la aseguradora
         def armar_vehiculo_r(r):
             m = str(r.get(col_marca_r, '')).strip().upper()
             mod = str(r.get(col_modelo_r, '')).strip().upper()
-            return mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
+            veh = mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
+            if col_ano_r:
+                ano = str(r.get(col_ano_r, '')).strip()
+                if ano.endswith('.0'): ano = ano[:-2]
+                if ano not in ['', 'NAN', 'NONE']: veh += f" | {ano}"
+            return veh
         
         df_listos['Vehiculo_Info'] = df_listos.apply(armar_vehiculo_r, axis=1)
         df_listos['Filtro_Siniestro'] = df_listos[col_id_r].astype(str).str.strip() + " | " + df_listos['Vehiculo_Info']
@@ -1214,7 +1220,8 @@ elif vista_actual == "📝 Remisiones":
                     icono = "🔵" if aseguradora == "MULTI" else ("🟠" if aseguradora == "GNP" else "⚪")
                     nombre_aseg = "MULTIASISTENCIAS" if aseguradora == "MULTI" else aseguradora
                     
-                    with st.expander(f"{icono} {nombre_aseg} | {len(df_aseg)} Partida(s) lista(s) para remisionar", expanded=True):
+                    # AQUÍ ESTÁ EL AJUSTE PARA QUE INICIEN CERRADOS (expanded=False)
+                    with st.expander(f"{icono} {nombre_aseg} | {len(df_aseg)} Partida(s) lista(s) para remisionar", expanded=False):
                         
                         # --- AGRUPACIÓN SECUNDARIA POR TALLER (ACORDEÓN) ---
                         for taller, df_taller_rem in df_aseg.groupby(col_taller_r):
@@ -1254,8 +1261,8 @@ elif vista_actual == "📝 Remisiones":
     st.info("Utiliza los filtros para encontrar rápidamente el folio de remisión histórico que deseas volver a generar.")
     
     if col_remision_univ and not df_completo.empty:
-        df_con_folio = df_completo[df_completo[col_remision_univ].astype(str).str.strip() != ''].copy()
-        df_con_folio = df_con_folio[df_con_folio[col_remision_univ].astype(str).str.upper().str.contains("PMR")]
+        # Extraemos las filas que sí contengan la cadena PMR en su remisión
+        df_con_folio = df_completo[df_completo[col_remision_univ].astype(str).str.upper().str.contains("PMR", na=False)].copy()
         
         if not df_con_folio.empty:
             col_id_reimp = next((c for c in df_con_folio.columns if "SINIESTRO" in str(c).upper()), None)
@@ -1264,12 +1271,18 @@ elif vista_actual == "📝 Remisiones":
             col_cant_reimp = next((c for c in df_con_folio.columns if "CANT" in str(c).upper()), None)
             col_marca_reimp = next((c for c in df_con_folio.columns if "MARCA" in str(c).upper()), None)
             col_modelo_reimp = next((c for c in df_con_folio.columns if "MODELO" in str(c).upper()), None)
+            col_ano_reimp = next((c for c in df_con_folio.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
             
-            # Generar Filtro Siniestro seguro
+            # Generar Filtro Siniestro incluyendo el AÑO para coincidencia perfecta
             def armar_vehiculo_filtro(row):
                 m = str(row.get(col_marca_reimp, '')).strip().upper()
                 mod = str(row.get(col_modelo_reimp, '')).strip().upper()
-                return mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
+                veh = mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
+                if col_ano_reimp:
+                    ano = str(row.get(col_ano_reimp, '')).strip()
+                    if ano.endswith('.0'): ano = ano[:-2]
+                    if ano not in ['', 'NAN', 'NONE']: veh += f" | {ano}"
+                return veh
                 
             df_con_folio['Vehiculo_Info_Reimp'] = df_con_folio.apply(armar_vehiculo_filtro, axis=1)
             df_con_folio['Filtro_Siniestro'] = df_con_folio[col_id_reimp].astype(str).str.strip() + " | " + df_con_folio['Vehiculo_Info_Reimp']
@@ -1294,12 +1307,22 @@ elif vista_actual == "📝 Remisiones":
                 if siniestro_sel_reimp:
                     df_t_folio = df_t_folio[df_t_folio['Filtro_Siniestro'].isin(siniestro_sel_reimp)]
                 
-                folios_disponibles = sorted(list(df_t_folio[col_remision_univ].dropna().astype(str).unique()), reverse=True)
+                # Extractor robusto: Escanea y divide cualquier remisión, previniendo errores si hay comas o texto extra
+                lista_cruda = df_t_folio[col_remision_univ].dropna().astype(str).tolist()
+                folios_limpios = set()
+                for val in lista_cruda:
+                    for fragmento in val.split(','):
+                        frag_strip = fragmento.strip()
+                        if "PMR" in frag_strip.upper():
+                            folios_limpios.add(frag_strip)
+                
+                folios_disponibles = sorted(list(folios_limpios), reverse=True)
                 folio_a_reimprimir = st.selectbox("📄 Seleccionar Folio a Reimprimir:", [""] + folios_disponibles)
             
             if folio_a_reimprimir:
                 folio_puro = folio_a_reimprimir.split(" | ")[0].strip()
-                df_reimp = df_con_folio[df_con_folio[col_remision_univ].astype(str).str.strip() == folio_puro].copy()
+                # Extraemos todas las partidas que contengan el folio seleccionado, sin importar si hay texto a su lado
+                df_reimp = df_con_folio[df_con_folio[col_remision_univ].astype(str).str.contains(folio_puro, regex=False, na=False)].copy()
                 
                 st.markdown(f"**Piezas incluidas en el folio {folio_puro}:**")
                 cols_mostrar_reimp = [c for c in [col_id_reimp, col_taller_reimp, col_desc_reimp, col_cant_reimp, col_marca_reimp, col_modelo_reimp] if c in df_reimp.columns]

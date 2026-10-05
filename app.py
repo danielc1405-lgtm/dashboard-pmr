@@ -1215,32 +1215,32 @@ elif vista_actual == "📝 Remisiones":
                     nombre_aseg = "MULTIASISTENCIAS" if aseguradora == "MULTI" else aseguradora
                     
                     with st.expander(f"{icono} {nombre_aseg} | {len(df_aseg)} Partida(s) lista(s) para remisionar", expanded=True):
-                        # --- AGRUPACIÓN SECUNDARIA POR TALLER ---
+                        
+                        # --- AGRUPACIÓN SECUNDARIA POR TALLER (ACORDEÓN) ---
                         for taller, df_taller_rem in df_aseg.groupby(col_taller_r):
-                            st.markdown(f"#### 🏢 {taller}")
-                            agrupadores = [c for c in [col_id_r, col_marca_r, col_modelo_r] if c in df_taller_rem.columns]
-                            
-                            for keys, df_sin_rem in df_taller_rem.groupby(agrupadores):
-                                siniestro_v = keys[agrupadores.index(col_id_r)] if col_id_r in agrupadores else "S/N"
-                                marca_v = keys[agrupadores.index(col_marca_r)] if col_marca_r in agrupadores else ""
-                                modelo_v = keys[agrupadores.index(col_modelo_r)] if col_modelo_r in agrupadores else ""
+                            with st.expander(f"🏢 {taller} | {len(df_taller_rem)} Pieza(s) lista(s)", expanded=False):
+                                agrupadores = [c for c in [col_id_r, col_marca_r, col_modelo_r] if c in df_taller_rem.columns]
                                 
-                                vehiculo_str = modelo_v if modelo_v.startswith(marca_v) and marca_v != "" else f"{marca_v} {modelo_v}".strip()
-                                
-                                with st.form(f"form_rem_{aseguradora}_{taller}_{siniestro_v}"):
-                                    st.markdown(f"**🚗 Siniestro: {siniestro_v} | {vehiculo_str}**")
-                                    piezas_a_remisionar = []
-                                    for _, row_p in df_sin_rem.iterrows():
-                                        desc_val = str(row_p.get(col_desc_r, ''))
-                                        if st.checkbox(desc_val, value=True, key=f"chk_{aseguradora}_{siniestro_v}_{desc_val}"):
-                                            piezas_a_remisionar.append(desc_val)
-                                            
-                                    if st.form_submit_button("📄 Generar Remisión PDF"):
-                                        if piezas_a_remisionar:
-                                            st.session_state['trigger_remision_manual'] = {'siniestro': siniestro_v, 'taller': taller, 'descripciones': piezas_a_remisionar}
-                                            st.rerun()
-                                        else: st.warning("Debes seleccionar al menos una pieza para generar la remisión.")
-                            st.markdown("---")
+                                for keys, df_sin_rem in df_taller_rem.groupby(agrupadores):
+                                    siniestro_v = keys[agrupadores.index(col_id_r)] if col_id_r in agrupadores else "S/N"
+                                    marca_v = keys[agrupadores.index(col_marca_r)] if col_marca_r in agrupadores else ""
+                                    modelo_v = keys[agrupadores.index(col_modelo_r)] if col_modelo_r in agrupadores else ""
+                                    
+                                    vehiculo_str = modelo_v if modelo_v.startswith(marca_v) and marca_v != "" else f"{marca_v} {modelo_v}".strip()
+                                    
+                                    with st.form(f"form_rem_{aseguradora}_{taller}_{siniestro_v}"):
+                                        st.markdown(f"**🚗 Siniestro: {siniestro_v} | {vehiculo_str}**")
+                                        piezas_a_remisionar = []
+                                        for _, row_p in df_sin_rem.iterrows():
+                                            desc_val = str(row_p.get(col_desc_r, ''))
+                                            if st.checkbox(desc_val, value=True, key=f"chk_{aseguradora}_{siniestro_v}_{desc_val}"):
+                                                piezas_a_remisionar.append(desc_val)
+                                                
+                                        if st.form_submit_button("📄 Generar Remisión PDF"):
+                                            if piezas_a_remisionar:
+                                                st.session_state['trigger_remision_manual'] = {'siniestro': siniestro_v, 'taller': taller, 'descripciones': piezas_a_remisionar}
+                                                st.rerun()
+                                            else: st.warning("Debes seleccionar al menos una pieza para generar la remisión.")
         else:
             st.warning("No hay refacciones que coincidan con los filtros actuales.")
     else:
@@ -1326,7 +1326,7 @@ elif vista_actual == "📝 Remisiones":
                         dir_v = ""
                         col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
                         if not df_catalogo.empty and col_cat_taller:
-                            match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == taller_v.upper()]
+                            match_taller = df_catalogo[df_catalogo[df_catalogo.columns[df_catalogo.columns.get_loc(col_cat_taller)]].astype(str).str.strip().str.upper() == taller_v.upper()]
                             if not match_taller.empty:
                                 col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
                                 if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()

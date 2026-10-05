@@ -383,6 +383,37 @@ if not modo_consulta:
 # ==============================================================================
 if vista_actual == "📊 Analítico":
     st.markdown("## 📊 Rendimiento de Operación")
+    
+    # -------------------------------------------------------------------------
+    # --- RESUMEN RÁPIDO EJECUTIVO ---
+    # -------------------------------------------------------------------------
+    st.markdown(f"#### 📋 Resumen de Pedidos en Proceso ({aseguradora_sel.upper()})")
+    if not df_proceso.empty:
+        # Usamos df_proceso porque ya viene limpio (sin cancelados, entregados, ni facturados)
+        total_proceso = len(df_proceso)
+        st.metric("📦 Cantidad de Partidas en Proceso", total_proceso)
+        
+        # Mapeamos exactamente las columnas clave
+        cols_resumen = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_desc, col_estatus, col_vencimiento] if c in df_proceso.columns]
+        df_resumen = df_proceso[cols_resumen].copy()
+        
+        # Renombramos para que se vea limpio en pantalla
+        df_resumen.rename(columns={
+            col_id: 'Siniestro', 
+            'Vehiculo_Info': 'Auto y Año', 
+            col_taller: 'Taller', 
+            col_desc: 'Pieza', 
+            col_estatus: 'Estatus', 
+            col_vencimiento: 'Vencimiento'
+        }, inplace=True)
+        
+        st.dataframe(df_resumen, hide_index=True, use_container_width=True)
+    else:
+        st.info(f"No hay pedidos activos en proceso para {aseguradora_sel}.")
+        
+    st.markdown("---")
+
+    # -------------------------------------------------------------------------
     st.markdown("#### 1. Estado General de Partidas en Proceso")
     if col_estatus and col_vencimiento and not df_proceso.empty:
         df_grafico = df_proceso.copy()
@@ -418,7 +449,7 @@ if vista_actual == "📊 Analítico":
                 x=0.5,
                 title_text=""
             ),
-            margin=dict(b=80) # Damos margen inferior para que no se corte el texto
+            margin=dict(b=80) 
         )
         
         col_graf, col_det = st.columns([2, 1])

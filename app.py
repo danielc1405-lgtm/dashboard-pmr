@@ -1149,10 +1149,21 @@ elif vista_actual == "📦 Inventario":
 elif vista_actual == "📝 Remisiones":
     st.markdown("### 📝 Generación de Remisiones (Envío a Taller)")
     
+    # Motor de búsqueda estricto local para evitar trampas en nombres de columnas
+    def buscar_col_local(df_obj, exactos, parciales, excluidos=["USUARIO", "ENV"]):
+        cols = df_obj.columns if hasattr(df_obj, 'columns') else df_obj
+        cols_up = [str(c).strip().upper() for c in cols]
+        for ex in exactos:
+            if ex in cols_up: return cols[cols_up.index(ex)]
+        for i, c_up in enumerate(cols_up):
+            for p in parciales:
+                if p in c_up and not any(exc in c_up for exc in excluidos): return cols[i]
+        return None
+
     # --- CORRECCIÓN LÓGICA: Leemos df_completo para traer TODAS las aseguradoras ---
-    col_estatus_univ = next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
-    col_remision_univ = next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
-    col_aseguradora = next((c for c in df_completo.columns if "ASEGURADORA" in str(c).upper()), None)
+    col_estatus_univ = buscar_col_local(df_completo, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])
+    col_remision_univ = buscar_col_local(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
+    col_aseguradora = buscar_col_local(df_completo, ["ASEGURADORA"], ["ASEGURADORA"])
 
     if col_estatus_univ and col_remision_univ and not df_completo.empty:
         estatus_permitidos = ["EN PROCESAMIENTO", "RECIBIDO"]
@@ -1163,17 +1174,17 @@ elif vista_actual == "📝 Remisiones":
         df_listos = pd.DataFrame()
 
     if not df_listos.empty:
-        col_id_r = next((c for c in df_listos.columns if "SINIESTRO" in str(c).upper()), None)
-        col_taller_r = next((c for c in df_listos.columns if "TALLER" in str(c).upper()), None)
-        col_marca_r = next((c for c in df_listos.columns if "MARCA" in str(c).upper()), None)
-        col_modelo_r = next((c for c in df_listos.columns if "MODELO" in str(c).upper()), None)
-        col_ano_r = next((c for c in df_listos.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
-        col_desc_r = next((c for c in df_listos.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+        col_id_r = buscar_col_local(df_listos, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+        col_taller_r = buscar_col_local(df_listos, ["TALLER", "CDR"], ["TALLER"])
+        col_marca_r = buscar_col_local(df_listos, ["MARCA"], ["MARCA"])
+        col_modelo_r = buscar_col_local(df_listos, ["MODELO"], ["MODELO"])
+        col_ano_r = buscar_col_local(df_listos, ["AÑO", "ANO"], ["AÑO", "ANO"])
+        col_desc_r = buscar_col_local(df_listos, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
         
         # Formatear el vehículo y la aseguradora
         def armar_vehiculo_r(r):
-            m = str(r.get(col_marca_r, '')).strip().upper()
-            mod = str(r.get(col_modelo_r, '')).strip().upper()
+            m = str(r.get(col_marca_r, '')).strip().upper() if col_marca_r else ''
+            mod = str(r.get(col_modelo_r, '')).strip().upper() if col_modelo_r else ''
             veh = mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
             if col_ano_r:
                 ano = str(r.get(col_ano_r, '')).strip()
@@ -1220,7 +1231,6 @@ elif vista_actual == "📝 Remisiones":
                     icono = "🔵" if aseguradora == "MULTI" else ("🟠" if aseguradora == "GNP" else "⚪")
                     nombre_aseg = "MULTIASISTENCIAS" if aseguradora == "MULTI" else aseguradora
                     
-                    # AQUÍ ESTÁ EL AJUSTE PARA QUE INICIEN CERRADOS (expanded=False)
                     with st.expander(f"{icono} {nombre_aseg} | {len(df_aseg)} Partida(s) lista(s) para remisionar", expanded=False):
                         
                         # --- AGRUPACIÓN SECUNDARIA POR TALLER (ACORDEÓN) ---
@@ -1261,22 +1271,22 @@ elif vista_actual == "📝 Remisiones":
     st.info("Utiliza los filtros para encontrar rápidamente el folio de remisión histórico que deseas volver a generar.")
     
     if col_remision_univ and not df_completo.empty:
-        # Extraemos las filas que sí contengan la cadena PMR en su remisión
+        # Extraemos solo filas que sí contengan la cadena PMR
         df_con_folio = df_completo[df_completo[col_remision_univ].astype(str).str.upper().str.contains("PMR", na=False)].copy()
         
         if not df_con_folio.empty:
-            col_id_reimp = next((c for c in df_con_folio.columns if "SINIESTRO" in str(c).upper()), None)
-            col_taller_reimp = next((c for c in df_con_folio.columns if "TALLER" in str(c).upper()), None)
-            col_desc_reimp = next((c for c in df_con_folio.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
-            col_cant_reimp = next((c for c in df_con_folio.columns if "CANT" in str(c).upper()), None)
-            col_marca_reimp = next((c for c in df_con_folio.columns if "MARCA" in str(c).upper()), None)
-            col_modelo_reimp = next((c for c in df_con_folio.columns if "MODELO" in str(c).upper()), None)
-            col_ano_reimp = next((c for c in df_con_folio.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
+            col_id_reimp = buscar_col_local(df_con_folio, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+            col_taller_reimp = buscar_col_local(df_con_folio, ["TALLER", "CDR"], ["TALLER"])
+            col_desc_reimp = buscar_col_local(df_con_folio, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
+            col_cant_reimp = buscar_col_local(df_con_folio, ["CANTIDAD", "CANT"], ["CANTIDAD", "CANT"])
+            col_marca_reimp = buscar_col_local(df_con_folio, ["MARCA"], ["MARCA"])
+            col_modelo_reimp = buscar_col_local(df_con_folio, ["MODELO"], ["MODELO"])
+            col_ano_reimp = buscar_col_local(df_con_folio, ["AÑO", "ANO"], ["AÑO", "ANO"])
             
-            # Generar Filtro Siniestro incluyendo el AÑO para coincidencia perfecta
-            def armar_vehiculo_filtro(row):
-                m = str(row.get(col_marca_reimp, '')).strip().upper()
-                mod = str(row.get(col_modelo_reimp, '')).strip().upper()
+            # Generar Filtro Siniestro
+            def armar_veh_reimp(row):
+                m = str(row.get(col_marca_reimp, '')).strip().upper() if col_marca_reimp else ''
+                mod = str(row.get(col_modelo_reimp, '')).strip().upper() if col_modelo_reimp else ''
                 veh = mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
                 if col_ano_reimp:
                     ano = str(row.get(col_ano_reimp, '')).strip()
@@ -1284,7 +1294,7 @@ elif vista_actual == "📝 Remisiones":
                     if ano not in ['', 'NAN', 'NONE']: veh += f" | {ano}"
                 return veh
                 
-            df_con_folio['Vehiculo_Info_Reimp'] = df_con_folio.apply(armar_vehiculo_filtro, axis=1)
+            df_con_folio['Vehiculo_Info_Reimp'] = df_con_folio.apply(armar_veh_reimp, axis=1)
             df_con_folio['Filtro_Siniestro'] = df_con_folio[col_id_reimp].astype(str).str.strip() + " | " + df_con_folio['Vehiculo_Info_Reimp']
             
             st.markdown("#### 🎛️ Filtros para Reimpresión")
@@ -1307,120 +1317,163 @@ elif vista_actual == "📝 Remisiones":
                 if siniestro_sel_reimp:
                     df_t_folio = df_t_folio[df_t_folio['Filtro_Siniestro'].isin(siniestro_sel_reimp)]
                 
-                # Extractor robusto: Escanea y divide cualquier remisión, previniendo errores si hay comas o texto extra
+                # EXTRACTOR PROFUNDO CON RAYOS X (Regex)
                 lista_cruda = df_t_folio[col_remision_univ].dropna().astype(str).tolist()
                 folios_limpios = set()
                 for val in lista_cruda:
-                    for fragmento in val.split(','):
-                        frag_strip = fragmento.strip()
-                        if "PMR" in frag_strip.upper():
-                            folios_limpios.add(frag_strip)
+                    # Busca "PMR", opcionalmente un guion/espacio, y luego números
+                    matches = re.findall(r'(?i)PMR\s*[-_]?\s*\d+', val)
+                    if matches:
+                        for m in matches:
+                            numero = re.sub(r'[^\d]', '', m).zfill(3)
+                            folios_limpios.add(f"PMR - {numero}")
+                    elif "PMR" in val.upper():
+                        # Por si solo escribieron PMR sin número
+                        folios_limpios.add(val.strip())
                 
                 folios_disponibles = sorted(list(folios_limpios), reverse=True)
-                folio_a_reimprimir = st.selectbox("📄 Seleccionar Folio a Reimprimir:", [""] + folios_disponibles)
+                opciones_folios = [""] + folios_disponibles if folios_disponibles else ["No se encontraron folios"]
+                
+                folio_a_reimprimir = st.selectbox(f"📄 Seleccionar Folio a Reimprimir ({len(folios_disponibles)}):", opciones_folios)
             
-            if folio_a_reimprimir:
+            if folio_a_reimprimir and folio_a_reimprimir != "No se encontraron folios":
                 folio_puro = folio_a_reimprimir.split(" | ")[0].strip()
-                # Extraemos todas las partidas que contengan el folio seleccionado, sin importar si hay texto a su lado
-                df_reimp = df_con_folio[df_con_folio[col_remision_univ].astype(str).str.contains(folio_puro, regex=False, na=False)].copy()
                 
-                st.markdown(f"**Piezas incluidas en el folio {folio_puro}:**")
-                cols_mostrar_reimp = [c for c in [col_id_reimp, col_taller_reimp, col_desc_reimp, col_cant_reimp, col_marca_reimp, col_modelo_reimp] if c in df_reimp.columns]
-                st.dataframe(df_reimp[cols_mostrar_reimp], hide_index=True, use_container_width=True)
+                # RECOLECTOR PROFUNDO (Para hacer match entre 'PMR - 071' y celdas que dicen 'PMR-71, PMR-72')
+                num_match = re.search(r'\d+', folio_puro)
+                num_int = int(num_match.group()) if num_match else -1
                 
-                if st.button("📄 Generar PDF de Reimpresión", type="primary"):
-                    with st.spinner("Construyendo documento histórico..."):
-                        fila_0 = df_reimp.iloc[0]
-                        siniestro_v = str(fila_0.get(col_id_reimp, '')).strip()
-                        taller_v = str(fila_0.get(col_taller_reimp, '')).strip()
-                        marca_v = str(fila_0.get(col_marca_reimp, '')).strip()
-                        modelo_v = str(fila_0.get(col_modelo_reimp, '')).strip()
-                        
-                        col_envio = next((c for c in df_reimp.columns if "FECHA ENVI" in str(c).upper() or "FECHA ENVÍ" in str(c).upper()), None)
-                        fecha_header = str(fila_0.get(col_envio, '')).strip()
-                        if not fecha_header or fecha_header in ['nan', 'None']: 
-                            tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
-                            fecha_header = datetime.datetime.now(tz_mx).strftime('%d/%b/%Y').upper()
-                        else:
-                            fecha_header = fecha_header.upper()
+                filas_coincidentes = []
+                for index, row in df_con_folio.iterrows():
+                    val_celda = str(row.get(col_remision_univ, '')).upper()
+                    if num_int != -1:
+                        numeros_en_celda = [int(x) for x in re.findall(r'\d+', val_celda) if x.isdigit()]
+                        if num_int in numeros_en_celda and "PMR" in val_celda:
+                            filas_coincidentes.append(row)
+                    else:
+                        if folio_puro.upper() in val_celda:
+                            filas_coincidentes.append(row)
                             
-                        firma_digital = f"Reimpresión solicitada por: {st.session_state.get('usuario_actual', 'Sistema')}"
-                        
-                        dir_v = ""
-                        col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
-                        if not df_catalogo.empty and col_cat_taller:
-                            match_taller = df_catalogo[df_catalogo[df_catalogo.columns[df_catalogo.columns.get_loc(col_cat_taller)]].astype(str).str.strip().str.upper() == taller_v.upper()]
-                            if not match_taller.empty:
-                                col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
-                                if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
-                        
-                        def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
-
-                        pdf = FPDF(orientation='L', unit='mm', format='A4')
-                        pdf.set_auto_page_break(auto=False, margin=0); pdf.add_page()
-                        
-                        def dibujar_bloque_reimpresion(x_offset):
-                            import os
-                            y_offset = 15
-                            if os.path.exists("logo.png"):
-                                try: pdf.image("logo.png", x_offset, y_offset - 3, 30)
-                                except: pass
+                df_reimp = pd.DataFrame(filas_coincidentes)
+                
+                if not df_reimp.empty:
+                    st.markdown(f"**Piezas incluidas en el folio {folio_puro}:**")
+                    cols_mostrar_reimp = [c for c in [col_id_reimp, col_taller_reimp, col_desc_reimp, col_cant_reimp, col_marca_reimp, col_modelo_reimp] if c in df_reimp.columns]
+                    st.dataframe(df_reimp[cols_mostrar_reimp], hide_index=True, use_container_width=True)
+                    
+                    if st.button("📄 Generar PDF de Reimpresión", type="primary"):
+                        with st.spinner("Construyendo documento histórico..."):
+                            fila_0 = df_reimp.iloc[0]
+                            siniestro_v = str(fila_0.get(col_id_reimp, '')).strip()
+                            taller_v = str(fila_0.get(col_taller_reimp, '')).strip()
+                            marca_v = str(fila_0.get(col_marca_reimp, '')).strip()
+                            modelo_v = str(fila_0.get(col_modelo_reimp, '')).strip()
                             
-                            pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
-                            pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"))
-                            pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5); pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"))
-                            pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_xy(x_offset + 32, y_offset + 9); pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"))
-                            pdf.set_xy(x_offset + 32, y_offset + 12); pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"))
-
-                            pdf.set_text_color(0, 0, 0); pdf.set_xy(x_offset + 105, y_offset); pdf.set_font("Arial", 'B', 9); pdf.cell(30, 5, "REMISION", border=1, align='C')
-                            pdf.set_text_color(200, 0, 0); pdf.set_font("Arial", 'B', 10); pdf.set_xy(x_offset + 105, y_offset + 5); pdf.cell(30, 6, folio_puro, border=1, align='C')
-                            pdf.set_text_color(100, 100, 100); pdf.set_font("Arial", '', 7); pdf.set_xy(x_offset + 105, y_offset + 12); pdf.cell(30, 4, f"FECHA: {fecha_header}", align='C')
-                            
-                            y_datos = y_offset + 22; pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
-                            pdf.set_xy(x_offset, y_datos); pdf.cell(20, 5, "TALLER", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {taller_v}")[:75], border=1)
-                            y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "DIRECCION", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}")[:85], border=1)
-                            y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "SINIESTRO", border=1, fill=True); pdf.set_font("Arial", 'B', 8); pdf.cell(45, 5, limpiar_texto(f" {siniestro_v}"), border=1)
-                            pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "VEHICULO", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}")[:35], border=1)
-
-                            y_tabla = y_datos + 10; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0); pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
-                            pdf.cell(15, 6, "CANT", border=1, fill=True, align='C'); pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C')
-
-                            y_item = y_tabla + 6; pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
-                            for _, row_rem in df_reimp.iterrows():
-                                cant_v = str(row_rem.get(col_cant_reimp, 1))
-                                if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
-                                pdf.set_xy(x_offset, y_item); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C'); pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc_reimp, '')))[:80], border=1)
-                                y_item += 5
+                            col_envio = buscar_col_local(df_reimp, ["FECHA ENVIO", "FECHA ENVÍO"], ["FECHA ENV"])
+                            fecha_header = str(fila_0.get(col_envio, '')).strip() if col_envio else ''
+                            if not fecha_header or fecha_header in ['nan', 'None']: 
+                                tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+                                fecha_header = datetime.datetime.now(tz_mx).strftime('%d/%b/%Y').upper()
+                            else:
+                                fecha_header = fecha_header.upper()
                                 
-                            pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120); pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
-
-                        dibujar_bloque_reimpresion(10)
-                        pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
-                        dibujar_bloque_reimpresion(152)
-
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                            pdf.output(tmp.name)
-                            nombre_archivo = f"Reimpresion_{folio_puro.replace(' - ', '_')}_{siniestro_v}.pdf"
-                            with open(tmp.name, "rb") as f: pdf_bytes = f.read()
+                            firma_digital = f"Reimpresión solicitada por: {st.session_state.get('usuario_actual', 'Sistema')}"
                             
-                        st.session_state['pdfs_list'] = [{'folio': folio_puro, 'siniestro': siniestro_v, 'bytes': pdf_bytes, 'nombre': nombre_archivo}]
-                        st.rerun()
+                            dir_v = ""
+                            col_cat_taller = buscar_col_local(df_catalogo, ["TALLER", "CDR"], ["TALLER"])
+                            if not df_catalogo.empty and col_cat_taller:
+                                match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == taller_v.upper()]
+                                if not match_taller.empty:
+                                    col_dir = buscar_col_local(df_catalogo, ["DIRECCION", "DIRECCIÓN"], ["DIRECCI"])
+                                    if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
+                            
+                            def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
+
+                            pdf = FPDF(orientation='L', unit='mm', format='A4')
+                            pdf.set_auto_page_break(auto=False, margin=0); pdf.add_page()
+                            
+                            def dibujar_bloque_reimpresion(x_offset):
+                                import os
+                                y_offset = 15
+                                if os.path.exists("logo.png"):
+                                    try: pdf.image("logo.png", x_offset, y_offset - 3, 30)
+                                    except: pass
+                                
+                                pdf.set_font("Arial", 'B', 10); pdf.set_text_color(0, 51, 102); pdf.set_xy(x_offset + 32, y_offset)
+                                pdf.cell(70, 5, limpiar_texto("PREMIER SERVICIOS Y REFACCIONES"))
+                                pdf.set_font("Arial", 'B', 8); pdf.set_xy(x_offset + 32, y_offset + 5); pdf.cell(70, 4, limpiar_texto("PMR SERVICIOS AUTOMOTRIZ"))
+                                pdf.set_font("Arial", '', 7); pdf.set_text_color(100, 100, 100); pdf.set_xy(x_offset + 32, y_offset + 9); pdf.cell(70, 3, limpiar_texto("ALLENDE 228, AÑO DE JUAREZ"))
+                                pdf.set_xy(x_offset + 32, y_offset + 12); pdf.cell(70, 3, limpiar_texto("SAN NICOLAS DE LOS GARZA, N.L. | PSA 211015 B30"))
+
+                                pdf.set_text_color(0, 0, 0); pdf.set_xy(x_offset + 105, y_offset); pdf.set_font("Arial", 'B', 9); pdf.cell(30, 5, "REMISION", border=1, align='C')
+                                pdf.set_text_color(200, 0, 0); pdf.set_font("Arial", 'B', 10); pdf.set_xy(x_offset + 105, y_offset + 5); pdf.cell(30, 6, folio_puro, border=1, align='C')
+                                pdf.set_text_color(100, 100, 100); pdf.set_font("Arial", '', 7); pdf.set_xy(x_offset + 105, y_offset + 12); pdf.cell(30, 4, f"FECHA: {fecha_header}", align='C')
+                                
+                                y_datos = y_offset + 22; pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
+                                pdf.set_xy(x_offset, y_datos); pdf.cell(20, 5, "TALLER", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {taller_v}")[:75], border=1)
+                                y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "DIRECCION", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(115, 5, limpiar_texto(f" {dir_v}")[:85], border=1)
+                                y_datos += 5; pdf.set_xy(x_offset, y_datos); pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "SINIESTRO", border=1, fill=True); pdf.set_font("Arial", 'B', 8); pdf.cell(45, 5, limpiar_texto(f" {siniestro_v}"), border=1)
+                                pdf.set_font("Arial", 'B', 7); pdf.cell(20, 5, "VEHICULO", border=1, fill=True); pdf.set_font("Arial", '', 7); pdf.cell(50, 5, limpiar_texto(f" {marca_v} {modelo_v}")[:35], border=1)
+
+                                y_tabla = y_datos + 10; pdf.set_xy(x_offset, y_tabla); pdf.set_fill_color(0, 0, 0); pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
+                                pdf.cell(15, 6, "CANT", border=1, fill=True, align='C'); pdf.cell(120, 6, "DESCRIPCION", border=1, fill=True, align='C')
+
+                                y_item = y_tabla + 6; pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
+                                for _, row_rem in df_reimp.iterrows():
+                                    cant_v = str(row_rem.get(col_cant_reimp, 1))
+                                    if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
+                                    pdf.set_xy(x_offset, y_item); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C'); pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc_reimp, '')))[:80], border=1)
+                                    y_item += 5
+                                    
+                                pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120); pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
+
+                            dibujar_bloque_reimpresion(10)
+                            pdf.set_draw_color(180, 180, 180); pdf.line(148.5, 10, 148.5, 200); pdf.set_draw_color(0, 0, 0)
+                            dibujar_bloque_reimpresion(152)
+
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                                pdf.output(tmp.name)
+                                nombre_archivo = f"Reimpresion_{folio_puro.replace(' - ', '_')}_{siniestro_v}.pdf"
+                                with open(tmp.name, "rb") as f: pdf_bytes = f.read()
+                                
+                            st.session_state['pdfs_list'] = [{'folio': folio_puro, 'siniestro': siniestro_v, 'bytes': pdf_bytes, 'nombre': nombre_archivo}]
+                            st.rerun()
 
 elif vista_actual == "🧾 Facturación":
     st.markdown("### 🧾 Control de Facturación a Aseguradoras")
     
-    if col_estatus and not df_trabajo.empty:
-        df_por_facturar = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper() == "RECIBIDO"].copy()
+    # Motor de búsqueda estricto local
+    def buscar_col_local_fac(df_obj, exactos, parciales, excluidos=["USUARIO", "ENV"]):
+        cols = df_obj.columns if hasattr(df_obj, 'columns') else df_obj
+        cols_up = [str(c).strip().upper() for c in cols]
+        for ex in exactos:
+            if ex in cols_up: return cols[cols_up.index(ex)]
+        for i, c_up in enumerate(cols_up):
+            for p in parciales:
+                if p in c_up and not any(exc in c_up for exc in excluidos): return cols[i]
+        return None
+        
+    col_estatus_fac = buscar_col_local_fac(df_trabajo, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])
+    
+    if col_estatus_fac and not df_trabajo.empty:
+        df_por_facturar = df_trabajo[df_trabajo[col_estatus_fac].astype(str).str.upper() == "RECIBIDO"].copy()
     else: df_por_facturar = pd.DataFrame()
 
     st.markdown(f"**📦 Total de partidas esperando facturación:** {len(df_por_facturar)}")
     
     if not df_por_facturar.empty:
+        col_id_fac = buscar_col_local_fac(df_por_facturar, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+        col_taller_fac = buscar_col_local_fac(df_por_facturar, ["TALLER", "CDR"], ["TALLER"])
+        col_cant_fac = buscar_col_local_fac(df_por_facturar, ["CANTIDAD", "CANT"], ["CANTIDAD", "CANT"])
+        col_desc_fac = buscar_col_local_fac(df_por_facturar, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
+        col_origen_fac = buscar_col_local_fac(df_por_facturar, ["ORIGEN"], ["ORIGEN"])
+        col_precio_fac = buscar_col_local_fac(df_por_facturar, ["PRECIO", "COSTO VENTA"], ["PRECIO", "COSTO"])
+        
         if permiso_edicion:
             df_por_facturar['Facturado'] = False
-            cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_facturar.columns] + ['Facturado']
+            cols_visibles = [c for c in [col_id_fac, 'Vehiculo_Info', col_taller_fac, col_cant_fac, col_desc_fac, col_origen_fac, col_precio_fac] if c in df_por_facturar.columns] + ['Facturado']
             config_fact = {}
-            if col_id in df_por_facturar.columns: config_fact[col_id] = st.column_config.TextColumn("Siniestro", disabled=True)
+            if col_id_fac in df_por_facturar.columns: config_fact[col_id_fac] = st.column_config.TextColumn("Siniestro", disabled=True)
             if 'Vehiculo_Info' in df_por_facturar.columns: config_fact['Vehiculo_Info'] = st.column_config.TextColumn("Vehículo", disabled=True)
             config_fact["Facturado"] = st.column_config.CheckboxColumn("🧾 Facturar", default=False)
             
@@ -1429,7 +1482,7 @@ elif vista_actual == "🧾 Facturación":
             for col in df_por_facturar.columns:
                 if col not in df_editado_fact.columns: df_editado_fact[col] = df_por_facturar[col].values
         else:
-            cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_facturar.columns]
+            cols_visibles = [c for c in [col_id_fac, 'Vehiculo_Info', col_taller_fac, col_cant_fac, col_desc_fac, col_origen_fac, col_precio_fac] if c in df_por_facturar.columns]
             st.dataframe(df_por_facturar[cols_visibles], hide_index=True, use_container_width=True)
     else:
         st.success("✅ Todo está al día. No hay partidas pendientes de facturación.")

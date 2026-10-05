@@ -128,7 +128,7 @@ modo_consulta = False
 
 opciones_menu = [
     "📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Talleres", 
-    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
+    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedio", "🔍 Consultas", "🛠 Cuartel General"
 ]
 
 # El parámetro vertical_alignment="center" alinea todo a la misma altura
@@ -144,7 +144,10 @@ with col_menu:
     vista_actual = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
 
 with col_aseg:
-    if vista_actual in ["📊 Analítico", "⚙️ Panel Operativo"]:
+    # Quitamos "📝 Remisiones" de esta lista para que el selector desaparezca en esa pestaña
+    # y nos permita ver todas las aseguradoras a la vez.
+    vistas_con_aseguradora = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🧾 Facturación", "🔍 Consultas"]
+    if vista_actual in vistas_con_aseguradora:
         aseguradora_sel = st.selectbox("Aseguradora", ["Multiasistencias", "GNP"], label_visibility="collapsed")
     else:
         aseguradora_sel = "MULTI" 
@@ -156,6 +159,7 @@ with col_btn_ref:
 
 with col_btn:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
+    espacio_spinner = st.empty()
     espacio_spinner = st.empty()
 
 # ==============================================================================
@@ -1145,10 +1149,16 @@ elif vista_actual == "📦 Inventario":
 elif vista_actual == "📝 Remisiones":
     st.markdown("### 📝 Generación de Remisiones (Envío a Taller)")
     
-    if col_estatus and col_remision and not df_trabajo.empty:
-        cond_proceso = df_trabajo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"
-        cond_sin_folio = df_trabajo[col_remision].astype(str).str.strip() == ""
-        df_listos = df_trabajo[cond_proceso & cond_sin_folio].copy()
+    # --- CORRECCIÓN LÓGICA: Leemos df_completo para traer TODAS las aseguradoras ---
+    col_estatus_univ = next((c for c in df_completo.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
+    col_remision_univ = next((c for c in df_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
+    col_aseguradora = next((c for c in df_completo.columns if "ASEGURADORA" in str(c).upper()), None)
+
+    if col_estatus_univ and col_remision_univ and not df_completo.empty:
+        estatus_permitidos = ["EN PROCESAMIENTO", "RECIBIDO"]
+        cond_proceso = df_completo[col_estatus_univ].astype(str).str.upper().isin(estatus_permitidos)
+        cond_sin_folio = df_completo[col_remision_univ].astype(str).str.strip() == ""
+        df_listos = df_completo[cond_proceso & cond_sin_folio].copy()
     else: 
         df_listos = pd.DataFrame()
 
@@ -1158,6 +1168,20 @@ elif vista_actual == "📝 Remisiones":
         col_marca_r = next((c for c in df_listos.columns if "MARCA" in str(c).upper()), None)
         col_modelo_r = next((c for c in df_listos.columns if "MODELO" in str(c).upper()), None)
         col_desc_r = next((c for c in df_listos.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+        
+        # Formatear el vehículo y la aseguradora
+        def armar_vehiculo_r(r):
+            m = str(r.get(col_marca_r, '')).strip().upper()
+            mod = str(r.get(col_modelo_r, '')).strip().upper()
+            return mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
+        
+        df_listos['Vehiculo_Info'] = df_listos.apply(armar_vehiculo_r, axis=1)
+        df_listos['Filtro_Siniestro'] = df_listos[col_id_r].astype(str).str.strip() + " | " + df_listos['Vehiculo_Info']
+        
+        if col_aseguradora:
+            df_listos['Aseg_Grupo'] = df_listos[col_aseguradora].astype(str).str.upper().apply(lambda x: "MULTI" if "MULTI" in x else ("GNP" if "GNP" in x else "OTRA"))
+        else:
+            df_listos['Aseg_Grupo'] = "MULTI"
         
         st.markdown("#### 🎛️ Filtros de Búsqueda para Envío")
         filtro_r1, filtro_r2, filtro_r3 = st.columns([1.5, 1.5, 1.5])
@@ -1181,35 +1205,46 @@ elif vista_actual == "📝 Remisiones":
         st.markdown("---")
 
         if not df_filtrado_rem.empty:
-            st.info("Selecciona las refacciones que deseas incluir en la nueva remisión para cada taller.")
-            for taller, df_taller_rem in df_filtrado_rem.groupby(col_taller_r):
-                with st.expander(f"🏢 {taller} | {len(df_taller_rem)} Pieza(s) lista(s)", expanded=False):
-                    agrupadores = [c for c in [col_id_r, col_marca_r, col_modelo_r] if c in df_taller_rem.columns]
+            st.info("Selecciona las refacciones que deseas incluir en la nueva remisión.")
+            
+            # --- AGRUPACIÓN PRINCIPAL POR ASEGURADORA ---
+            for aseguradora in ["MULTI", "GNP", "OTRA"]:
+                df_aseg = df_filtrado_rem[df_filtrado_rem['Aseg_Grupo'] == aseguradora]
+                if not df_aseg.empty:
+                    icono = "🔵" if aseguradora == "MULTI" else ("🟠" if aseguradora == "GNP" else "⚪")
+                    nombre_aseg = "MULTIASISTENCIAS" if aseguradora == "MULTI" else aseguradora
                     
-                    for keys, df_sin_rem in df_taller_rem.groupby(agrupadores):
-                        siniestro_v = keys[agrupadores.index(col_id_r)] if col_id_r in agrupadores else "S/N"
-                        marca_v = keys[agrupadores.index(col_marca_r)] if col_marca_r in agrupadores else ""
-                        modelo_v = keys[agrupadores.index(col_modelo_r)] if col_modelo_r in agrupadores else ""
-                        
-                        vehiculo_str = modelo_v if modelo_v.startswith(marca_v) and marca_v != "" else f"{marca_v} {modelo_v}".strip()
-                        st.markdown(f"**🚗 Siniestro: {siniestro_v} | {vehiculo_str}**")
-                        
-                        with st.form(f"form_rem_{taller}_{siniestro_v}"):
-                            piezas_a_remisionar = []
-                            for _, row_p in df_sin_rem.iterrows():
-                                desc_val = str(row_p.get(col_desc_r, ''))
-                                if st.checkbox(desc_val, value=True, key=f"chk_{siniestro_v}_{desc_val}"):
-                                    piezas_a_remisionar.append(desc_val)
-                                    
-                            if st.form_submit_button("📄 Generar Remisión PDF"):
-                                if piezas_a_remisionar:
-                                    st.session_state['trigger_remision_manual'] = {'siniestro': siniestro_v, 'taller': taller, 'descripciones': piezas_a_remisionar}
-                                    st.rerun()
-                                else: st.warning("Debes seleccionar al menos una pieza para generar la remisión.")
+                    with st.expander(f"{icono} {nombre_aseg} | {len(df_aseg)} Partida(s) lista(s) para remisionar", expanded=True):
+                        # --- AGRUPACIÓN SECUNDARIA POR TALLER ---
+                        for taller, df_taller_rem in df_aseg.groupby(col_taller_r):
+                            st.markdown(f"#### 🏢 {taller}")
+                            agrupadores = [c for c in [col_id_r, col_marca_r, col_modelo_r] if c in df_taller_rem.columns]
+                            
+                            for keys, df_sin_rem in df_taller_rem.groupby(agrupadores):
+                                siniestro_v = keys[agrupadores.index(col_id_r)] if col_id_r in agrupadores else "S/N"
+                                marca_v = keys[agrupadores.index(col_marca_r)] if col_marca_r in agrupadores else ""
+                                modelo_v = keys[agrupadores.index(col_modelo_r)] if col_modelo_r in agrupadores else ""
+                                
+                                vehiculo_str = modelo_v if modelo_v.startswith(marca_v) and marca_v != "" else f"{marca_v} {modelo_v}".strip()
+                                
+                                with st.form(f"form_rem_{aseguradora}_{taller}_{siniestro_v}"):
+                                    st.markdown(f"**🚗 Siniestro: {siniestro_v} | {vehiculo_str}**")
+                                    piezas_a_remisionar = []
+                                    for _, row_p in df_sin_rem.iterrows():
+                                        desc_val = str(row_p.get(col_desc_r, ''))
+                                        if st.checkbox(desc_val, value=True, key=f"chk_{aseguradora}_{siniestro_v}_{desc_val}"):
+                                            piezas_a_remisionar.append(desc_val)
+                                            
+                                    if st.form_submit_button("📄 Generar Remisión PDF"):
+                                        if piezas_a_remisionar:
+                                            st.session_state['trigger_remision_manual'] = {'siniestro': siniestro_v, 'taller': taller, 'descripciones': piezas_a_remisionar}
+                                            st.rerun()
+                                        else: st.warning("Debes seleccionar al menos una pieza para generar la remisión.")
+                            st.markdown("---")
         else:
             st.warning("No hay refacciones que coincidan con los filtros actuales.")
     else:
-        st.success("✅ No hay piezas marcadas listas para remisionar (EN PROCESAMIENTO sin folio asignado).")
+        st.success("✅ No hay piezas marcadas listas para remisionar (EN PROCESAMIENTO o RECIBIDO sin folio asignado).")
 
     # -------------------------------------------------------------------------
     # --- BÓVEDA DE REIMPRESIÓN ---
@@ -1218,13 +1253,26 @@ elif vista_actual == "📝 Remisiones":
     st.markdown("### 🖨️ Bóveda de Reimpresión")
     st.info("Utiliza los filtros para encontrar rápidamente el folio de remisión histórico que deseas volver a generar.")
     
-    if col_remision and not df_completo.empty:
-        df_con_folio = df_completo[df_completo[col_remision].astype(str).str.strip() != ''].copy()
-        df_con_folio = df_con_folio[df_con_folio[col_remision].astype(str).str.upper().str.contains("PMR")]
+    if col_remision_univ and not df_completo.empty:
+        df_con_folio = df_completo[df_completo[col_remision_univ].astype(str).str.strip() != ''].copy()
+        df_con_folio = df_con_folio[df_con_folio[col_remision_univ].astype(str).str.upper().str.contains("PMR")]
         
         if not df_con_folio.empty:
             col_id_reimp = next((c for c in df_con_folio.columns if "SINIESTRO" in str(c).upper()), None)
             col_taller_reimp = next((c for c in df_con_folio.columns if "TALLER" in str(c).upper()), None)
+            col_desc_reimp = next((c for c in df_con_folio.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+            col_cant_reimp = next((c for c in df_con_folio.columns if "CANT" in str(c).upper()), None)
+            col_marca_reimp = next((c for c in df_con_folio.columns if "MARCA" in str(c).upper()), None)
+            col_modelo_reimp = next((c for c in df_con_folio.columns if "MODELO" in str(c).upper()), None)
+            
+            # Generar Filtro Siniestro seguro
+            def armar_vehiculo_filtro(row):
+                m = str(row.get(col_marca_reimp, '')).strip().upper()
+                mod = str(row.get(col_modelo_reimp, '')).strip().upper()
+                return mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
+                
+            df_con_folio['Vehiculo_Info_Reimp'] = df_con_folio.apply(armar_vehiculo_filtro, axis=1)
+            df_con_folio['Filtro_Siniestro'] = df_con_folio[col_id_reimp].astype(str).str.strip() + " | " + df_con_folio['Vehiculo_Info_Reimp']
             
             st.markdown("#### 🎛️ Filtros para Reimpresión")
             f_reimp1, f_reimp2, f_reimp3 = st.columns([1.5, 1.5, 1.5])
@@ -1237,27 +1285,24 @@ elif vista_actual == "📝 Remisiones":
                 
                 siniestro_sel_reimp = st.multiselect(
                     "🚗 Siniestro / Vehículo:", 
-                    sorted(list(df_t_reimp['Filtro_Siniestro'].dropna().unique()) if 'Filtro_Siniestro' in df_t_reimp.columns else list(df_t_reimp[col_id_reimp].dropna().unique())), 
+                    sorted(list(df_t_reimp['Filtro_Siniestro'].dropna().unique())), 
                     placeholder="Todos...", 
                     key="sin_reimp"
                 )
             with f_reimp3:
                 df_t_folio = df_t_reimp.copy()
                 if siniestro_sel_reimp:
-                    if 'Filtro_Siniestro' in df_t_folio.columns:
-                        df_t_folio = df_t_folio[df_t_folio['Filtro_Siniestro'].isin(siniestro_sel_reimp)]
-                    else:
-                        df_t_folio = df_t_folio[df_t_folio[col_id_reimp].astype(str).isin(siniestro_sel_reimp)]
+                    df_t_folio = df_t_folio[df_t_folio['Filtro_Siniestro'].isin(siniestro_sel_reimp)]
                 
-                folios_disponibles = sorted(list(df_t_folio[col_remision].dropna().astype(str).unique()), reverse=True)
+                folios_disponibles = sorted(list(df_t_folio[col_remision_univ].dropna().astype(str).unique()), reverse=True)
                 folio_a_reimprimir = st.selectbox("📄 Seleccionar Folio a Reimprimir:", [""] + folios_disponibles)
             
             if folio_a_reimprimir:
                 folio_puro = folio_a_reimprimir.split(" | ")[0].strip()
-                df_reimp = df_con_folio[df_con_folio[col_remision].astype(str).str.strip() == folio_puro].copy()
+                df_reimp = df_con_folio[df_con_folio[col_remision_univ].astype(str).str.strip() == folio_puro].copy()
                 
                 st.markdown(f"**Piezas incluidas en el folio {folio_puro}:**")
-                cols_mostrar_reimp = [c for c in [col_id_reimp, col_taller_reimp, col_desc, col_cant, col_marca, col_modelo] if c in df_reimp.columns]
+                cols_mostrar_reimp = [c for c in [col_id_reimp, col_taller_reimp, col_desc_reimp, col_cant_reimp, col_marca_reimp, col_modelo_reimp] if c in df_reimp.columns]
                 st.dataframe(df_reimp[cols_mostrar_reimp], hide_index=True, use_container_width=True)
                 
                 if st.button("📄 Generar PDF de Reimpresión", type="primary"):
@@ -1265,8 +1310,8 @@ elif vista_actual == "📝 Remisiones":
                         fila_0 = df_reimp.iloc[0]
                         siniestro_v = str(fila_0.get(col_id_reimp, '')).strip()
                         taller_v = str(fila_0.get(col_taller_reimp, '')).strip()
-                        marca_v = str(fila_0.get(col_marca, '')).strip()
-                        modelo_v = str(fila_0.get(col_modelo, '')).strip()
+                        marca_v = str(fila_0.get(col_marca_reimp, '')).strip()
+                        modelo_v = str(fila_0.get(col_modelo_reimp, '')).strip()
                         
                         col_envio = next((c for c in df_reimp.columns if "FECHA ENVI" in str(c).upper() or "FECHA ENVÍ" in str(c).upper()), None)
                         fecha_header = str(fila_0.get(col_envio, '')).strip()
@@ -1281,7 +1326,7 @@ elif vista_actual == "📝 Remisiones":
                         dir_v = ""
                         col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
                         if not df_catalogo.empty and col_cat_taller:
-                            match_taller = df_catalogo[df_catalogo[df_catalogo.columns[df_catalogo.columns.get_loc(col_cat_taller)]].astype(str).str.strip().str.upper() == taller_v.upper()]
+                            match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == taller_v.upper()]
                             if not match_taller.empty:
                                 col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
                                 if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
@@ -1319,9 +1364,9 @@ elif vista_actual == "📝 Remisiones":
 
                             y_item = y_tabla + 6; pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 7)
                             for _, row_rem in df_reimp.iterrows():
-                                cant_v = str(row_rem.get(col_cant, 1))
+                                cant_v = str(row_rem.get(col_cant_reimp, 1))
                                 if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
-                                pdf.set_xy(x_offset, y_item); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C'); pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc, '')))[:80], border=1)
+                                pdf.set_xy(x_offset, y_item); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C'); pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc_reimp, '')))[:80], border=1)
                                 y_item += 5
                                 
                             pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120); pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')

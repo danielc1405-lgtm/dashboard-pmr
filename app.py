@@ -128,7 +128,7 @@ modo_consulta = False
 
 opciones_menu = [
     "📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Directorio", 
-    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "Precios Promedio", "🔍 Consultas", "🛠 Cuartel General"
+    "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🚚 Rutas", "Precios Promedio", "🔍 Consultas", "🛠 Cuartel General"
 ]
 
 # El parámetro vertical_alignment="center" alinea todo a la misma altura
@@ -145,6 +145,7 @@ with col_menu:
 
 with col_aseg:
     # Quitamos "📝 Remisiones" de esta lista para que el selector desaparezca en esa pestaña
+    # y nos permita ver todas las aseguradoras a la vez.
     vistas_con_aseguradora = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🧾 Facturación", "🔍 Consultas"]
     if vista_actual in vistas_con_aseguradora:
         aseguradora_sel = st.selectbox("Aseguradora", ["Multiasistencias", "GNP"], label_visibility="collapsed")

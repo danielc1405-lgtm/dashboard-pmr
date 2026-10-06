@@ -1396,7 +1396,7 @@ elif vista_actual == "🧾 Facturación":
 # ==============================================================================
 elif vista_actual == "🚚 Rutas":
     st.markdown("### 🚚 Despachador de Rutas (Logística Local - Nuevo León)")
-    st.info("Selecciona los destinos que visitará el operador hoy. Solo se muestran los talleres ubicados en Nuevo León.")
+    st.info("Selecciona los destinos que visitará el operador hoy. Desmarca las piezas que NO deseas enviar en este viaje.")
     
     tab_entregas, tab_recolecciones, tab_compras = st.tabs(["📦 Entregas a CDR (Locales)", "↩ Recolecciones (Locales)", "🛒 Compras físicas"])
     
@@ -1448,37 +1448,44 @@ elif vista_actual == "🚚 Rutas":
             st.error(f"Error al enviar a BD_RUTAS: {e}")
             return False
 
-    # 3. Pestaña: Entregas a Talleres (CDR) - SOLO NUEVO LEÓN
+    # 3. Pestaña: Entregas a Talleres (CDR)
     with tab_entregas:
         if col_estatus and not df_trabajo.empty:
             df_para_entrega = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().isin(["EN TRANSITO", "RECIBIDO"])].copy()
             if not df_para_entrega.empty:
-                # Filtro local
                 df_para_entrega['Estado_CDR'] = df_para_entrega[col_taller].astype(str).str.strip().str.upper().map(dict_estado_talleres).fillna("")
                 df_para_entrega = df_para_entrega[df_para_entrega['Estado_CDR'].str.contains("NUEVO LEÓN|NUEVO LEON|NL", case=False, na=False)]
                 
             if not df_para_entrega.empty:
                 for taller, df_taller in df_para_entrega.groupby(col_taller):
-                    with st.expander(f"🏢 {taller} | {len(df_taller)} piezas para entregar", expanded=False):
+                    with st.expander(f"🏢 {taller} | {len(df_taller)} piezas en sistema", expanded=False):
                         cols_ver = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_estatus, col_remision] if c in df_taller.columns]
-                        st.dataframe(df_taller[cols_ver], hide_index=True, use_container_width=True)
                         
+                        df_interactivo = df_taller[cols_ver].copy()
+                        df_interactivo.insert(0, 'Enviar Hoy', True)
+                        
+                        config_ent = {'Enviar Hoy': st.column_config.CheckboxColumn("Enviar Hoy", default=True)}
+                        for c in cols_ver: config_ent[c] = st.column_config.TextColumn(disabled=True)
+                        
+                        editado = st.data_editor(df_interactivo, column_config=config_ent, hide_index=True, use_container_width=True, key=f"ed_ent_{taller}")
                         direccion_taller = dict_dir_talleres.get(str(taller).strip().upper(), "Dirección no registrada en catálogo")
                         
-                        if st.button(f"➕ Asignar {taller} a Ruta de Hoy", key=f"btn_ent_{taller}"):
-                            with st.spinner(f"Inyectando parada en {taller}..."):
-                                col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
-                                exito = enviar_a_bd_rutas('entrega', taller, direccion_taller, df_taller, 'Vehiculo_Info', col_vin, col_desc, col_id)
-                                if exito: st.success(f"✅ ¡{taller} enviado al celular del operador!")
-            else:
-                st.success("✅ No hay piezas locales marcadas como EN TRANSITO o RECIBIDO para entregar.")
+                        if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_ent_{taller}"):
+                            seleccionadas = editado[editado['Enviar Hoy'] == True]
+                            if not seleccionadas.empty:
+                                with st.spinner(f"Inyectando parada en {taller}..."):
+                                    col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
+                                    df_a_enviar = df_taller.loc[seleccionadas.index]
+                                    exito = enviar_a_bd_rutas('entrega', taller, direccion_taller, df_a_enviar, 'Vehiculo_Info', col_vin, col_desc, col_id)
+                                    if exito: st.success(f"✅ ¡{taller} enviado al celular con {len(seleccionadas)} pieza(s)!")
+                            else: st.warning("Selecciona al menos una pieza para enviar.")
+            else: st.success("✅ No hay piezas locales marcadas como EN TRANSITO o RECIBIDO para entregar.")
 
-    # 4. Pestaña: Recolecciones - SOLO NUEVO LEÓN
+    # 4. Pestaña: Recolecciones
     with tab_recolecciones:
         if col_estatus and not df_trabajo.empty:
             df_para_recoleccion = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("RECOLEC")].copy()
             if not df_para_recoleccion.empty:
-                # Filtro local
                 df_para_recoleccion['Estado_CDR'] = df_para_recoleccion[col_taller].astype(str).str.strip().str.upper().map(dict_estado_talleres).fillna("")
                 df_para_recoleccion = df_para_recoleccion[df_para_recoleccion['Estado_CDR'].str.contains("NUEVO LEÓN|NUEVO LEON|NL", case=False, na=False)]
                 
@@ -1486,17 +1493,26 @@ elif vista_actual == "🚚 Rutas":
                 for taller, df_taller in df_para_recoleccion.groupby(col_taller):
                     with st.expander(f"🏢 {taller} | {len(df_taller)} piezas a recolectar", expanded=False):
                         cols_ver = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_estatus] if c in df_taller.columns]
-                        st.dataframe(df_taller[cols_ver], hide_index=True, use_container_width=True)
                         
+                        df_interactivo = df_taller[cols_ver].copy()
+                        df_interactivo.insert(0, 'Recoger Hoy', True)
+                        
+                        config_rec = {'Recoger Hoy': st.column_config.CheckboxColumn("Recoger Hoy", default=True)}
+                        for c in cols_ver: config_rec[c] = st.column_config.TextColumn(disabled=True)
+                        
+                        editado = st.data_editor(df_interactivo, column_config=config_rec, hide_index=True, use_container_width=True, key=f"ed_rec_{taller}")
                         direccion_taller = dict_dir_talleres.get(str(taller).strip().upper(), "Dirección no registrada en catálogo")
                         
-                        if st.button(f"➕ Asignar Recolección en {taller}", key=f"btn_rec_{taller}"):
-                            with st.spinner("Enviando a BD_RUTAS..."):
-                                col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
-                                exito = enviar_a_bd_rutas('recoleccion', taller, direccion_taller, df_taller, 'Vehiculo_Info', col_vin, col_desc, col_id)
-                                if exito: st.success(f"✅ ¡Recolección en {taller} asignada!")
-            else:
-                st.success("✅ No hay recolecciones locales pendientes en la base.")
+                        if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_rec_{taller}"):
+                            seleccionadas = editado[editado['Recoger Hoy'] == True]
+                            if not seleccionadas.empty:
+                                with st.spinner("Enviando a BD_RUTAS..."):
+                                    col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
+                                    df_a_enviar = df_taller.loc[seleccionadas.index]
+                                    exito = enviar_a_bd_rutas('recoleccion', taller, direccion_taller, df_a_enviar, 'Vehiculo_Info', col_vin, col_desc, col_id)
+                                    if exito: st.success(f"✅ ¡Recolección en {taller} asignada con {len(seleccionadas)} pieza(s)!")
+                            else: st.warning("Selecciona al menos una pieza para recolectar.")
+            else: st.success("✅ No hay recolecciones locales pendientes en la base.")
                 
     # 5. Pestaña: Compras Físicas en Proveedores
     with tab_compras:
@@ -1504,20 +1520,29 @@ elif vista_actual == "🚚 Rutas":
             df_c_pend = df_compras[df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['FALSE', 'NO', '0', 'FALSO', ''])].copy()
             if not df_c_pend.empty:
                 for prov, df_prov in df_c_pend.groupby('Proveedor'):
-                    if str(prov).strip() and str(prov).lower() != 'nan':
-                        with st.expander(f"🚚 {prov} | {len(df_prov)} compras pendientes", expanded=False):
-                            st.dataframe(df_prov[['Siniestro', 'Vehículo', 'Descripción Pieza', 'Condición Pago']], hide_index=True, use_container_width=True)
+                    prov_limpio = str(prov).strip()
+                    if prov_limpio and prov_limpio.lower() != 'nan':
+                        with st.expander(f"🚚 {prov_limpio} | {len(df_prov)} compras pendientes", expanded=False):
+                            cols_ver = ['Siniestro', 'Vehículo', 'Descripción Pieza', 'Condición Pago']
+                            df_interactivo = df_prov[cols_ver].copy()
+                            df_interactivo.insert(0, 'Recolectar Hoy', True)
                             
-                            direccion_prov = dict_dir_provs.get(str(prov).strip().upper(), "Dirección no registrada en directorio")
+                            config_comp = {'Recolectar Hoy': st.column_config.CheckboxColumn("Recolectar Hoy", default=True)}
+                            for c in cols_ver: config_comp[c] = st.column_config.TextColumn(disabled=True)
                             
-                            if st.button(f"➕ Asignar Visita a {prov}", key=f"btn_comp_{prov}"):
-                                with st.spinner(f"Asignando visita a {prov}..."):
-                                    exito = enviar_a_bd_rutas('cotizacion', prov, direccion_prov, df_prov, 'Vehículo', None, 'Descripción Pieza', 'Siniestro')
-                                    if exito: st.success(f"✅ ¡Visita a {prov} enviada al celular del operador!")
-            else:
-                st.success("✅ Todas las compras han sido marcadas como recibidas.")
-        else:
-            st.warning("La base de datos de compras está vacía.")
+                            editado = st.data_editor(df_interactivo, column_config=config_comp, hide_index=True, use_container_width=True, key=f"ed_comp_{prov_limpio}")
+                            direccion_prov = dict_dir_provs.get(prov_limpio.upper(), "Dirección no registrada en directorio")
+                            
+                            if st.button(f"➕ Enviar Selección a {prov_limpio}", key=f"btn_comp_{prov_limpio}"):
+                                seleccionadas = editado[editado['Recolectar Hoy'] == True]
+                                if not seleccionadas.empty:
+                                    with st.spinner(f"Asignando visita a {prov_limpio}..."):
+                                        df_a_enviar = df_prov.loc[seleccionadas.index]
+                                        exito = enviar_a_bd_rutas('cotizacion', prov_limpio, direccion_prov, df_a_enviar, 'Vehículo', None, 'Descripción Pieza', 'Siniestro')
+                                        if exito: st.success(f"✅ ¡Visita a {prov_limpio} enviada al celular con {len(seleccionadas)} pieza(s)!")
+                                else: st.warning("Selecciona al menos una pieza para recolectar.")
+            else: st.success("✅ Todas las compras han sido marcadas como recibidas.")
+        else: st.warning("La base de datos de compras está vacía.")
 
 elif vista_actual == "Precios Promedio":
     st.markdown("## 💲 Precios Promedio Históricos")
@@ -1525,8 +1550,6 @@ elif vista_actual == "Precios Promedio":
 
     if not df_completo.empty:
         df_cot = df_completo.copy()
-        
-        # Mapeo dinámico de columnas
         col_marca_cot = next((c for c in df_cot.columns if "MARCA" in str(c).upper()), None)
         col_modelo_cot = next((c for c in df_cot.columns if "MODELO" in str(c).upper()), None)
         col_ano_cot = next((c for c in df_cot.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
@@ -1545,10 +1568,8 @@ elif vista_actual == "Precios Promedio":
                 lista_marcas = ["Todas"] + sorted(df_cot[col_marca_cot].dropna().astype(str).unique().tolist())
                 filtro_marca = st.selectbox("Marca", options=lista_marcas)
             with col_mo:
-                if filtro_marca != "Todas":
-                    lista_modelos = ["Todos"] + sorted(df_cot[df_cot[col_marca_cot] == filtro_marca][col_modelo_cot].dropna().astype(str).unique().tolist())
-                else:
-                    lista_modelos = ["Todos"] + sorted(df_cot[col_modelo_cot].dropna().astype(str).unique().tolist())
+                if filtro_marca != "Todas": lista_modelos = ["Todos"] + sorted(df_cot[df_cot[col_marca_cot] == filtro_marca][col_modelo_cot].dropna().astype(str).unique().tolist())
+                else: lista_modelos = ["Todos"] + sorted(df_cot[col_modelo_cot].dropna().astype(str).unique().tolist())
                 filtro_modelo = st.selectbox("Modelo", options=lista_modelos)
             with col_a:
                 lista_anios = ["Todos"] + sorted(df_cot[col_ano_cot].dropna().astype(str).unique().tolist(), reverse=True)
@@ -1576,12 +1597,9 @@ elif vista_actual == "Precios Promedio":
                 st.caption(f"**Resultados encontrados:** {len(df_cot)} piezas históricas")
                 columnas_vista = [c for c in [col_marca_cot, col_modelo_cot, col_ano_cot, col_desc_cot, col_origen_cot, col_precio_cot] if c]
                 st.dataframe(df_cot[columnas_vista].sort_values(by=col_precio_cot, ascending=False), use_container_width=True, hide_index=True)
-            else:
-                st.info("No hay registros históricos que coincidan con estos filtros.")
-        else:
-            st.warning("Faltan columnas clave (Marca, Modelo, Descripción o Precio) en la base maestra.")
-    else:
-        st.warning("La base de datos está vacía.")
+            else: st.info("No hay registros históricos que coincidan con estos filtros.")
+        else: st.warning("Faltan columnas clave (Marca, Modelo, Descripción o Precio) en la base maestra.")
+    else: st.warning("La base de datos está vacía.")
 
 elif vista_actual == "🔍 Consultas":
     st.markdown("## 🔍 Consulta Global y Filtros de Búsqueda")
@@ -1598,8 +1616,7 @@ elif vista_actual == "🔍 Consultas":
                 if texto_busqueda:
                     opciones_filtradas = [s for s in siniestros_unicos if texto_busqueda.upper() in s.upper()]
                     sin_sel = st.selectbox("Selecciona el Siniestro:", [""] + opciones_filtradas)
-                else:
-                    sin_sel = ""
+                else: sin_sel = ""
                 
                 if sin_sel:
                     df_edit = df_trabajo[df_trabajo[col_id].astype(str) == sin_sel].copy()
@@ -1668,12 +1685,8 @@ elif vista_actual == "🔍 Consultas":
                                 if celdas_a_actualizar_uni: ws_uni.update_cells(celdas_a_actualizar_uni, value_input_option='USER_ENTERED')
                                 if celdas_a_actualizar_hist: ws_hist.update_cells(celdas_a_actualizar_hist, value_input_option='USER_ENTERED')
                                 
-                                st.cache_data.clear()
-                                st.success("⚡ ¡Cambios aplicados con éxito en la matriz!")
-                                time.sleep(1.5)
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"Error al guardar: {e}")
+                                st.cache_data.clear(); st.success("⚡ ¡Cambios aplicados con éxito en la matriz!"); time.sleep(1.5); st.rerun()
+                            except Exception as e: st.error(f"Error al guardar: {e}")
     st.markdown("---")
     
     if not df_completo.empty:
@@ -1700,14 +1713,11 @@ elif vista_actual == "🔍 Consultas":
             
             df_busqueda['Vehiculo_Temp'] = df_busqueda.apply(armar_vehiculo_filtro, axis=1)
             df_busqueda['Filtro_Siniestro'] = df_busqueda[col_id_univ].astype(str).str.strip() + " | " + df_busqueda['Vehiculo_Temp']
-        else:
-            df_busqueda['Filtro_Siniestro'] = df_busqueda[col_id_univ] if col_id_univ else "S/N"
+        else: df_busqueda['Filtro_Siniestro'] = df_busqueda[col_id_univ] if col_id_univ else "S/N"
             
         filtro_col1, filtro_col2, filtro_col3, filtro_col4 = st.columns(4)
-        with filtro_col1: 
-            taller_sel = st.multiselect("🏢 Taller:", sorted([str(t) for t in df_busqueda[col_taller_univ].dropna().unique() if str(t).strip() != '']) if col_taller_univ else [], placeholder="Todos...")
-        with filtro_col2: 
-            estatus_sel = st.multiselect("📊 Estatus:", sorted([str(e) for e in df_busqueda[col_estatus_univ].dropna().unique() if str(e).strip() != '']) if col_estatus_univ else [], placeholder="Todos...")
+        with filtro_col1: taller_sel = st.multiselect("🏢 Taller:", sorted([str(t) for t in df_busqueda[col_taller_univ].dropna().unique() if str(t).strip() != '']) if col_taller_univ else [], placeholder="Todos...")
+        with filtro_col2: estatus_sel = st.multiselect("📊 Estatus:", sorted([str(e) for e in df_busqueda[col_estatus_univ].dropna().unique() if str(e).strip() != '']) if col_estatus_univ else [], placeholder="Todos...")
         with filtro_col3:
             df_temp = df_busqueda.copy()
             if taller_sel: df_temp = df_temp[df_temp[col_taller_univ].astype(str).isin(taller_sel)]
@@ -1721,31 +1731,20 @@ elif vista_actual == "🔍 Consultas":
         df_filtrado_global = df_busqueda.copy()
         filtros_activos = False
         
-        if taller_sel: 
-            df_filtrado_global = df_filtrado_global[df_filtrado_global[col_taller_univ].astype(str).isin(taller_sel)]
-            filtros_activos = True
-        if estatus_sel: 
-            df_filtrado_global = df_filtrado_global[df_filtrado_global[col_estatus_univ].astype(str).isin(estatus_sel)]
-            filtros_activos = True
-        if siniestro_sel: 
-            df_filtrado_global = df_filtrado_global[df_filtrado_global['Filtro_Siniestro'].isin(siniestro_sel)]
-            filtros_activos = True
-        if desc_sel: 
-            df_filtrado_global = df_filtrado_global[df_filtrado_global[col_desc_univ].astype(str).isin(desc_sel)]
-            filtros_activos = True
+        if taller_sel: df_filtrado_global = df_filtrado_global[df_filtrado_global[col_taller_univ].astype(str).isin(taller_sel)]; filtros_activos = True
+        if estatus_sel: df_filtrado_global = df_filtrado_global[df_filtrado_global[col_estatus_univ].astype(str).isin(estatus_sel)]; filtros_activos = True
+        if siniestro_sel: df_filtrado_global = df_filtrado_global[df_filtrado_global['Filtro_Siniestro'].isin(siniestro_sel)]; filtros_activos = True
+        if desc_sel: df_filtrado_global = df_filtrado_global[df_filtrado_global[col_desc_univ].astype(str).isin(desc_sel)]; filtros_activos = True
 
         st.markdown("---")
         
         if filtros_activos:
             st.markdown(f"**✅ {len(df_filtrado_global)} registro(s) encontrado(s)** con los filtros seleccionados.")
-            
             col_aseg_exp = next((c for c in df_filtrado_global.columns if "ASEGURADORA" in str(c).upper()), None)
             col_vin_exp = next((c for c in df_filtrado_global.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
             col_cant_exp = next((c for c in df_filtrado_global.columns if "CANT" in str(c).upper()), None)
             
-            if not col_cant_exp:
-                df_filtrado_global['Cant.'] = "1"
-                col_cant_exp = 'Cant.'
+            if not col_cant_exp: df_filtrado_global['Cant.'] = "1"; col_cant_exp = 'Cant.'
 
             col_precio_exp = next((c for c in df_filtrado_global.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
             col_asig_exp = next((c for c in df_filtrado_global.columns if "ASIGNACI" in str(c).upper()), None)
@@ -1778,10 +1777,8 @@ elif vista_actual == "🔍 Consultas":
                             st.dataframe(df_comp_disp, hide_index=True, use_container_width=True)
                         else: st.info("No existen registros de compras o pagos capturados para estos siniestros.")
                 else: st.warning("La base de datos de compras no está disponible.")
-        else:
-            st.info("👆 Selecciona al menos un filtro en la parte superior para mostrar resultados.")
-    else:
-        st.warning("La base de datos está vacía.")
+        else: st.info("👆 Selecciona al menos un filtro en la parte superior para mostrar resultados.")
+    else: st.warning("La base de datos está vacía.")
 
 elif vista_actual == "🛠️ Cuartel General":
     st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")

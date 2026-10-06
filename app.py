@@ -1395,18 +1395,23 @@ elif vista_actual == "🧾 Facturación":
 # === [BLOQUE 9: VISTAS - RUTAS, PRECIOS, CONSULTAS GLOBALES Y CUARTEL GENERAL] ===
 # ==============================================================================
 elif vista_actual == "🚚 Rutas":
-    st.markdown("### 🚚 Despachador de Rutas (Logística)")
-    st.info("Selecciona los destinos que visitará el operador hoy. Al asignar, se enviarán directamente a la aplicación móvil.")
+    st.markdown("### 🚚 Despachador de Rutas (Logística Local - Nuevo León)")
+    st.info("Selecciona los destinos que visitará el operador hoy. Solo se muestran los talleres ubicados en Nuevo León.")
     
-    tab_entregas, tab_recolecciones, tab_compras = st.tabs(["📦 Entregas a CDR", "↩ Recolecciones", "🛒 Compras físicas"])
+    tab_entregas, tab_recolecciones, tab_compras = st.tabs(["📦 Entregas a CDR (Locales)", "↩ Recolecciones (Locales)", "🛒 Compras físicas"])
     
-    # 1. Mapeo de direcciones desde los catálogos
+    # 1. Mapeo de direcciones y estados desde los catálogos
     dict_dir_talleres = {}
+    dict_estado_talleres = {}
+    
     if not df_catalogo.empty:
         col_cat_tall = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
         col_cat_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
-        if col_cat_tall and col_cat_dir:
-            dict_dir_talleres = dict(zip(df_catalogo[col_cat_tall].astype(str).str.strip().str.upper(), df_catalogo[col_cat_dir].astype(str).str.strip().str.upper()))
+        col_cat_est = next((c for c in df_catalogo.columns if "ESTADO" in str(c).upper()), None)
+        
+        if col_cat_tall:
+            if col_cat_dir: dict_dir_talleres = dict(zip(df_catalogo[col_cat_tall].astype(str).str.strip().str.upper(), df_catalogo[col_cat_dir].astype(str).str.strip().str.upper()))
+            if col_cat_est: dict_estado_talleres = dict(zip(df_catalogo[col_cat_tall].astype(str).str.strip().str.upper(), df_catalogo[col_cat_est].astype(str).str.strip().str.upper()))
             
     dict_dir_provs = {}
     if not df_proveedores.empty:
@@ -1418,7 +1423,6 @@ elif vista_actual == "🚚 Rutas":
             doc = init_connection()
             ws_rutas = doc.worksheet("BD_RUTAS")
             
-            # Extraer y agrupar datos de las piezas seleccionadas
             vehiculos_unicos = df_partidas[col_vehiculo].dropna().unique().tolist() if col_vehiculo in df_partidas.columns else ["S/D"]
             vins_unicos = df_partidas[col_vin].dropna().unique().tolist() if col_vin and col_vin in df_partidas.columns else [""]
             siniestros_unicos = df_partidas[col_siniestro].dropna().unique().tolist() if col_siniestro in df_partidas.columns else ["S/D"]
@@ -1444,12 +1448,15 @@ elif vista_actual == "🚚 Rutas":
             st.error(f"Error al enviar a BD_RUTAS: {e}")
             return False
 
-    # 3. Pestaña: Entregas a Talleres (CDR)
+    # 3. Pestaña: Entregas a Talleres (CDR) - SOLO NUEVO LEÓN
     with tab_entregas:
         if col_estatus and not df_trabajo.empty:
-            # Filtramos piezas listas para enviar o en tránsito
             df_para_entrega = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().isin(["EN TRANSITO", "RECIBIDO"])].copy()
-            
+            if not df_para_entrega.empty:
+                # Filtro local
+                df_para_entrega['Estado_CDR'] = df_para_entrega[col_taller].astype(str).str.strip().str.upper().map(dict_estado_talleres).fillna("")
+                df_para_entrega = df_para_entrega[df_para_entrega['Estado_CDR'].str.contains("NUEVO LEÓN|NUEVO LEON|NL", case=False, na=False)]
+                
             if not df_para_entrega.empty:
                 for taller, df_taller in df_para_entrega.groupby(col_taller):
                     with st.expander(f"🏢 {taller} | {len(df_taller)} piezas para entregar", expanded=False):
@@ -1462,15 +1469,19 @@ elif vista_actual == "🚚 Rutas":
                             with st.spinner(f"Inyectando parada en {taller}..."):
                                 col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
                                 exito = enviar_a_bd_rutas('entrega', taller, direccion_taller, df_taller, 'Vehiculo_Info', col_vin, col_desc, col_id)
-                                if exito:
-                                    st.success(f"✅ ¡{taller} enviado al celular del operador!")
+                                if exito: st.success(f"✅ ¡{taller} enviado al celular del operador!")
             else:
-                st.success("✅ No hay piezas marcadas como EN TRANSITO o RECIBIDO para entregar.")
+                st.success("✅ No hay piezas locales marcadas como EN TRANSITO o RECIBIDO para entregar.")
 
-    # 4. Pestaña: Recolecciones (Logística Inversa)
+    # 4. Pestaña: Recolecciones - SOLO NUEVO LEÓN
     with tab_recolecciones:
         if col_estatus and not df_trabajo.empty:
             df_para_recoleccion = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("RECOLEC")].copy()
+            if not df_para_recoleccion.empty:
+                # Filtro local
+                df_para_recoleccion['Estado_CDR'] = df_para_recoleccion[col_taller].astype(str).str.strip().str.upper().map(dict_estado_talleres).fillna("")
+                df_para_recoleccion = df_para_recoleccion[df_para_recoleccion['Estado_CDR'].str.contains("NUEVO LEÓN|NUEVO LEON|NL", case=False, na=False)]
+                
             if not df_para_recoleccion.empty:
                 for taller, df_taller in df_para_recoleccion.groupby(col_taller):
                     with st.expander(f"🏢 {taller} | {len(df_taller)} piezas a recolectar", expanded=False):
@@ -1483,10 +1494,9 @@ elif vista_actual == "🚚 Rutas":
                             with st.spinner("Enviando a BD_RUTAS..."):
                                 col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
                                 exito = enviar_a_bd_rutas('recoleccion', taller, direccion_taller, df_taller, 'Vehiculo_Info', col_vin, col_desc, col_id)
-                                if exito:
-                                    st.success(f"✅ ¡Recolección en {taller} asignada!")
+                                if exito: st.success(f"✅ ¡Recolección en {taller} asignada!")
             else:
-                st.success("✅ No hay recolecciones pendientes en la base.")
+                st.success("✅ No hay recolecciones locales pendientes en la base.")
                 
     # 5. Pestaña: Compras Físicas en Proveedores
     with tab_compras:
@@ -1503,8 +1513,7 @@ elif vista_actual == "🚚 Rutas":
                             if st.button(f"➕ Asignar Visita a {prov}", key=f"btn_comp_{prov}"):
                                 with st.spinner(f"Asignando visita a {prov}..."):
                                     exito = enviar_a_bd_rutas('cotizacion', prov, direccion_prov, df_prov, 'Vehículo', None, 'Descripción Pieza', 'Siniestro')
-                                    if exito:
-                                        st.success(f"✅ ¡Visita a {prov} enviada al celular del operador!")
+                                    if exito: st.success(f"✅ ¡Visita a {prov} enviada al celular del operador!")
             else:
                 st.success("✅ Todas las compras han sido marcadas como recibidas.")
         else:
@@ -1526,7 +1535,6 @@ elif vista_actual == "Precios Promedio":
         col_precio_cot = next((c for c in df_cot.columns if "PRECIO" in str(c).upper() or "COSTO" in str(c).upper()), None)
 
         if col_marca_cot and col_precio_cot and col_desc_cot:
-            # Limpieza crucial: Quitar símbolos y convertir a número para las métricas matemáticas
             df_cot['Precio_Num'] = df_cot[col_precio_cot].astype(str).replace({r'\$': '', r',': '', r' ': ''}, regex=True)
             df_cot['Precio_Num'] = pd.to_numeric(df_cot['Precio_Num'], errors='coerce')
             df_cot = df_cot.dropna(subset=['Precio_Num']) 
@@ -1548,15 +1556,10 @@ elif vista_actual == "Precios Promedio":
             with col_p:
                 filtro_pieza = st.text_input("Buscar Pieza (Ej. Salpicadera)", value="")
 
-            # Motor de filtrado
-            if filtro_marca != "Todas":
-                df_cot = df_cot[df_cot[col_marca_cot] == filtro_marca]
-            if filtro_modelo != "Todos":
-                df_cot = df_cot[df_cot[col_modelo_cot] == filtro_modelo]
-            if filtro_anio != "Todos":
-                df_cot = df_cot[df_cot[col_ano_cot].astype(str) == filtro_anio]
-            if filtro_pieza.strip() != "":
-                df_cot = df_cot[df_cot[col_desc_cot].astype(str).str.contains(filtro_pieza.strip(), case=False, na=False)]
+            if filtro_marca != "Todas": df_cot = df_cot[df_cot[col_marca_cot] == filtro_marca]
+            if filtro_modelo != "Todos": df_cot = df_cot[df_cot[col_modelo_cot] == filtro_modelo]
+            if filtro_anio != "Todos": df_cot = df_cot[df_cot[col_ano_cot].astype(str) == filtro_anio]
+            if filtro_pieza.strip() != "": df_cot = df_cot[df_cot[col_desc_cot].astype(str).str.contains(filtro_pieza.strip(), case=False, na=False)]
 
             st.divider()
 
@@ -1571,7 +1574,6 @@ elif vista_actual == "Precios Promedio":
                 kpi3.metric("📉 Precio Mínimo", f"${precio_min:,.2f}" if pd.notnull(precio_min) else "$0.00")
 
                 st.caption(f"**Resultados encontrados:** {len(df_cot)} piezas históricas")
-
                 columnas_vista = [c for c in [col_marca_cot, col_modelo_cot, col_ano_cot, col_desc_cot, col_origen_cot, col_precio_cot] if c]
                 st.dataframe(df_cot[columnas_vista].sort_values(by=col_precio_cot, ascending=False), use_container_width=True, hide_index=True)
             else:
@@ -1585,9 +1587,6 @@ elif vista_actual == "🔍 Consultas":
     st.markdown("## 🔍 Consulta Global y Filtros de Búsqueda")
     st.info("Utiliza los filtros desplegables para encontrar refacciones y siniestros específicos en el histórico.")
     
-    # ==============================================================================
-    # 👑 EDITOR MAESTRO (MODO DIOS) - BUSCADOR ESTRICTO
-    # ==============================================================================
     if not modo_consulta and permiso_edicion and "Daniel" in st.session_state.get("usuario_actual", ""):
         with st.expander("👑 Editor Maestro (Modo Dios)", expanded=False):
             st.info("Control total: Edita cualquier dato histórico o activo. Para logística inversa, selecciona 'EN PROCESO DE REEMBOLSO' en la columna de Estatus.")
@@ -1791,8 +1790,8 @@ elif vista_actual == "🛠️ Cuartel General":
     with col_c1:
         st.markdown("#### 🚧 Próximas Implementaciones (Mapa de Ruta):")
         st.checkbox("Ruta de Escape Local (Offline DB)", value=False, disabled=True)
-        st.checkbox("Pantalla de Ruta Local para Don Dionicio", value=False, disabled=True)
-        st.caption("_Nota: Estas funciones se encuentran bloqueadas temporalmente ya que representan la bitácora de desarrollo a futuro._")
+        st.checkbox("Pantalla de Ruta Local para Don Dionicio", value=True, disabled=True)
+        st.caption("_Nota: Aplicación móvil en producción._")
     with col_c2:
         st.markdown("#### 🐛 Reporte de Bugs e Ideas (Checklist Activo):")
         try:

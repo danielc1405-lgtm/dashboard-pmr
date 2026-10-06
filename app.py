@@ -1392,8 +1392,124 @@ elif vista_actual == "🧾 Facturación":
         st.success("✅ Todo está al día. No hay partidas pendientes de facturación.")
 
 # ==============================================================================
-# === [BLOQUE 9: VISTAS - PRECIOS, CONSULTAS GLOBALES Y CUARTEL GENERAL] ===
+# === [BLOQUE 9: VISTAS - RUTAS, PRECIOS, CONSULTAS GLOBALES Y CUARTEL GENERAL] ===
 # ==============================================================================
+elif vista_actual == "🚚 Rutas":
+    st.markdown("### 🚚 Despachador de Rutas (Logística)")
+    st.info("Selecciona los destinos que visitará el operador hoy. Al asignar, se enviarán directamente a la aplicación móvil.")
+    
+    tab_entregas, tab_recolecciones, tab_compras = st.tabs(["📦 Entregas a CDR", "↩ Recolecciones", "🛒 Compras físicas"])
+    
+    # 1. Mapeo de direcciones desde los catálogos
+    dict_dir_talleres = {}
+    if not df_catalogo.empty:
+        col_cat_tall = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
+        col_cat_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
+        if col_cat_tall and col_cat_dir:
+            dict_dir_talleres = dict(zip(df_catalogo[col_cat_tall].astype(str).str.strip().str.upper(), df_catalogo[col_cat_dir].astype(str).str.strip().str.upper()))
+            
+    dict_dir_provs = {}
+    if not df_proveedores.empty:
+        dict_dir_provs = dict(zip(df_proveedores['Proveedor'].astype(str).str.strip().str.upper(), df_proveedores['Dirección'].astype(str).str.strip().str.upper()))
+
+    # 2. Función de inyección a BD_RUTAS
+    def enviar_a_bd_rutas(tipo, lugar, direccion, df_partidas, col_vehiculo, col_vin, col_pieza, col_siniestro):
+        try:
+            doc = init_connection()
+            ws_rutas = doc.worksheet("BD_RUTAS")
+            
+            # Extraer y agrupar datos de las piezas seleccionadas
+            vehiculos_unicos = df_partidas[col_vehiculo].dropna().unique().tolist() if col_vehiculo in df_partidas.columns else ["S/D"]
+            vins_unicos = df_partidas[col_vin].dropna().unique().tolist() if col_vin and col_vin in df_partidas.columns else [""]
+            siniestros_unicos = df_partidas[col_siniestro].dropna().unique().tolist() if col_siniestro in df_partidas.columns else ["S/D"]
+            
+            str_vehiculos = " | ".join([str(v) for v in vehiculos_unicos])
+            str_vins = " | ".join([str(v) for v in vins_unicos if str(v).strip()])
+            str_siniestros = ", ".join([str(s) for s in siniestros_unicos])
+            str_piezas = "|".join(df_partidas[col_pieza].dropna().astype(str).tolist())
+            
+            tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+            ahora = datetime.datetime.now(tz_mx)
+            id_ruta = "R-" + ahora.strftime("%Y%m%d%H%M%S")
+            fecha_hoy = ahora.strftime("%d/%b/%Y").upper()
+            
+            fila = [
+                id_ruta, fecha_hoy, tipo, lugar.upper(), direccion.upper(), 
+                str_vehiculos, str_vins, str_piezas, str_siniestros, 
+                "Pendiente", "", ""
+            ]
+            ws_rutas.append_row(fila, value_input_option='USER_ENTERED')
+            return True
+        except Exception as e:
+            st.error(f"Error al enviar a BD_RUTAS: {e}")
+            return False
+
+    # 3. Pestaña: Entregas a Talleres (CDR)
+    with tab_entregas:
+        if col_estatus and not df_trabajo.empty:
+            # Filtramos piezas listas para enviar o en tránsito
+            df_para_entrega = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().isin(["EN TRANSITO", "RECIBIDO"])].copy()
+            
+            if not df_para_entrega.empty:
+                for taller, df_taller in df_para_entrega.groupby(col_taller):
+                    with st.expander(f"🏢 {taller} | {len(df_taller)} piezas para entregar", expanded=False):
+                        cols_ver = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_estatus, col_remision] if c in df_taller.columns]
+                        st.dataframe(df_taller[cols_ver], hide_index=True, use_container_width=True)
+                        
+                        direccion_taller = dict_dir_talleres.get(str(taller).strip().upper(), "Dirección no registrada en catálogo")
+                        
+                        if st.button(f"➕ Asignar {taller} a Ruta de Hoy", key=f"btn_ent_{taller}"):
+                            with st.spinner(f"Inyectando parada en {taller}..."):
+                                col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
+                                exito = enviar_a_bd_rutas('entrega', taller, direccion_taller, df_taller, 'Vehiculo_Info', col_vin, col_desc, col_id)
+                                if exito:
+                                    st.success(f"✅ ¡{taller} enviado al celular del operador!")
+            else:
+                st.success("✅ No hay piezas marcadas como EN TRANSITO o RECIBIDO para entregar.")
+
+    # 4. Pestaña: Recolecciones (Logística Inversa)
+    with tab_recolecciones:
+        if col_estatus and not df_trabajo.empty:
+            df_para_recoleccion = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("RECOLEC")].copy()
+            if not df_para_recoleccion.empty:
+                for taller, df_taller in df_para_recoleccion.groupby(col_taller):
+                    with st.expander(f"🏢 {taller} | {len(df_taller)} piezas a recolectar", expanded=False):
+                        cols_ver = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_estatus] if c in df_taller.columns]
+                        st.dataframe(df_taller[cols_ver], hide_index=True, use_container_width=True)
+                        
+                        direccion_taller = dict_dir_talleres.get(str(taller).strip().upper(), "Dirección no registrada en catálogo")
+                        
+                        if st.button(f"➕ Asignar Recolección en {taller}", key=f"btn_rec_{taller}"):
+                            with st.spinner("Enviando a BD_RUTAS..."):
+                                col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
+                                exito = enviar_a_bd_rutas('recoleccion', taller, direccion_taller, df_taller, 'Vehiculo_Info', col_vin, col_desc, col_id)
+                                if exito:
+                                    st.success(f"✅ ¡Recolección en {taller} asignada!")
+            else:
+                st.success("✅ No hay recolecciones pendientes en la base.")
+                
+    # 5. Pestaña: Compras Físicas en Proveedores
+    with tab_compras:
+        if not df_compras.empty:
+            df_c_pend = df_compras[df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['FALSE', 'NO', '0', 'FALSO', ''])].copy()
+            if not df_c_pend.empty:
+                for prov, df_prov in df_c_pend.groupby('Proveedor'):
+                    if str(prov).strip() and str(prov).lower() != 'nan':
+                        with st.expander(f"🚚 {prov} | {len(df_prov)} compras pendientes", expanded=False):
+                            st.dataframe(df_prov[['Siniestro', 'Vehículo', 'Descripción Pieza', 'Condición Pago']], hide_index=True, use_container_width=True)
+                            
+                            direccion_prov = dict_dir_provs.get(str(prov).strip().upper(), "Dirección no registrada en directorio")
+                            
+                            if st.button(f"➕ Asignar Visita a {prov}", key=f"btn_comp_{prov}"):
+                                with st.spinner(f"Asignando visita a {prov}..."):
+                                    exito = enviar_a_bd_rutas('cotizacion', prov, direccion_prov, df_prov, 'Vehículo', None, 'Descripción Pieza', 'Siniestro')
+                                    if exito:
+                                        st.success(f"✅ ¡Visita a {prov} enviada al celular del operador!")
+            else:
+                st.success("✅ Todas las compras han sido marcadas como recibidas.")
+        else:
+            st.warning("La base de datos de compras está vacía.")
+
 elif vista_actual == "Precios Promedio":
     st.markdown("## 💲 Precios Promedio Históricos")
     st.info("Filtra el historial de la base unificada para obtener referencias de precios (Promedio, Máximo y Mínimo) para nuevas cotizaciones.")

@@ -1415,34 +1415,35 @@ elif vista_actual == "🚚 Rutas":
     if not df_proveedores.empty:
         dict_dir_provs = dict(zip(df_proveedores['Proveedor'].astype(str).str.strip().str.upper(), df_proveedores['Dirección'].astype(str).str.strip().str.upper()))
 
-    # 2. Función de inyección
+    # 2. Función de inyección MULTI-FILA
     def enviar_a_bd_rutas(tipo, lugar, direccion, df_partidas, col_vehiculo, col_vin, col_pieza, col_siniestro, notas_op=""):
         try:
             doc = init_connection()
             ws_rutas = doc.worksheet("BD_RUTAS")
-            
-            vehiculos_unicos = df_partidas[col_vehiculo].dropna().unique().tolist() if col_vehiculo and col_vehiculo in df_partidas.columns else ["S/D"]
-            vins_unicos = df_partidas[col_vin].dropna().unique().tolist() if col_vin and col_vin in df_partidas.columns else [""]
-            siniestros_unicos = df_partidas[col_siniestro].dropna().unique().tolist() if col_siniestro and col_siniestro in df_partidas.columns else ["S/D"]
-            
-            str_vehiculos = " | ".join([str(v) for v in vehiculos_unicos])
-            str_vins = " | ".join([str(v) for v in vins_unicos if str(v).strip()])
-            str_siniestros = ", ".join([str(s) for s in siniestros_unicos])
-            str_piezas = "|".join(df_partidas[col_pieza].dropna().astype(str).tolist())
             
             tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
             ahora = datetime.datetime.now(tz_mx)
             id_ruta = "R-" + ahora.strftime("%Y%m%d%H%M%S")
             fecha_hoy = ahora.strftime("%d/%b/%Y").upper()
             
-            fila = [id_ruta, fecha_hoy, tipo, lugar.upper(), direccion.upper(), str_vehiculos, str_vins, str_piezas, str_siniestros, "Pendiente", "", "", notas_op]
-            ws_rutas.append_row(fila, value_input_option='USER_ENTERED')
+            filas_a_insertar = []
+            for _, row in df_partidas.iterrows():
+                v_veh = str(row.get(col_vehiculo, 'S/D')).strip() if col_vehiculo and pd.notna(row.get(col_vehiculo)) else "S/D"
+                v_vin = str(row.get(col_vin, '')).strip() if col_vin and pd.notna(row.get(col_vin)) else ""
+                v_sin = str(row.get(col_siniestro, 'S/D')).strip() if col_siniestro and pd.notna(row.get(col_siniestro)) else "S/D"
+                v_pza = str(row.get(col_pieza, 'S/D')).strip() if col_pieza and pd.notna(row.get(col_pieza)) else "S/D"
+                
+                fila = [id_ruta, fecha_hoy, tipo, lugar.upper(), direccion.upper(), v_veh, v_vin, v_pza, v_sin, "Pendiente", "", "", notas_op]
+                filas_a_insertar.append(fila)
+                
+            if filas_a_insertar:
+                ws_rutas.append_rows(filas_a_insertar, value_input_option='USER_ENTERED')
             return True
         except Exception as e:
             st.error(f"Error al enviar a BD_RUTAS: {e}")
             return False
 
-    # 3. Pestaña: Entregas (TIPO: entrega)
+    # 3. Pestaña: Entregas
     with tab_entregas:
         if col_estatus and not df_trabajo.empty:
             df_para_entrega = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().isin(["EN TRANSITO", "RECIBIDO"])].copy()
@@ -1461,8 +1462,7 @@ elif vista_actual == "🚚 Rutas":
                         
                         editado = st.data_editor(df_interactivo, column_config=config_ent, hide_index=True, use_container_width=True, key=f"ed_ent_{taller}")
                         direccion_taller = dict_dir_talleres.get(str(taller).strip().upper(), "Dirección no registrada en catálogo")
-                        
-                        nota_op_ent = st.text_input("📝 Instrucciones / Notas para el operador:", key=f"nota_ent_{taller}", placeholder="Ej. Dejar con el jefe de taller")
+                        nota_op_ent = st.text_input("📝 Instrucciones / Notas:", key=f"nota_ent_{taller}", placeholder="Ej. Dejar con el jefe de taller")
                         
                         if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_ent_{taller}"):
                             seleccionadas = editado[editado['Enviar Hoy'] == True]
@@ -1471,13 +1471,11 @@ elif vista_actual == "🚚 Rutas":
                                     col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
                                     df_a_enviar = df_taller.loc[seleccionadas.index]
                                     exito = enviar_a_bd_rutas('entrega', taller, direccion_taller, df_a_enviar, 'Vehiculo_Info', col_vin, col_desc, col_id, notas_op=nota_op_ent)
-                                    if exito: 
-                                        st.success(f"✅ ¡Enviado al celular con {len(seleccionadas)} pieza(s)!")
-                                        time.sleep(1.5); st.rerun()
+                                    if exito: st.success(f"✅ ¡Enviado con {len(seleccionadas)} pieza(s)!"); time.sleep(1.5); st.rerun()
                             else: st.warning("Selecciona al menos una pieza.")
             else: st.success("✅ No hay entregas locales pendientes.")
 
-    # 4. Pestaña: Recolecciones (TIPO: recoleccion)
+    # 4. Pestaña: Recolecciones
     with tab_recolecciones:
         if col_estatus and not df_trabajo.empty:
             df_para_recoleccion = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("RECOLEC")].copy()
@@ -1496,8 +1494,7 @@ elif vista_actual == "🚚 Rutas":
                         
                         editado = st.data_editor(df_interactivo, column_config=config_rec, hide_index=True, use_container_width=True, key=f"ed_rec_{taller}")
                         direccion_taller = dict_dir_talleres.get(str(taller).strip().upper(), "Dirección no registrada en catálogo")
-                        
-                        nota_op_rec = st.text_input("📝 Instrucciones / Notas para el operador:", key=f"nota_rec_{taller}", placeholder="Ej. Validar que la pieza venga completa")
+                        nota_op_rec = st.text_input("📝 Instrucciones / Notas:", key=f"nota_rec_{taller}", placeholder="Ej. Validar que venga completa")
                         
                         if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_rec_{taller}"):
                             seleccionadas = editado[editado['Recoger Hoy'] == True]
@@ -1506,13 +1503,11 @@ elif vista_actual == "🚚 Rutas":
                                     col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
                                     df_a_enviar = df_taller.loc[seleccionadas.index]
                                     exito = enviar_a_bd_rutas('recoleccion', taller, direccion_taller, df_a_enviar, 'Vehiculo_Info', col_vin, col_desc, col_id, notas_op=nota_op_rec)
-                                    if exito: 
-                                        st.success(f"✅ ¡Recolección asignada!")
-                                        time.sleep(1.5); st.rerun()
+                                    if exito: st.success(f"✅ ¡Recolección asignada!"); time.sleep(1.5); st.rerun()
                             else: st.warning("Selecciona al menos una pieza.")
             else: st.success("✅ No hay recolecciones locales pendientes.")
                 
-    # 5. Pestaña: Compras Físicas (TIPO: compra)
+    # 5. Pestaña: Compras Físicas
     with tab_compras:
         if not df_compras.empty:
             df_c_pend = df_compras[df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['FALSE', 'NO', '0', 'FALSO', ''])].copy()
@@ -1529,77 +1524,49 @@ elif vista_actual == "🚚 Rutas":
                             
                             editado = st.data_editor(df_interactivo, column_config=config_comp, hide_index=True, use_container_width=True, key=f"ed_comp_{prov_limpio}")
                             direccion_prov = dict_dir_provs.get(prov_limpio.upper(), "Dirección no registrada")
-                            
-                            nota_op_comp = st.text_input("📝 Instrucciones / Notas para el operador:", key=f"nota_comp_{prov_limpio}", placeholder="Ej. Llevar cheque y verificar factura")
+                            nota_op_comp = st.text_input("📝 Instrucciones / Notas:", key=f"nota_comp_{prov_limpio}", placeholder="Ej. Llevar cheque")
                             
                             if st.button(f"➕ Enviar Selección a {prov_limpio}", key=f"btn_comp_{prov_limpio}"):
                                 seleccionadas = editado[editado['Recolectar Hoy'] == True]
                                 if not seleccionadas.empty:
-                                    with st.spinner(f"Asignando visita a {prov_limpio}..."):
+                                    with st.spinner(f"Asignando visita..."):
                                         df_a_enviar = df_prov.loc[seleccionadas.index]
                                         exito = enviar_a_bd_rutas('compra', prov_limpio, direccion_prov, df_a_enviar, 'Vehículo', None, 'Descripción Pieza', 'Siniestro', notas_op=nota_op_comp)
-                                        if exito: 
-                                            st.success(f"✅ ¡Visita enviada al celular!")
-                                            time.sleep(1.5); st.rerun()
+                                        if exito: st.success(f"✅ ¡Visita enviada al celular!"); time.sleep(1.5); st.rerun()
                                 else: st.warning("Selecciona al menos una pieza.")
             else: st.success("✅ Todas las compras han sido marcadas como recibidas.")
         else: st.warning("La base de datos de compras está vacía.")
         
-    # 6. Pestaña: Cotizaciones Manuales Inteligentes (TIPO: cotizacion)
+    # 6. Pestaña: Cotizaciones Manuales
     with tab_cotizacion:
         st.markdown("#### 🔎 Asignar Cotización / Visita Especial")
-        st.caption("Usa esta pestaña para enviar al operador a revisar o cotizar piezas a Yonkes o Agencias que no están formalizadas en una compra.")
-        
-        # Jalar la lista real de proveedores de la base de datos
+        st.caption("Usa esta pestaña para enviar al operador a revisar piezas sin una orden de compra formal.")
         lista_provs_cot = sorted([str(p).strip().upper() for p in df_proveedores['Proveedor'].dropna().unique() if str(p).strip() != ''])
         
         col_cot1, col_cot2 = st.columns(2)
         with col_cot1:
             sel_lugar = st.selectbox("Lugar (Yonke / Agencia) *", [""] + lista_provs_cot + ["➕ [ ESCRIBIR OTRO NUEVO... ]"])
-            if sel_lugar == "➕ [ ESCRIBIR OTRO NUEVO... ]":
-                lugar_cot = st.text_input("Escribe el nombre del nuevo lugar *")
-            else:
-                lugar_cot = sel_lugar
-
+            lugar_cot = st.text_input("Escribe el nombre del nuevo lugar *") if sel_lugar == "➕ [ ESCRIBIR OTRO NUEVO... ]" else sel_lugar
         with col_cot2:
             dir_sugerida = dict_dir_provs.get(lugar_cot, "") if lugar_cot else ""
-            dir_cot = st.text_input("Dirección o Zona", value=dir_sugerida, help="Si eliges un proveedor registrado, la dirección se autocompleta.")
+            dir_cot = st.text_input("Dirección o Zona", value=dir_sugerida)
             
         col_cot3, col_cot4 = st.columns(2)
         vehiculo_cot = col_cot3.text_input("Vehículo *")
         vin_cot = col_cot4.text_input("VIN / Número de Serie")
         
         st.markdown("**Piezas y Números de Parte a buscar ***")
-        st.caption("Agrega tantas filas como necesites arrastrando desde abajo o escribiendo en la última celda vacía.")
-        
-        # Tabla dinámica infinita para agregar piezas
         df_p_vacia = pd.DataFrame([{"Descripción o Número de Parte": ""}])
         df_piezas_cot = st.data_editor(df_p_vacia, num_rows="dynamic", use_container_width=True, key="tabla_cotizaciones", hide_index=True)
-        
-        nota_cot = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Solo tomar fotos, NO comprar todavía", key="nota_cot_manual")
+        nota_cot = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Solo tomar fotos", key="nota_cot_manual")
         
         if st.button("➕ Enviar Cotización a la Ruta", type="primary", use_container_width=True):
-            # Filtramos para no enviar filas en blanco de la tabla
             piezas_validas = df_piezas_cot[df_piezas_cot["Descripción o Número de Parte"].str.strip() != ""]
-            
             if lugar_cot.strip() and vehiculo_cot.strip() and not piezas_validas.empty:
-                df_cot_list = []
-                for _, row_p in piezas_validas.iterrows():
-                    df_cot_list.append({
-                        'Vehiculo_C': vehiculo_cot.upper(),
-                        'VIN_C': vin_cot.upper(),
-                        'Pieza_C': row_p['Descripción o Número de Parte'].upper(),
-                        'Sin_C': 'COTIZACIÓN'
-                    })
-                df_cot_envio = pd.DataFrame(df_cot_list)
-                
-                with st.spinner("Enviando cotización..."):
-                    exito = enviar_a_bd_rutas('cotizacion', lugar_cot, dir_cot, df_cot_envio, 'Vehiculo_C', 'VIN_C', 'Pieza_C', 'Sin_C', notas_op=nota_cot)
-                    if exito: 
-                        st.success(f"✅ ¡Cotización en {lugar_cot} con {len(piezas_validas)} partida(s) enviada a la ruta!")
-                        time.sleep(1.5); st.rerun()
-            else: 
-                st.error("❌ Completa los campos obligatorios: Lugar, Vehículo y asegúrate de agregar al menos una Pieza válida en la tabla.")
+                df_cot_list = [{'Vehiculo_C': vehiculo_cot.upper(), 'VIN_C': vin_cot.upper(), 'Pieza_C': row_p['Descripción o Número de Parte'].upper(), 'Sin_C': 'COTIZACIÓN'} for _, row_p in piezas_validas.iterrows()]
+                exito = enviar_a_bd_rutas('cotizacion', lugar_cot, dir_cot, pd.DataFrame(df_cot_list), 'Vehiculo_C', 'VIN_C', 'Pieza_C', 'Sin_C', notas_op=nota_cot)
+                if exito: st.success(f"✅ ¡Cotización en {lugar_cot} enviada!"); time.sleep(1.5); st.rerun()
+            else: st.error("❌ Completa Lugar, Vehículo y agrega al menos una Pieza.")
 
 elif vista_actual == "Precios Promedio":
     st.markdown("## 💲 Precios Promedio Históricos")

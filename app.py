@@ -1435,7 +1435,6 @@ elif vista_actual == "🚚 Rutas":
             id_ruta = "R-" + ahora.strftime("%Y%m%d%H%M%S")
             fecha_hoy = ahora.strftime("%d/%b/%Y").upper()
             
-            # Ahora pasamos 'notas_op' como columna 13
             fila = [id_ruta, fecha_hoy, tipo, lugar.upper(), direccion.upper(), str_vehiculos, str_vins, str_piezas, str_siniestros, "Pendiente", "", "", notas_op]
             ws_rutas.append_row(fila, value_input_option='USER_ENTERED')
             return True
@@ -1472,7 +1471,9 @@ elif vista_actual == "🚚 Rutas":
                                     col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
                                     df_a_enviar = df_taller.loc[seleccionadas.index]
                                     exito = enviar_a_bd_rutas('entrega', taller, direccion_taller, df_a_enviar, 'Vehiculo_Info', col_vin, col_desc, col_id, notas_op=nota_op_ent)
-                                    if exito: st.success(f"✅ ¡Enviado al celular con {len(seleccionadas)} pieza(s)!")
+                                    if exito: 
+                                        st.success(f"✅ ¡Enviado al celular con {len(seleccionadas)} pieza(s)!")
+                                        time.sleep(1.5); st.rerun()
                             else: st.warning("Selecciona al menos una pieza.")
             else: st.success("✅ No hay entregas locales pendientes.")
 
@@ -1505,7 +1506,9 @@ elif vista_actual == "🚚 Rutas":
                                     col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
                                     df_a_enviar = df_taller.loc[seleccionadas.index]
                                     exito = enviar_a_bd_rutas('recoleccion', taller, direccion_taller, df_a_enviar, 'Vehiculo_Info', col_vin, col_desc, col_id, notas_op=nota_op_rec)
-                                    if exito: st.success(f"✅ ¡Recolección asignada!")
+                                    if exito: 
+                                        st.success(f"✅ ¡Recolección asignada!")
+                                        time.sleep(1.5); st.rerun()
                             else: st.warning("Selecciona al menos una pieza.")
             else: st.success("✅ No hay recolecciones locales pendientes.")
                 
@@ -1535,31 +1538,68 @@ elif vista_actual == "🚚 Rutas":
                                     with st.spinner(f"Asignando visita a {prov_limpio}..."):
                                         df_a_enviar = df_prov.loc[seleccionadas.index]
                                         exito = enviar_a_bd_rutas('compra', prov_limpio, direccion_prov, df_a_enviar, 'Vehículo', None, 'Descripción Pieza', 'Siniestro', notas_op=nota_op_comp)
-                                        if exito: st.success(f"✅ ¡Visita enviada al celular!")
+                                        if exito: 
+                                            st.success(f"✅ ¡Visita enviada al celular!")
+                                            time.sleep(1.5); st.rerun()
                                 else: st.warning("Selecciona al menos una pieza.")
             else: st.success("✅ Todas las compras han sido marcadas como recibidas.")
         else: st.warning("La base de datos de compras está vacía.")
         
-    # 6. Pestaña: Cotizaciones Manuales (TIPO: cotizacion)
+    # 6. Pestaña: Cotizaciones Manuales Inteligentes (TIPO: cotizacion)
     with tab_cotizacion:
         st.markdown("#### 🔎 Asignar Cotización / Visita Especial")
         st.caption("Usa esta pestaña para enviar al operador a revisar o cotizar piezas a Yonkes o Agencias que no están formalizadas en una compra.")
-        with st.form("form_nueva_cotizacion", clear_on_submit=True):
-            col_cot1, col_cot2 = st.columns(2)
-            lugar_cot = col_cot1.text_input("Lugar (Yonke / Agencia) *")
-            dir_cot = col_cot2.text_input("Dirección o Zona")
-            col_cot3, col_cot4 = st.columns(2)
-            vehiculo_cot = col_cot3.text_input("Vehículo *")
-            vin_cot = col_cot4.text_input("VIN / Número de Serie")
-            piezas_cot = st.text_input("Piezas y Números de Parte a buscar *", placeholder="Ej. Faro Izquierdo (92101-3X000) | Espejo Derecho")
-            nota_cot = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Solo tomar fotos, NO comprar todavía")
+        
+        # Jalar la lista real de proveedores de la base de datos
+        lista_provs_cot = sorted([str(p).strip().upper() for p in df_proveedores['Proveedor'].dropna().unique() if str(p).strip() != ''])
+        
+        col_cot1, col_cot2 = st.columns(2)
+        with col_cot1:
+            sel_lugar = st.selectbox("Lugar (Yonke / Agencia) *", [""] + lista_provs_cot + ["➕ [ ESCRIBIR OTRO NUEVO... ]"])
+            if sel_lugar == "➕ [ ESCRIBIR OTRO NUEVO... ]":
+                lugar_cot = st.text_input("Escribe el nombre del nuevo lugar *")
+            else:
+                lugar_cot = sel_lugar
+
+        with col_cot2:
+            dir_sugerida = dict_dir_provs.get(lugar_cot, "") if lugar_cot else ""
+            dir_cot = st.text_input("Dirección o Zona", value=dir_sugerida, help="Si eliges un proveedor registrado, la dirección se autocompleta.")
             
-            if st.form_submit_button("➕ Enviar Cotización a la Ruta"):
-                if lugar_cot.strip() and vehiculo_cot.strip() and piezas_cot.strip():
-                    df_cot = pd.DataFrame([{'Vehiculo_C': vehiculo_cot.upper(), 'VIN_C': vin_cot.upper(), 'Pieza_C': piezas_cot.upper(), 'Sin_C': 'COTIZACIÓN'}])
-                    exito = enviar_a_bd_rutas('cotizacion', lugar_cot, dir_cot, df_cot, 'Vehiculo_C', 'VIN_C', 'Pieza_C', 'Sin_C', notas_op=nota_cot)
-                    if exito: st.success(f"✅ ¡Cotización en {lugar_cot} enviada a la ruta!")
-                else: st.error("❌ Completa los campos obligatorios: Lugar, Vehículo y Piezas.")
+        col_cot3, col_cot4 = st.columns(2)
+        vehiculo_cot = col_cot3.text_input("Vehículo *")
+        vin_cot = col_cot4.text_input("VIN / Número de Serie")
+        
+        st.markdown("**Piezas y Números de Parte a buscar ***")
+        st.caption("Agrega tantas filas como necesites arrastrando desde abajo o escribiendo en la última celda vacía.")
+        
+        # Tabla dinámica infinita para agregar piezas
+        df_p_vacia = pd.DataFrame([{"Descripción o Número de Parte": ""}])
+        df_piezas_cot = st.data_editor(df_p_vacia, num_rows="dynamic", use_container_width=True, key="tabla_cotizaciones", hide_index=True)
+        
+        nota_cot = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Solo tomar fotos, NO comprar todavía", key="nota_cot_manual")
+        
+        if st.button("➕ Enviar Cotización a la Ruta", type="primary", use_container_width=True):
+            # Filtramos para no enviar filas en blanco de la tabla
+            piezas_validas = df_piezas_cot[df_piezas_cot["Descripción o Número de Parte"].str.strip() != ""]
+            
+            if lugar_cot.strip() and vehiculo_cot.strip() and not piezas_validas.empty:
+                df_cot_list = []
+                for _, row_p in piezas_validas.iterrows():
+                    df_cot_list.append({
+                        'Vehiculo_C': vehiculo_cot.upper(),
+                        'VIN_C': vin_cot.upper(),
+                        'Pieza_C': row_p['Descripción o Número de Parte'].upper(),
+                        'Sin_C': 'COTIZACIÓN'
+                    })
+                df_cot_envio = pd.DataFrame(df_cot_list)
+                
+                with st.spinner("Enviando cotización..."):
+                    exito = enviar_a_bd_rutas('cotizacion', lugar_cot, dir_cot, df_cot_envio, 'Vehiculo_C', 'VIN_C', 'Pieza_C', 'Sin_C', notas_op=nota_cot)
+                    if exito: 
+                        st.success(f"✅ ¡Cotización en {lugar_cot} con {len(piezas_validas)} partida(s) enviada a la ruta!")
+                        time.sleep(1.5); st.rerun()
+            else: 
+                st.error("❌ Completa los campos obligatorios: Lugar, Vehículo y asegúrate de agregar al menos una Pieza válida en la tabla.")
 
 elif vista_actual == "Precios Promedio":
     st.markdown("## 💲 Precios Promedio Históricos")

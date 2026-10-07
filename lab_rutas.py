@@ -88,7 +88,6 @@ if not st.session_state['autenticado']:
 # 2. MOTOR DE DESCARGA DESDE LA NUBE
 # ==========================================
 def formatear_vin(vin):
-    """Separa el VIN en bloques de 4 caracteres para facilitar lectura."""
     v = str(vin).replace(" ", "").upper()
     if not v or v in ['NAN', 'S/D', 'NONE']: return "S/D"
     return " ".join([v[i:i+4] for i in range(0, len(v), 4)])
@@ -100,32 +99,48 @@ def cargar_rutas_nube():
         datos = ws_rutas.get_all_values()
         
         if len(datos) > 1:
-            headers = [str(h).strip() for h in datos[0]]
+            headers = [str(h).strip().upper() for h in datos[0]]
             df = pd.DataFrame(datos[1:], columns=headers)
-            df_pendientes = df[df['Estatus_App'].astype(str).str.upper() == 'PENDIENTE'].copy()
             
-            rutas_descargadas = []
+            # Buscar columnas dinámicamente para evitar fallos si cambian los títulos
+            col_estatus = next((c for c in df.columns if 'ESTATUS' in c), None)
+            col_id_ruta = next((c for c in df.columns if 'ID_RUTA' in c), None)
+            col_piezas = next((c for c in df.columns if 'PIEZA' in c), None)
+            col_siniestros = next((c for c in df.columns if 'SINIESTRO' in c), None)
+            col_notas = next((c for c in df.columns if 'NOTA' in c), None)
+            
+            if not col_estatus or not col_id_ruta:
+                st.error("Error: Faltan columnas clave (ID_Ruta o Estatus) en BD_RUTAS.")
+                return False
+
+            df_pendientes = df[df[col_estatus].astype(str).str.upper() == 'PENDIENTE'].copy()
+            
+            rutas_dict = {}
             for _, row in df_pendientes.iterrows():
-                texto_piezas = str(row.get('Piezas', 'Pieza general'))
-                lista_piezas = [{"desc": p.strip(), "np": ""} for p in texto_piezas.split("|") if p.strip()]
-                texto_siniestros = str(row.get('Siniestros', ''))
-                lista_siniestros = [s.strip() for s in texto_siniestros.split(",") if s.strip()]
-                nota_op = str(row.get('Notas', '')).strip() if 'Notas' in df.columns else ""
+                id_ruta = str(row.get(col_id_ruta, ''))
+                pieza_actual = str(row.get(col_piezas, '')) if col_piezas else ''
+                sin_actual = str(row.get(col_siniestros, '')) if col_siniestros else ''
                 
-                parada = {
-                    "id": str(row.get('ID_Ruta', '')),
-                    "tipo": str(row.get('Tipo_Operacion', 'entrega')).lower(),
-                    "lugar": str(row.get('Lugar', 'S/D')),
-                    "direccion": str(row.get('Direccion', 'S/D')),
-                    "vehiculo": str(row.get('Vehiculo', '')),
-                    "serie": formatear_vin(row.get('VIN', '')),
-                    "piezas": lista_piezas,
-                    "siniestros": lista_siniestros,
-                    "notas": nota_op
-                }
-                rutas_descargadas.append(parada)
+                # Agrupamos las filas en la misma tarjeta usando el ID_Ruta
+                if id_ruta not in rutas_dict:
+                    rutas_dict[id_ruta] = {
+                        "id": id_ruta,
+                        "tipo": str(row.get('TIPO_OPERACION', 'entrega')).lower(),
+                        "lugar": str(row.get('LUGAR', 'S/D')),
+                        "direccion": str(row.get('DIRECCION', 'S/D')),
+                        "vehiculo": str(row.get('VEHICULO', 'S/D')),
+                        "serie": formatear_vin(row.get('VIN', '')),
+                        "piezas": [{"desc": pieza_actual, "np": ""}] if pieza_actual and pieza_actual not in ['S/D', ''] else [],
+                        "siniestros": [sin_actual] if sin_actual and sin_actual not in ['S/D', ''] else [],
+                        "notas": str(row.get(col_notas, '')) if col_notas else ""
+                    }
+                else:
+                    if pieza_actual and pieza_actual not in ['S/D', '']: 
+                        rutas_dict[id_ruta]["piezas"].append({"desc": pieza_actual, "np": ""})
+                    if sin_actual and sin_actual not in ['S/D', ''] and sin_actual not in rutas_dict[id_ruta]["siniestros"]:
+                        rutas_dict[id_ruta]["siniestros"].append(sin_actual)
             
-            st.session_state['ruta_hoy'] = rutas_descargadas
+            st.session_state['ruta_hoy'] = list(rutas_dict.values())
             return True
     except Exception as e:
         st.error(f"Error conectando a BD_RUTAS: {e}")
@@ -164,11 +179,10 @@ else:
 
     for i, parada in enumerate(st.session_state['ruta_hoy']):
         
-        # 4 COLORES TOTALMENTE INDEPENDIENTES
         if parada['tipo'] == 'entrega': icono = "🟢"
         elif parada['tipo'] == 'recoleccion': icono = "🟠"
         elif parada['tipo'] == 'compra': icono = "🟣"
-        else: icono = "🔵" # cotizacion
+        else: icono = "🔵"
             
         titulo_tarjeta = f"{icono} #{i+1} - {parada['lugar']}"
         
@@ -179,11 +193,8 @@ else:
             st.markdown("---")
             st.caption(f"📍 **Dirección:** {parada['direccion']}")
             
-            # --- NOTAS PARA EL OPERADOR ---
-            if parada['notas']:
-                st.markdown(f'<div class="nota-operador">⚠️ <b>INSTRUCCIÓN:</b> {parada["notas"]}</div>', unsafe_allow_html=True)
+            if parada['notas']: st.markdown(f'<div class="nota-operador">⚠️ <b>INSTRUCCIÓN:</b> {parada["notas"]}</div>', unsafe_allow_html=True)
             
-            # --- 4 VISTAS ESPECÍFICAS ---
             if parada['tipo'] == 'entrega':
                 st.markdown(f"**Siniestro / Pedido:** {', '.join(parada['siniestros'])}")
                 st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}</div>', unsafe_allow_html=True)
@@ -206,42 +217,45 @@ else:
                 st.markdown(f"**🔎 Piezas a Cotizar ({len(parada['piezas'])}):**")
                 for p in parada['piezas']: st.markdown(f"- {p['desc']}")
                 
-            # --- BOTONES Y GPS ---
             st.markdown("<br>", unsafe_allow_html=True)
-            col1, col2 = st.columns(2)
-            with col1:
-                query_str = f"{parada['lugar']} {parada['direccion']}".replace(' ', '+')
-                st.link_button("🧭 Navegar", f"https://www.google.com/maps/search/?api=1&query={query_str}", use_container_width=True)
-                
-            with col2:
-                texto_btn = "✅ Check-In" if parada['tipo'] == 'entrega' else "🔄 Check-In"
-                if st.button(texto_btn, key=f"btn_check_{parada['id']}", type="primary", use_container_width=True):
-                    st.session_state['parada_activa'] = parada['id']
-
-            if st.session_state.get('parada_activa') == parada['id']:
-                st.info("👇 Presiona el botón para capturar GPS y confirmar.")
-                ubicacion = streamlit_geolocation()
+            
+            # --- CHECK-IN OPTIMIZADO (Paso 1 y 2 directos) ---
+            if st.session_state.get('parada_activa') != parada['id']:
+                col1, col2 = st.columns(2)
+                with col1:
+                    query_str = f"{parada['lugar']} {parada['direccion']}".replace(' ', '+')
+                    st.link_button("🧭 Navegar", f"https://www.google.com/maps/search/?api=1&query={query_str}", use_container_width=True)
+                with col2:
+                    if st.button("📍 Iniciar Check-In", key=f"btn_check_{parada['id']}", type="primary", use_container_width=True):
+                        st.session_state['parada_activa'] = parada['id']
+                        st.rerun()
+            else:
+                st.markdown("**1. Captura tu ubicación (Se requiere una sola vez)**")
+                ubicacion = streamlit_geolocation(key=f"geo_{parada['id']}")
                 
                 if ubicacion and ubicacion.get('latitude'):
-                    lat = ubicacion['latitude']
-                    lon = ubicacion['longitude']
-                    st.success(f"📍 Ubicación capturada.")
+                    lat, lon = ubicacion['latitude'], ubicacion['longitude']
+                    st.success("📍 Coordenadas capturadas con éxito.")
                     
-                    if st.button("Confirmar Operación", key=f"save_{parada['id']}", use_container_width=True):
-                        with st.spinner("Subiendo datos a la nube..."):
+                    if st.button("✅ 2. Terminar Tarea y Subir a Nube", key=f"save_{parada['id']}", type="primary", use_container_width=True):
+                        with st.spinner("Actualizando todas las piezas en la nube..."):
                             try:
                                 doc = init_connection()
                                 ws_rutas = doc.worksheet("BD_RUTAS")
                                 datos = ws_rutas.get_all_values()
-                                fila_encontrada = next((idx + 1 for idx, r in enumerate(datos) if r[0] == parada['id']), None)
                                 
-                                if fila_encontrada:
-                                    ws_rutas.update_cell(fila_encontrada, 10, "Completado")
-                                    ws_rutas.update_cell(fila_encontrada, 11, str(lat))
-                                    ws_rutas.update_cell(fila_encontrada, 12, str(lon))
-                                    st.success(f"¡Estatus actualizado en la nube! ✅")
+                                # Actualiza masivamente TODAS las filas que compartan el ID de ruta
+                                filas_a_actualizar = [idx + 1 for idx, r in enumerate(datos) if r[0] == parada['id']]
+                                if filas_a_actualizar:
+                                    celdas_cambio = []
+                                    for fila_idx in filas_a_actualizar:
+                                        celdas_cambio.append(gspread.Cell(row=fila_idx, col=10, value="Completado"))
+                                        celdas_cambio.append(gspread.Cell(row=fila_idx, col=11, value=str(lat)))
+                                        celdas_cambio.append(gspread.Cell(row=fila_idx, col=12, value=str(lon)))
+                                    
+                                    ws_rutas.update_cells(celdas_cambio, value_input_option='USER_ENTERED')
+                                    st.success("¡Estatus actualizado! ✅")
                                     st.session_state['parada_activa'] = None
-                                    time.sleep(1.5)
-                                    cargar_rutas_nube()
-                                    st.rerun()
+                                    time.sleep(1.5); cargar_rutas_nube(); st.rerun()
+                                else: st.error("Error: No se encontró este folio en la base.")
                             except Exception as e: st.error(f"Error actualizando sistema: {e}")

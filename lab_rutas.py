@@ -2,7 +2,6 @@
 # 0. CONFIGURACIÓN, IMPORTS Y CONEXIÓN
 # ==========================================
 import streamlit as st
-from streamlit_geolocation import streamlit_geolocation
 import pandas as pd
 import gspread
 import json
@@ -102,7 +101,6 @@ def cargar_rutas_nube():
             headers = [str(h).strip().upper() for h in datos[0]]
             df = pd.DataFrame(datos[1:], columns=headers)
             
-            # Buscar columnas dinámicamente para evitar fallos si cambian los títulos
             col_estatus = next((c for c in df.columns if 'ESTATUS' in c), None)
             col_id_ruta = next((c for c in df.columns if 'ID_RUTA' in c), None)
             col_piezas = next((c for c in df.columns if 'PIEZA' in c), None)
@@ -121,7 +119,6 @@ def cargar_rutas_nube():
                 pieza_actual = str(row.get(col_piezas, '')) if col_piezas else ''
                 sin_actual = str(row.get(col_siniestros, '')) if col_siniestros else ''
                 
-                # Agrupamos las filas en la misma tarjeta usando el ID_Ruta
                 if id_ruta not in rutas_dict:
                     rutas_dict[id_ruta] = {
                         "id": id_ruta,
@@ -148,7 +145,6 @@ def cargar_rutas_nube():
     return False
 
 if 'ruta_hoy' not in st.session_state: st.session_state['ruta_hoy'] = []
-if 'parada_activa' not in st.session_state: st.session_state['parada_activa'] = None
 
 # ==========================================
 # 3. ENCABEZADO Y SINCRONIZACIÓN
@@ -219,43 +215,33 @@ else:
                 
             st.markdown("<br>", unsafe_allow_html=True)
             
-            # --- CHECK-IN OPTIMIZADO (Paso 1 y 2 directos) ---
-            if st.session_state.get('parada_activa') != parada['id']:
-                col1, col2 = st.columns(2)
-                with col1:
-                    query_str = f"{parada['lugar']} {parada['direccion']}".replace(' ', '+')
-                    st.link_button("🧭 Navegar", f"https://www.google.com/maps/search/?api=1&query={query_str}", use_container_width=True)
-                with col2:
-                    if st.button("📍 Iniciar Check-In", key=f"btn_check_{parada['id']}", type="primary", use_container_width=True):
-                        st.session_state['parada_activa'] = parada['id']
-                        st.rerun()
-            else:
-                st.markdown("**1. Captura tu ubicación (Se requiere una sola vez)**")
-                ubicacion = streamlit_geolocation(key=f"geo_{parada['id']}")
+            # --- CHECK-IN RÁPIDO Y DIRECTO ---
+            col1, col2 = st.columns(2)
+            with col1:
+                query_str = f"{parada['lugar']} {parada['direccion']}".replace(' ', '+')
+                st.link_button("🧭 Navegar", f"https://www.google.com/maps/search/?api=1&query={query_str}", use_container_width=True)
+            with col2:
+                if parada['tipo'] == 'entrega': texto_btn = "✅ Entregado"
+                elif parada['tipo'] in ['compra', 'recoleccion']: texto_btn = "✅ Recolectado"
+                else: texto_btn = "✅ Visita Lista"
                 
-                if ubicacion and ubicacion.get('latitude'):
-                    lat, lon = ubicacion['latitude'], ubicacion['longitude']
-                    st.success("📍 Coordenadas capturadas con éxito.")
-                    
-                    if st.button("✅ 2. Terminar Tarea y Subir a Nube", key=f"save_{parada['id']}", type="primary", use_container_width=True):
-                        with st.spinner("Actualizando todas las piezas en la nube..."):
-                            try:
-                                doc = init_connection()
-                                ws_rutas = doc.worksheet("BD_RUTAS")
-                                datos = ws_rutas.get_all_values()
+                if st.button(texto_btn, key=f"save_{parada['id']}", type="primary", use_container_width=True):
+                    with st.spinner("Registrando operación..."):
+                        try:
+                            doc = init_connection()
+                            ws_rutas = doc.worksheet("BD_RUTAS")
+                            datos = ws_rutas.get_all_values()
+                            
+                            filas_a_actualizar = [idx + 1 for idx, r in enumerate(datos) if r[0] == parada['id']]
+                            if filas_a_actualizar:
+                                celdas_cambio = []
+                                for fila_idx in filas_a_actualizar:
+                                    celdas_cambio.append(gspread.Cell(row=fila_idx, col=10, value="Completado"))
                                 
-                                # Actualiza masivamente TODAS las filas que compartan el ID de ruta
-                                filas_a_actualizar = [idx + 1 for idx, r in enumerate(datos) if r[0] == parada['id']]
-                                if filas_a_actualizar:
-                                    celdas_cambio = []
-                                    for fila_idx in filas_a_actualizar:
-                                        celdas_cambio.append(gspread.Cell(row=fila_idx, col=10, value="Completado"))
-                                        celdas_cambio.append(gspread.Cell(row=fila_idx, col=11, value=str(lat)))
-                                        celdas_cambio.append(gspread.Cell(row=fila_idx, col=12, value=str(lon)))
-                                    
-                                    ws_rutas.update_cells(celdas_cambio, value_input_option='USER_ENTERED')
-                                    st.success("¡Estatus actualizado! ✅")
-                                    st.session_state['parada_activa'] = None
-                                    time.sleep(1.5); cargar_rutas_nube(); st.rerun()
-                                else: st.error("Error: No se encontró este folio en la base.")
-                            except Exception as e: st.error(f"Error actualizando sistema: {e}")
+                                ws_rutas.update_cells(celdas_cambio, value_input_option='USER_ENTERED')
+                                st.success("¡Listo! ✅")
+                                time.sleep(1)
+                                cargar_rutas_nube()
+                                st.rerun()
+                            else: st.error("Error: No se encontró este folio en la base.")
+                        except Exception as e: st.error(f"Error actualizando sistema: {e}")

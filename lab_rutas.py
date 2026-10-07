@@ -24,12 +24,25 @@ def init_connection():
     cliente = gspread.authorize(credenciales)
     return cliente.open_by_key(SHEET_ID)
 
-if 'usuario_actual' not in st.session_state:
-    st.session_state['usuario_actual'] = 'Dionicio Cantú'
+# ==========================================
+# 1. SISTEMA DE LOGIN (REAL) Y ESTILOS CSS
+# ==========================================
+if 'autenticado' not in st.session_state:
+    st.session_state['autenticado'] = False
 
-# Estilos CSS actualizados (Botones emparejados y tarjetas limpias)
+# Estilos CSS
 st.markdown("""
     <style>
+    /* Agrandar enormemente los nombres de los destinos en el expander */
+    div[data-testid="stExpander"] details summary p {
+        font-size: 1.5rem !important;
+        font-weight: 800 !important;
+        color: #FFFFFF !important;
+        line-height: 1.3 !important;
+        padding-top: 5px !important;
+        padding-bottom: 5px !important;
+    }
+    /* Homologar tamaños y alineación vertical para botones */
     .stButton>button, .stLinkButton>a { 
         width: 100% !important; 
         height: 55px !important; 
@@ -43,13 +56,41 @@ st.markdown("""
         margin: 0px !important;
     }
     .tarjeta { background-color: #1E1E1E; padding: 20px; border-radius: 15px; margin-bottom: 10px; border: 1px solid #333;}
-    .lista-piezas { margin-top: 5px; margin-bottom: 15px; padding-left: 20px; color: #E0E0E0; font-size: 15px;}
-    .datos-auto { background-color: #2D2D2D; padding: 10px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: #FFF;}
+    .datos-auto { background-color: #2D2D2D; padding: 12px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: #FFF; border-left: 4px solid #F63366;}
     </style>
 """, unsafe_allow_html=True)
 
+# Pantalla de Login si no está autenticado
+if not st.session_state['autenticado']:
+    st.markdown("<h1 style='text-align: center; color: #FF4B4B;'>🚚 Acceso a Rutas</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Ingresa tus credenciales para ver tu ruta de hoy.</p>", unsafe_allow_html=True)
+    
+    with st.form("login_form"):
+        usuario_input = st.text_input("👤 Usuario").strip().lower()
+        password_input = st.text_input("🔑 Contraseña", type="password")
+        btn_login = st.form_submit_button("Entrar a mi Ruta", use_container_width=True)
+        
+        if btn_login:
+            try:
+                doc = init_connection()
+                ws_usuarios = doc.worksheet("Usuarios") 
+                df_usuarios = pd.DataFrame(ws_usuarios.get_all_records())
+                df_usuarios['Usuario'] = df_usuarios['Usuario'].astype(str).str.strip().str.lower()
+                df_usuarios['Password'] = df_usuarios['Password'].astype(str).str.strip()
+                
+                match = df_usuarios[(df_usuarios['Usuario'] == usuario_input) & (df_usuarios['Password'] == password_input)]
+                if not match.empty:
+                    st.session_state['autenticado'] = True
+                    st.session_state['usuario_actual'] = match.iloc[0]['Nombre Completo']
+                    st.rerun()
+                else:
+                    st.error("❌ Usuario o contraseña incorrectos.")
+            except Exception as e:
+                st.error(f"Error al conectar con la base de usuarios: {e}")
+    st.stop()
+
 # ==========================================
-# 1. MOTOR DE DESCARGA DESDE LA NUBE
+# 2. MOTOR DE DESCARGA DESDE LA NUBE
 # ==========================================
 def cargar_rutas_nube():
     try:
@@ -101,12 +142,12 @@ if 'ruta_hoy' not in st.session_state:
     st.session_state['ruta_hoy'] = []
 
 # ==========================================
-# 2. ENCABEZADO Y SINCRONIZACIÓN
+# 3. ENCABEZADO Y SINCRONIZACIÓN
 # ==========================================
-st.title("🚚 Ruta de Hoy")
-st.caption(f"👤 Operador en turno: **{st.session_state['usuario_actual']}** | Zona: Área Metropolitana")
+st.title("🚚 Mi Ruta de Hoy")
+st.caption(f"👤 Operador: **{st.session_state['usuario_actual']}**")
 
-if st.button("🔄 Sincronizar Nube (Descargar Ruta)", use_container_width=True, type="primary"):
+if st.button("🔄 Sincronizar (Descargar Ruta)", use_container_width=True, type="primary"):
     with st.spinner("Descargando asignaciones..."):
         if cargar_rutas_nube():
             st.toast("Ruta actualizada exitosamente", icon="☁️")
@@ -114,10 +155,10 @@ if st.button("🔄 Sincronizar Nube (Descargar Ruta)", use_container_width=True,
 st.markdown("---")
 
 # ==========================================
-# 3. RENDERIZADO DE TARJETAS
+# 4. RENDERIZADO DE TARJETAS (INFO DINÁMICA)
 # ==========================================
 if not st.session_state['ruta_hoy']:
-    st.info("👋 ¡Todo limpio! No tienes destinos pendientes. Presiona 'Sincronizar Nube' para revisar si hay nuevas asignaciones.")
+    st.info("👋 ¡Todo limpio! No tienes destinos pendientes. Presiona 'Sincronizar' para revisar si hay nuevas asignaciones.")
 else:
     def cambiar_posicion_nombre(old_idx, key_selectbox):
         seleccion = st.session_state[key_selectbox]
@@ -131,22 +172,20 @@ else:
 
     for i, parada in enumerate(st.session_state['ruta_hoy']):
         
+        # Titulo y color dependiendo del tipo
         if parada['tipo'] == 'entrega':
             icono = "🟢"
-            texto_accion = f"📦 Entregar: {len(parada['piezas'])} pieza(s)"
         elif parada['tipo'] == 'recoleccion':
             icono = "🟠"
-            texto_accion = f"↩️ Recoger: {len(parada['piezas'])} pieza(s)"
-        else:
+        else: # Cotizacion
             icono = "🔵"
-            texto_accion = f"🔎 Cotizar / Recoger: {len(parada['piezas'])} pieza(s)"
             
         titulo_tarjeta = f"{icono} #{i+1} - {parada['lugar']}"
         
         with st.expander(titulo_tarjeta, expanded=False):
             
+            # Selector de Orden
             opciones_orden = [f"{idx + 1} - {r['lugar']}" for idx, r in enumerate(st.session_state['ruta_hoy'])]
-            
             st.selectbox(
                 "Mover al lugar:", 
                 options=opciones_orden,
@@ -157,29 +196,59 @@ else:
             )
             
             st.markdown("---")
-            
             st.caption(f"📍 **Dirección:** {parada['direccion']}")
             
-            if parada.get('vehiculo') or parada.get('serie'):
-                vin_info = f" | <b>VIN:</b> {parada['serie']}" if parada.get('serie') else ""
+            # -----------------------------------------------------------
+            # RENDERIZADO ESPECÍFICO SEGÚN TIPO DE VIAJE
+            # -----------------------------------------------------------
+            if parada['tipo'] == 'entrega':
+                # FORMATO DE ENTREGA
+                st.markdown(f"**Siniestro / Pedido:** {', '.join(parada['siniestros'])}")
                 st.markdown(f"""
                 <div class="datos-auto">
-                    🚗 <b>Vehículo:</b> {parada.get('vehiculo', 'S/D')}{vin_info}
+                    🚗 <b>Vehículo:</b> {parada.get('vehiculo', 'S/D')}
                 </div>
                 """, unsafe_allow_html=True)
                 
-            st.markdown(f"**{texto_accion}**")
-            
-            for p in parada['piezas']:
-                np_str = f" *(NP: {p['np']})*" if p.get('np') else ""
-                st.markdown(f"- {p['desc']}{np_str}")
+                st.markdown(f"**📦 Piezas a Entregar ({len(parada['piezas'])}):**")
+                for p in parada['piezas']: st.markdown(f"- {p['desc']}")
+
+            elif parada['tipo'] == 'recoleccion':
+                # FORMATO DE COMPRAS / RECOLECCIÓN
+                st.markdown(f"""
+                <div class="datos-auto">
+                    🚗 <b>Vehículo:</b> {parada.get('vehiculo', 'S/D')}<br>
+                    🏷️ <b>Serie (VIN):</b> {parada.get('serie', 'S/D')}
+                </div>
+                """, unsafe_allow_html=True)
                 
-            st.markdown(f"**Siniestro/Ref:** {', '.join(parada['siniestros'])}")
+                st.markdown(f"**↩️ Piezas a Recoger ({len(parada['piezas'])}):**")
+                for p in parada['piezas']: 
+                    np_str = f" *(NP: {p['np']})*" if p.get('np') else ""
+                    st.markdown(f"- {p['desc']}{np_str}")
+
+            else:
+                # FORMATO DE COTIZACIÓN
+                st.markdown(f"""
+                <div class="datos-auto">
+                    🚗 <b>Vehículo:</b> {parada.get('vehiculo', 'S/D')}<br>
+                    🏷️ <b>Serie (VIN):</b> {parada.get('serie', 'S/D')}
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"**🔎 Piezas / Número de Parte ({len(parada['piezas'])}):**")
+                for p in parada['piezas']: 
+                    np_str = f" *(NP: {p['np']})*" if p.get('np') else ""
+                    st.markdown(f"- {p['desc']}{np_str}")
+            # -----------------------------------------------------------
 
             st.markdown("<br>", unsafe_allow_html=True)
             col1, col2 = st.columns(2)
+            
             with col1:
-                url_maps = f"https://www.google.com/maps/search/?api=1&query={parada['lugar'].replace(' ', '+')}+Nuevo+Leon"
+                # FIX MAPAS: Busca la combinación del Lugar + Dirección exacta
+                query_str = f"{parada['lugar']} {parada['direccion']}".replace(' ', '+')
+                url_maps = f"https://www.google.com/maps/search/?api=1&query={query_str}"
                 st.link_button("🧭 Navegar", url_maps, use_container_width=True)
                 
             with col2:
@@ -197,32 +266,28 @@ else:
                     st.success(f"📍 Ubicación capturada.")
                     st.markdown(f"[🗺️ Ver en Mapa para Auditoría](https://www.google.com/maps?q={lat},{lon})")
                     
-                    if st.button("Confirmar Operación en Sistema", key=f"save_{parada['id']}", use_container_width=True):
+                    if st.button("Confirmar Operación", key=f"save_{parada['id']}", use_container_width=True):
                         with st.spinner("Subiendo datos a la nube..."):
                             try:
                                 doc = init_connection()
                                 ws_rutas = doc.worksheet("BD_RUTAS")
                                 datos = ws_rutas.get_all_values()
                                 
-                                # Encontrar la fila que corresponde a este ID_Ruta
                                 id_buscado = parada['id']
                                 fila_encontrada = None
                                 
                                 for row_idx, row_data in enumerate(datos):
                                     if row_data[0] == id_buscado:
-                                        fila_encontrada = row_idx + 1 # +1 porque GSheets es base 1
+                                        fila_encontrada = row_idx + 1
                                         break
                                 
                                 if fila_encontrada:
-                                    # Col 10: Estatus_App, Col 11: Latitud, Col 12: Longitud
                                     ws_rutas.update_cell(fila_encontrada, 10, "Completado")
                                     ws_rutas.update_cell(fila_encontrada, 11, str(lat))
                                     ws_rutas.update_cell(fila_encontrada, 12, str(lon))
                                     
                                     st.success(f"¡Estatus de {parada['lugar']} actualizado en la nube! ✅")
                                     time.sleep(1.5)
-                                    
-                                    # Recargar rutas para que desaparezca la tarjeta
                                     cargar_rutas_nube()
                                     st.rerun()
                                 else:

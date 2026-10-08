@@ -378,7 +378,7 @@ if not modo_consulta:
                             st.dataframe(df_muestra, hide_index=True, use_container_width=True)
 
 # ==============================================================================
-# === [BLOQUE 6: VISTAS SECUNDARIAS - CATÁLOGOS Y DIRECTORIOS] ===
+# === [BLOQUE 6: VISTAS - ANALÍTICO & OPERATIVO] ===
 # ==============================================================================
 if vista_actual == "📊 Analítico":
     st.markdown("## 📊 Rendimiento de Operación")
@@ -562,7 +562,7 @@ elif vista_actual == "⚙️ Panel Operativo":
             
             # Solo modificamos si no está ya recibido, facturado, cancelado o en reembolso
             if "delivery" in rastreo or "entregado" in rastreo:
-                if estatus_actual not in ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO"]:
+                if estatus_actual not in ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN"]:
                     return "ENTREGADO"
             return row[col_estatus]
             
@@ -892,10 +892,20 @@ elif vista_actual == "⚙️ Panel Operativo":
         df_recoleccion = df_recoleccion[df_recoleccion[col_id].isin(ids_sel)]
     if desc_sel: df_recoleccion = df_recoleccion[df_recoleccion[col_desc].astype(str).isin(desc_sel)]
 
+    df_editado_rec = pd.DataFrame()
     with st.expander(f"↩️ Piezas para Recolección | {len(df_recoleccion)} Partida(s)", expanded=False):
         if not df_recoleccion.empty:
-            cols_rec = [c for c in [col_id, col_cant, col_desc, col_precio, col_estatus, col_comentarios] if c in df_recoleccion.columns]
-            st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
+            if permiso_edicion:
+                cols_rec = [c for c in [col_id, col_cant, col_desc, col_precio, col_estatus] if c in df_recoleccion.columns] + \
+                           [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_recoleccion.columns]
+                
+                df_editado_rec = st.data_editor(df_recoleccion[cols_rec], column_config=base_config, disabled=[c for c in cols_rec if c not in [col_paqueteria, col_guia, col_comentarios]], hide_index=True, use_container_width=True, key="ed_rec_panel")
+                
+                for col in df_recoleccion.columns: 
+                    if col not in df_editado_rec.columns: df_editado_rec[col] = df_recoleccion[col].values
+            else:
+                cols_rec = [c for c in [col_id, col_cant, col_desc, col_precio, col_estatus, col_paqueteria, col_guia, col_comentarios] if c in df_recoleccion.columns]
+                st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
 
 # ==============================================================================
 # === [BLOQUE 7: VISTAS - COMPRAS, TALLERES E INVENTARIO] ===
@@ -1560,13 +1570,11 @@ elif vista_actual == "🚚 Rutas":
     with tab_cotizacion:
         st.markdown("#### 🔎 Asignar Cotización / Visita Especial")
         st.caption("Usa esta pestaña para enviar al operador a revisar piezas sin una orden de compra formal.")
-        
-        # Filtro predictivo / autocompletable con selectbox (lee de proveedores)
         lista_provs_cot = sorted([str(p).strip().upper() for p in df_proveedores['Proveedor'].dropna().unique() if str(p).strip() != ''])
         
         col_cot1, col_cot2 = st.columns(2)
         with col_cot1:
-            sel_lugar = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", [""] + lista_provs_cot + ["➕ [ ESCRIBIR OTRO NUEVO... ]"], help="Escribe para buscar un proveedor.")
+            sel_lugar = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", [""] + lista_provs_cot + ["➕ [ ESCRIBIR OTRO NUEVO... ]"])
             lugar_cot = st.text_input("Escribe el nombre del nuevo lugar *") if sel_lugar == "➕ [ ESCRIBIR OTRO NUEVO... ]" else sel_lugar
         with col_cot2:
             dir_sugerida = dict_dir_provs.get(lugar_cot, "") if lugar_cot else ""
@@ -1577,38 +1585,26 @@ elif vista_actual == "🚚 Rutas":
         vin_cot = col_cot4.text_input("VIN / Número de Serie")
         
         st.markdown("**Piezas a buscar ***")
-        # --- TABLA DIVIDIDA EN 2 COLUMNAS ---
         df_p_vacia = pd.DataFrame([{"Número de Parte": "", "Descripción": ""}])
         config_columnas_cot = {
             "Número de Parte": st.column_config.TextColumn("No. de Parte (Opcional)", width="medium"),
             "Descripción": st.column_config.TextColumn("Descripción de la Pieza", width="large")
         }
-        
         df_piezas_cot = st.data_editor(df_p_vacia, num_rows="dynamic", use_container_width=True, key="tabla_cotizaciones", hide_index=True, column_config=config_columnas_cot)
         nota_cot = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Solo tomar fotos", key="nota_cot_manual")
         
         if st.button("➕ Enviar Cotización a la Ruta", type="primary", use_container_width=True):
-            # Validamos que al menos la descripción o el número de parte no estén vacíos
             piezas_validas = df_piezas_cot[(df_piezas_cot["Descripción"].str.strip() != "") | (df_piezas_cot["Número de Parte"].str.strip() != "")]
-            
             if lugar_cot.strip() and vehiculo_cot.strip() and not piezas_validas.empty:
                 df_cot_list = []
                 for _, row_p in piezas_validas.iterrows():
                     np = str(row_p['Número de Parte']).strip()
                     desc = str(row_p['Descripción']).strip()
-                    # Unimos si existen los dos, o ponemos el que exista
                     texto_pieza = f"{np} - {desc}".strip(" - ") if np and desc else (np if np else desc)
-                    
-                    df_cot_list.append({
-                        'Vehiculo_C': vehiculo_cot.upper(), 
-                        'VIN_C': vin_cot.upper(), 
-                        'Pieza_C': texto_pieza.upper(), 
-                        'Sin_C': 'COTIZACIÓN'
-                    })
-                    
+                    df_cot_list.append({'Vehiculo_C': vehiculo_cot.upper(), 'VIN_C': vin_cot.upper(), 'Pieza_C': texto_pieza.upper(), 'Sin_C': 'COTIZACIÓN'})
                 exito = enviar_a_bd_rutas('cotizacion', lugar_cot, dir_cot, pd.DataFrame(df_cot_list), 'Vehiculo_C', 'VIN_C', 'Pieza_C', 'Sin_C', notas_op=nota_cot)
                 if exito: st.success(f"✅ ¡Cotización en {lugar_cot} enviada!"); time.sleep(1.5); st.rerun()
-            else: st.error("❌ Completa Lugar, Vehículo y agrega al menos la descripción o número de parte de una pieza.")
+            else: st.error("❌ Completa Lugar, Vehículo y agrega al menos la descripción o número de parte.")
 
 elif vista_actual == "Precios Promedio":
     st.markdown("## 💲 Precios Promedio Históricos")
@@ -1673,7 +1669,7 @@ elif vista_actual == "🔍 Consultas":
     
     if not modo_consulta and permiso_edicion and "Daniel" in st.session_state.get("usuario_actual", ""):
         with st.expander("👑 Editor Maestro (Modo Dios)", expanded=False):
-            st.info("Control total: Edita cualquier dato histórico o activo. Para logística inversa, selecciona 'EN PROCESO DE REEMBOLSO' en la columna de Estatus.")
+            st.info("Control total: Edita cualquier dato histórico o activo. Para crear un reemplazo, selecciona 'EN PROCESO DE CAMBIO' en la columna de Estatus.")
             
             if not df_trabajo.empty and col_id in df_trabajo.columns:
                 siniestros_unicos = sorted(list(df_trabajo[col_id].dropna().astype(str).unique()))
@@ -1689,7 +1685,7 @@ elif vista_actual == "🔍 Consultas":
                     cols_dios = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_desc, col_cant, col_precio, col_estatus, col_vencimiento, col_comentarios] if c in df_edit.columns]
                     
                     estatus_bd = list(df_trabajo[col_estatus].dropna().astype(str).unique()) if col_estatus else []
-                    estatus_base = ["EN PROCESO DE REEMBOLSO", "REEMBOLSADO", "POR CONFIRMAR", "EN PROCESAMIENTO", "EN TRANSITO", "ENTREGADO", "RECIBIDO", "FACTURADO", "CANCELADO"]
+                    estatus_base = ["EN PROCESO DE REEMBOLSO", "REEMBOLSADO", "POR CONFIRMAR", "EN PROCESAMIENTO", "EN TRANSITO", "ENTREGADO", "RECIBIDO", "FACTURADO", "CANCELADO", "EN PROCESO DE CAMBIO"]
                     opciones_estatus = sorted(list(set(estatus_bd + estatus_base)))
                     
                     config_dios = {}
@@ -1697,7 +1693,7 @@ elif vista_actual == "🔍 Consultas":
                     if 'Vehiculo_Info' in df_edit.columns: config_dios['Vehiculo_Info'] = st.column_config.TextColumn("Vehículo", disabled=True)
                     if col_id: config_dios[col_id] = st.column_config.TextColumn("Siniestro", disabled=True)
                     
-                    st.caption("Modifica directamente en la tabla y presiona Guardar.")
+                    st.caption("Modifica directamente en la tabla y presiona Guardar. Si seleccionas 'EN PROCESO DE CAMBIO', la original pasará a recolección y se creará una nueva partida clonada.")
                     df_modificado = st.data_editor(df_edit[cols_dios], column_config=config_dios, key="editor_dios", use_container_width=True, hide_index=True)
                     
                     if st.button("💾 Ejecutar Cambios (Modo Dios)", type="primary"):
@@ -1728,9 +1724,27 @@ elif vista_actual == "🔍 Consultas":
                                 
                                 celdas_a_actualizar_uni = []
                                 celdas_a_actualizar_hist = []
+                                filas_nuevas_uni = []
+                                filas_nuevas_hist = []
+                                
                                 encabezados_uni = [str(x).strip() for x in datos_uni[0]]
                                 encabezados_hist = [str(x).strip() for x in datos_hist[0]]
                                 
+                                def crear_fila_clon(encabezados, index_en_bd, datos_matriz):
+                                    if not index_en_bd or index_en_bd > len(datos_matriz): return [""] * len(encabezados)
+                                    fila_original = datos_matriz[index_en_bd - 1].copy()
+                                    while len(fila_original) < len(encabezados): fila_original.append("")
+                                        
+                                    for idx, h in enumerate(encabezados):
+                                        h_up = str(h).strip().upper()
+                                        if "ESTATUS" in h_up or "STATUS" in h_up:
+                                            fila_original[idx] = "POR CONFIRMAR"
+                                        elif "DESCRIPCIÓN" in h_up or "DESCRIPCION" in h_up or "REFACCI" in h_up:
+                                            fila_original[idx] = f"{str(fila_original[idx]).strip()} (CAMBIO)"
+                                        elif any(x in h_up for x in ["FECHA", "VENCIMIENTO", "PROMESA", "GUIA", "PAQUETERIA", "REMISION", "ASIGNAC"]):
+                                            fila_original[idx] = ""
+                                    return fila_original
+
                                 for index, row_orig in df_edit.iterrows():
                                     row_mod = df_modificado.loc[index]
                                     cambios_detectados = any(str(row_orig[c]) != str(row_mod[c]) for c in cols_dios)
@@ -1740,18 +1754,34 @@ elif vista_actual == "🔍 Consultas":
                                         fila_en_uni = mapa_uni.get(llave_busqueda)
                                         fila_en_hist = mapa_hist.get(llave_busqueda)
                                         
-                                        for c in cols_dios:
-                                            if str(row_orig[c]) != str(row_mod[c]):
-                                                nuevo_valor = row_mod[c]
-                                                if fila_en_uni and c in encabezados_uni:
-                                                    celdas_a_actualizar_uni.append(gspread.Cell(row=fila_en_uni, col=encabezados_uni.index(c) + 1, value=nuevo_valor))
-                                                if fila_en_hist and c in encabezados_hist:
-                                                    celdas_a_actualizar_hist.append(gspread.Cell(row=fila_en_hist, col=encabezados_hist.index(c) + 1, value=nuevo_valor))
+                                        estatus_sel_dios = str(row_mod[col_estatus]).strip()
+                                        
+                                        # Lógica Automática de Reemplazo
+                                        if estatus_sel_dios == "EN PROCESO DE CAMBIO":
+                                            if fila_en_uni and col_estatus in encabezados_uni:
+                                                celdas_a_actualizar_uni.append(gspread.Cell(row=fila_en_uni, col=encabezados_uni.index(col_estatus) + 1, value="EN PROCESO DE RECOLECCIÓN"))
+                                            if fila_en_hist and col_estatus in encabezados_hist:
+                                                celdas_a_actualizar_hist.append(gspread.Cell(row=fila_en_hist, col=encabezados_hist.index(col_estatus) + 1, value="EN PROCESO DE RECOLECCIÓN"))
+                                            
+                                            if fila_en_uni: filas_nuevas_uni.append(crear_fila_clon(encabezados_uni, fila_en_uni, datos_uni))
+                                            if fila_en_hist: filas_nuevas_hist.append(crear_fila_clon(encabezados_hist, fila_en_hist, datos_hist))
+                                            
+                                        else:
+                                            for c in cols_dios:
+                                                if str(row_orig[c]) != str(row_mod[c]):
+                                                    nuevo_valor = row_mod[c]
+                                                    if fila_en_uni and c in encabezados_uni:
+                                                        celdas_a_actualizar_uni.append(gspread.Cell(row=fila_en_uni, col=encabezados_uni.index(c) + 1, value=nuevo_valor))
+                                                    if fila_en_hist and c in encabezados_hist:
+                                                        celdas_a_actualizar_hist.append(gspread.Cell(row=fila_en_hist, col=encabezados_hist.index(c) + 1, value=nuevo_valor))
                                                     
                                 if celdas_a_actualizar_uni: ws_uni.update_cells(celdas_a_actualizar_uni, value_input_option='USER_ENTERED')
                                 if celdas_a_actualizar_hist: ws_hist.update_cells(celdas_a_actualizar_hist, value_input_option='USER_ENTERED')
                                 
-                                st.cache_data.clear(); st.success("⚡ ¡Cambios aplicados con éxito en la matriz!"); time.sleep(1.5); st.rerun()
+                                if filas_nuevas_uni: ws_uni.append_rows(filas_nuevas_uni, value_input_option='USER_ENTERED')
+                                if filas_nuevas_hist: ws_hist.append_rows(filas_nuevas_hist, value_input_option='USER_ENTERED')
+                                
+                                st.cache_data.clear(); st.success("⚡ ¡Cambios y clonaciones aplicados con éxito en la matriz!"); time.sleep(1.5); st.rerun()
                             except Exception as e: st.error(f"Error al guardar: {e}")
     st.markdown("---")
     
@@ -1988,6 +2018,20 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                     if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
                     if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+
+        # Guardado de Guías para Recolecciones
+        if 'df_editado_rec' in locals() and not df_editado_rec.empty:
+            for _, row in df_editado_rec.iterrows():
+                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': ''})
+                
+                comentario_actual = str(row.get(col_comentarios, '')).strip()
+                paq_actual = str(row.get(col_paqueteria, '')).strip()
+                guia_actual = str(row.get(col_guia, '')).strip()
+                
+                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+                if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
+                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
 
         if not df_editado_cobro.empty:
             for _, row in df_editado_cobro.iterrows():

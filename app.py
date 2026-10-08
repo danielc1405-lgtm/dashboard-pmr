@@ -378,7 +378,7 @@ if not modo_consulta:
                             st.dataframe(df_muestra, hide_index=True, use_container_width=True)
 
 # ==============================================================================
-# === [BLOQUE 6: VISTAS - ANALÍTICO & OPERATIVO] ===
+# === [BLOQUE 6: VISTAS SECUNDARIAS - CATÁLOGOS Y DIRECTORIOS] ===
 # ==============================================================================
 if vista_actual == "📊 Analítico":
     st.markdown("## 📊 Rendimiento de Operación")
@@ -551,6 +551,25 @@ elif vista_actual == "⚙️ Panel Operativo":
     hoy_str = f"{hoy_dt_full.day:02d}/{meses_es[hoy_dt_full.month]}/{hoy_dt_full.strftime('%y')}"
     hoy_dt = pd.to_datetime(hoy_dt_full.date())
     
+    # ==========================================================================
+    # --- INTERCEPTOR DE PAQUETERÍA (AUTOMATIZACIÓN "ENTREGADOS EN CDR") ---
+    # Si la API reporta 'delivery' o 'entregado', forzamos el estatus a ENTREGADO
+    # ==========================================================================
+    if not df_proceso.empty and col_estatus_envio and col_estatus:
+        def verificar_entrega_paqueteria(row):
+            rastreo = str(row.get(col_estatus_envio, '')).strip().lower()
+            estatus_actual = str(row.get(col_estatus, '')).strip().upper()
+            
+            # Solo modificamos si no está ya recibido, facturado, cancelado o en reembolso
+            if "delivery" in rastreo or "entregado" in rastreo:
+                if estatus_actual not in ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO"]:
+                    return "ENTREGADO"
+            return row[col_estatus]
+            
+        df_proceso[col_estatus] = df_proceso.apply(verificar_entrega_paqueteria, axis=1)
+        # Hacemos lo mismo en df_trabajo por si acaso para la facturación
+        df_trabajo[col_estatus] = df_trabajo.apply(verificar_entrega_paqueteria, axis=1)
+
     def parse_dt_safe_op(val):
         if pd.isna(val) or str(val).strip() == '': return pd.NaT
         val_str = str(val).lower()
@@ -1541,11 +1560,13 @@ elif vista_actual == "🚚 Rutas":
     with tab_cotizacion:
         st.markdown("#### 🔎 Asignar Cotización / Visita Especial")
         st.caption("Usa esta pestaña para enviar al operador a revisar piezas sin una orden de compra formal.")
+        
+        # Filtro predictivo / autocompletable con selectbox (lee de proveedores)
         lista_provs_cot = sorted([str(p).strip().upper() for p in df_proveedores['Proveedor'].dropna().unique() if str(p).strip() != ''])
         
         col_cot1, col_cot2 = st.columns(2)
         with col_cot1:
-            sel_lugar = st.selectbox("Lugar (Yonke / Agencia) *", [""] + lista_provs_cot + ["➕ [ ESCRIBIR OTRO NUEVO... ]"])
+            sel_lugar = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", [""] + lista_provs_cot + ["➕ [ ESCRIBIR OTRO NUEVO... ]"], help="Escribe para buscar un proveedor.")
             lugar_cot = st.text_input("Escribe el nombre del nuevo lugar *") if sel_lugar == "➕ [ ESCRIBIR OTRO NUEVO... ]" else sel_lugar
         with col_cot2:
             dir_sugerida = dict_dir_provs.get(lugar_cot, "") if lugar_cot else ""
@@ -1555,18 +1576,39 @@ elif vista_actual == "🚚 Rutas":
         vehiculo_cot = col_cot3.text_input("Vehículo *")
         vin_cot = col_cot4.text_input("VIN / Número de Serie")
         
-        st.markdown("**Piezas y Números de Parte a buscar ***")
-        df_p_vacia = pd.DataFrame([{"Descripción o Número de Parte": ""}])
-        df_piezas_cot = st.data_editor(df_p_vacia, num_rows="dynamic", use_container_width=True, key="tabla_cotizaciones", hide_index=True)
+        st.markdown("**Piezas a buscar ***")
+        # --- TABLA DIVIDIDA EN 2 COLUMNAS ---
+        df_p_vacia = pd.DataFrame([{"Número de Parte": "", "Descripción": ""}])
+        config_columnas_cot = {
+            "Número de Parte": st.column_config.TextColumn("No. de Parte (Opcional)", width="medium"),
+            "Descripción": st.column_config.TextColumn("Descripción de la Pieza", width="large")
+        }
+        
+        df_piezas_cot = st.data_editor(df_p_vacia, num_rows="dynamic", use_container_width=True, key="tabla_cotizaciones", hide_index=True, column_config=config_columnas_cot)
         nota_cot = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Solo tomar fotos", key="nota_cot_manual")
         
         if st.button("➕ Enviar Cotización a la Ruta", type="primary", use_container_width=True):
-            piezas_validas = df_piezas_cot[df_piezas_cot["Descripción o Número de Parte"].str.strip() != ""]
+            # Validamos que al menos la descripción o el número de parte no estén vacíos
+            piezas_validas = df_piezas_cot[(df_piezas_cot["Descripción"].str.strip() != "") | (df_piezas_cot["Número de Parte"].str.strip() != "")]
+            
             if lugar_cot.strip() and vehiculo_cot.strip() and not piezas_validas.empty:
-                df_cot_list = [{'Vehiculo_C': vehiculo_cot.upper(), 'VIN_C': vin_cot.upper(), 'Pieza_C': row_p['Descripción o Número de Parte'].upper(), 'Sin_C': 'COTIZACIÓN'} for _, row_p in piezas_validas.iterrows()]
+                df_cot_list = []
+                for _, row_p in piezas_validas.iterrows():
+                    np = str(row_p['Número de Parte']).strip()
+                    desc = str(row_p['Descripción']).strip()
+                    # Unimos si existen los dos, o ponemos el que exista
+                    texto_pieza = f"{np} - {desc}".strip(" - ") if np and desc else (np if np else desc)
+                    
+                    df_cot_list.append({
+                        'Vehiculo_C': vehiculo_cot.upper(), 
+                        'VIN_C': vin_cot.upper(), 
+                        'Pieza_C': texto_pieza.upper(), 
+                        'Sin_C': 'COTIZACIÓN'
+                    })
+                    
                 exito = enviar_a_bd_rutas('cotizacion', lugar_cot, dir_cot, pd.DataFrame(df_cot_list), 'Vehiculo_C', 'VIN_C', 'Pieza_C', 'Sin_C', notas_op=nota_cot)
                 if exito: st.success(f"✅ ¡Cotización en {lugar_cot} enviada!"); time.sleep(1.5); st.rerun()
-            else: st.error("❌ Completa Lugar, Vehículo y agrega al menos una Pieza.")
+            else: st.error("❌ Completa Lugar, Vehículo y agrega al menos la descripción o número de parte de una pieza.")
 
 elif vista_actual == "Precios Promedio":
     st.markdown("## 💲 Precios Promedio Históricos")

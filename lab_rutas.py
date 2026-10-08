@@ -175,73 +175,13 @@ else:
 
     for i, parada in enumerate(st.session_state['ruta_hoy']):
         
-        if parada['tipo'] == 'entrega': icono = "🟢"
-        elif parada['tipo'] == 'recoleccion': icono = "🟠"
-        elif parada['tipo'] == 'compra': icono = "🟣"
+        # --- DEFINICIÓN DE ICONOS ---
+        if parada['tipo'] == 'entrega': icono = "📦"
+        elif parada['tipo'] == 'recoleccion': icono = "↩️"
+        elif parada['tipo'] == 'compra': icono = "🛒"
+        elif parada['tipo'] == 'cotizacion': icono = "🔍"
         else: icono = "🔵"
             
         titulo_tarjeta = f"{icono} #{i+1} - {parada['lugar']}"
         
         with st.expander(titulo_tarjeta, expanded=False):
-            opciones_orden = [f"{idx + 1} - {r['lugar']}" for idx, r in enumerate(st.session_state['ruta_hoy'])]
-            st.selectbox("Mover al lugar:", options=opciones_orden, index=i, key=f"pos_{parada['id']}", on_change=cambiar_posicion_nombre, args=(i, f"pos_{parada['id']}"))
-            
-            st.markdown("---")
-            st.caption(f"📍 **Dirección:** {parada['direccion']}")
-            
-            if parada['notas']: st.markdown(f'<div class="nota-operador">⚠️ <b>INSTRUCCIÓN:</b> {parada["notas"]}</div>', unsafe_allow_html=True)
-            
-            if parada['tipo'] == 'entrega':
-                st.markdown(f"**Siniestro / Pedido:** {', '.join(parada['siniestros'])}")
-                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}</div>', unsafe_allow_html=True)
-                st.markdown(f"**📦 Piezas a Entregar ({len(parada['piezas'])}):**")
-                for p in parada['piezas']: st.markdown(f"- {p['desc']}")
-
-            elif parada['tipo'] == 'recoleccion':
-                st.markdown(f"**Siniestro / Pedido:** {', '.join(parada['siniestros'])}")
-                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}</div>', unsafe_allow_html=True)
-                st.markdown(f"**↩️ Piezas a Recolectar (Devolución) ({len(parada['piezas'])}):**")
-                for p in parada['piezas']: st.markdown(f"- {p['desc']}")
-
-            elif parada['tipo'] == 'compra':
-                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}<br>🏷️ <b>Serie (VIN):</b> {parada.get("serie", "S/D")}</div>', unsafe_allow_html=True)
-                st.markdown(f"**🛒 Piezas a Recoger (Compra) ({len(parada['piezas'])}):**")
-                for p in parada['piezas']: st.markdown(f"- {p['desc']}")
-
-            elif parada['tipo'] == 'cotizacion':
-                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}<br>🏷️ <b>Serie (VIN):</b> {parada.get("serie", "S/D")}</div>', unsafe_allow_html=True)
-                st.markdown(f"**🔎 Piezas a Cotizar ({len(parada['piezas'])}):**")
-                for p in parada['piezas']: st.markdown(f"- {p['desc']}")
-                
-            st.markdown("<br>", unsafe_allow_html=True)
-            
-            # --- CHECK-IN RÁPIDO Y DIRECTO ---
-            col1, col2 = st.columns(2)
-            with col1:
-                query_str = f"{parada['lugar']} {parada['direccion']}".replace(' ', '+')
-                st.link_button("🧭 Navegar", f"https://www.google.com/maps/search/?api=1&query={query_str}", use_container_width=True)
-            with col2:
-                if parada['tipo'] == 'entrega': texto_btn = "✅ Entregado"
-                elif parada['tipo'] in ['compra', 'recoleccion']: texto_btn = "✅ Recolectado"
-                else: texto_btn = "✅ Visita Lista"
-                
-                if st.button(texto_btn, key=f"save_{parada['id']}", type="primary", use_container_width=True):
-                    with st.spinner("Registrando operación..."):
-                        try:
-                            doc = init_connection()
-                            ws_rutas = doc.worksheet("BD_RUTAS")
-                            datos = ws_rutas.get_all_values()
-                            
-                            filas_a_actualizar = [idx + 1 for idx, r in enumerate(datos) if r[0] == parada['id']]
-                            if filas_a_actualizar:
-                                celdas_cambio = []
-                                for fila_idx in filas_a_actualizar:
-                                    celdas_cambio.append(gspread.Cell(row=fila_idx, col=10, value="Completado"))
-                                
-                                ws_rutas.update_cells(celdas_cambio, value_input_option='USER_ENTERED')
-                                st.success("¡Listo! ✅")
-                                time.sleep(1)
-                                cargar_rutas_nube()
-                                st.rerun()
-                            else: st.error("Error: No se encontró este folio en la base.")
-                        except Exception as e: st.error(f"Error actualizando sistema: {e}")

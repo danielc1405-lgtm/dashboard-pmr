@@ -420,7 +420,7 @@ elif vista_actual == "🏢 Directorio":
                     if sel_ciudad == "➕ OTRA CIUDAD (Escribir manual)": nueva_ciudad = col3.text_input("Escribe la nueva ciudad *").title()
                     else: nueva_ciudad = sel_ciudad
                     
-                    # NUEVO: Lista fija de los 32 Estados de México
+                    # Lista oficial de los 32 Estados de México
                     lista_estados_mexico = [
                         "Aguascalientes", "Baja California", "Baja California Sur", "Campeche", "Chiapas", 
                         "Chihuahua", "Ciudad de México", "Coahuila", "Colima", "Durango", "Estado de México", 

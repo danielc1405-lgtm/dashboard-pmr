@@ -551,7 +551,7 @@ if vista_actual == "📊 Analítico":
 
     st.markdown("---")
 
-    # --- 3. MONITOR LOGÍSTICO (AGRUPADO INTELIGENTE) ---
+    # --- 3. MONITOR LOGÍSTICO (AGRUPADO INTELIGENTE CON RASTREO) ---
     st.markdown(f"#### 📋 4. Monitor Logístico en Curso ({aseguradora_sel.upper()})")
     st.caption("Visión depurada de refacciones activas, agrupadas por su estatus logístico actual.")
     
@@ -581,8 +581,11 @@ if vista_actual == "📊 Analítico":
                         cols_ver = [col_taller, col_id, 'Vehiculo_Info']
                         if col_paqueteria and col_paqueteria in df_est.columns: cols_ver.append(col_paqueteria)
                         if col_guia and col_guia in df_est.columns: cols_ver.append(col_guia)
+                        if col_estatus_envio and col_estatus_envio in df_est.columns: cols_ver.append(col_estatus_envio)
                         if c_env_disp and c_env_disp in df_est.columns: cols_ver.append(c_env_disp)
+                        
                         rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_paqueteria: 'Paquetería', col_guia: 'Guía'}
+                        if col_estatus_envio: rename_dict[col_estatus_envio] = 'Rastreo API'
                         if c_env_disp: rename_dict[c_env_disp] = 'F. Envío'
                         
                     elif est == "ENTREGADO":
@@ -590,8 +593,11 @@ if vista_actual == "📊 Analítico":
                         cols_ver = [col_taller, col_id, 'Vehiculo_Info']
                         if col_paqueteria and col_paqueteria in df_est.columns: cols_ver.append(col_paqueteria)
                         if col_guia and col_guia in df_est.columns: cols_ver.append(col_guia)
+                        if col_estatus_envio and col_estatus_envio in df_est.columns: cols_ver.append(col_estatus_envio)
                         if c_rec_disp and c_rec_disp in df_est.columns: cols_ver.append(c_rec_disp)
+                        
                         rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_paqueteria: 'Paquetería', col_guia: 'Guía'}
+                        if col_estatus_envio: rename_dict[col_estatus_envio] = 'Rastreo API'
                         if c_rec_disp: rename_dict[c_rec_disp] = 'F. Entrega'
                         
                     else:
@@ -602,6 +608,13 @@ if vista_actual == "📊 Analítico":
                     with st.expander(titulo, expanded=(est in ["ENTREGADO", "EN TRANSITO"])):
                         df_vista = df_est[cols_ver].copy()
                         df_vista.rename(columns=rename_dict, inplace=True)
+                        
+                        # Traducción amigable de API para cuando la guía apenas se creó
+                        if 'Rastreo API' in df_vista.columns:
+                            df_vista['Rastreo API'] = df_vista['Rastreo API'].apply(
+                                lambda x: "Recién documentado (En sitio)" if str(x).strip().lower() in ["falta información", "falta informacion", ""] else str(x)
+                            )
+                            
                         st.dataframe(df_vista, use_container_width=True, hide_index=True)
         else: st.info("No hay pedidos activos en las etapas de flujo (Todos por confirmar o en PT).")
     else: st.info(f"No hay pedidos activos para {aseguradora_sel}.")

@@ -551,7 +551,7 @@ if vista_actual == "📊 Analítico":
 
     st.markdown("---")
 
-    # --- 3. MONITOR LOGÍSTICO (AGRUPADO CON FECHAS Y RASTREO) ---
+    # --- 3. MONITOR LOGÍSTICO (AGRUPADO INTELIGENTE) ---
     st.markdown(f"#### 📋 4. Monitor Logístico en Curso ({aseguradora_sel.upper()})")
     st.caption("Visión depurada de refacciones activas, agrupadas por su estatus logístico actual.")
     
@@ -563,40 +563,44 @@ if vista_actual == "📊 Analítico":
             df_mon['LLAVE'] = df_mon.apply(lambda r: gen_llave_ana(r.get(col_id,''), r.get(col_desc,'')), axis=1)
             df_mon['Proveedor'] = df_mon['LLAVE'].map(dict_prov_ana).fillna("-")
             
-            # Formateo de fechas para que no se vean feas
+            # Formateo de fechas
             c_env_disp = buscar_col_ana(["FECHA", "ENVIO"])
             c_rec_disp = buscar_col_ana(["FECHA", "RECIB"])
             
             for est in estatus_validos:
                 df_est = df_mon[df_mon[col_estatus].astype(str).str.upper() == est]
                 if not df_est.empty:
-                    if est == "ENTREGADO":
-                        titulo = f"📥 Entregados a Taller (Pedir Recepción) | {len(df_est)} Partidas"
+                    # Lógica de visualización de columnas por estatus
+                    if est == "EN PROCESAMIENTO":
+                        titulo = f"⚙️ En Procesamiento | {len(df_est)} Partida(s)"
+                        cols_ver = [col_taller, col_id, 'Vehiculo_Info', col_desc, 'Proveedor']
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza'}
+                        
                     elif est == "EN TRANSITO":
-                        titulo = f"🚚 En Tránsito | {len(df_est)} Partidas"
-                    else:
-                        titulo = f"⚙️ {est.title()} | {len(df_est)} Partidas"
-                        
-                    with st.expander(titulo, expanded=(est in ["ENTREGADO", "EN TRANSITO"])):
-                        cols_ver = [col_id, 'Vehiculo_Info', col_taller, col_desc, 'Proveedor']
-                        
-                        # Inyección de Guía, Paquetería, Rastreo y Fechas
+                        titulo = f"🚚 En Tránsito | {len(df_est)} Partida(s)"
+                        cols_ver = [col_taller, col_id, 'Vehiculo_Info']
                         if col_paqueteria and col_paqueteria in df_est.columns: cols_ver.append(col_paqueteria)
                         if col_guia and col_guia in df_est.columns: cols_ver.append(col_guia)
-                        if col_estatus_envio and col_estatus_envio in df_est.columns: cols_ver.append(col_estatus_envio)
                         if c_env_disp and c_env_disp in df_est.columns: cols_ver.append(c_env_disp)
-                        if c_rec_disp and c_rec_disp in df_est.columns: cols_ver.append(c_rec_disp)
-                        
-                        df_vista = df_est[cols_ver].copy()
-                        
-                        rename_dict = {
-                            col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_taller: 'Taller', 
-                            col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', 
-                            col_estatus_envio: 'Rastreo API'
-                        }
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_paqueteria: 'Paquetería', col_guia: 'Guía'}
                         if c_env_disp: rename_dict[c_env_disp] = 'F. Envío'
+                        
+                    elif est == "ENTREGADO":
+                        titulo = f"📥 Entregados a Taller (Pedir Recepción en Sistema) | {len(df_est)} Partida(s)"
+                        cols_ver = [col_taller, col_id, 'Vehiculo_Info']
+                        if col_paqueteria and col_paqueteria in df_est.columns: cols_ver.append(col_paqueteria)
+                        if col_guia and col_guia in df_est.columns: cols_ver.append(col_guia)
+                        if c_rec_disp and c_rec_disp in df_est.columns: cols_ver.append(c_rec_disp)
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_paqueteria: 'Paquetería', col_guia: 'Guía'}
                         if c_rec_disp: rename_dict[c_rec_disp] = 'F. Entrega'
                         
+                    else:
+                        titulo = f"⚙️ {est.title()} | {len(df_est)} Partida(s)"
+                        cols_ver = [col_taller, col_id, 'Vehiculo_Info', col_desc]
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza'}
+                        
+                    with st.expander(titulo, expanded=(est in ["ENTREGADO", "EN TRANSITO"])):
+                        df_vista = df_est[cols_ver].copy()
                         df_vista.rename(columns=rename_dict, inplace=True)
                         st.dataframe(df_vista, use_container_width=True, hide_index=True)
         else: st.info("No hay pedidos activos en las etapas de flujo (Todos por confirmar o en PT).")

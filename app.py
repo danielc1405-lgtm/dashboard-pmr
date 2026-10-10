@@ -382,6 +382,7 @@ if not modo_consulta:
 # ==============================================================================
 import plotly.graph_objects as go
 import pandas as pd
+import datetime
 
 # Variables de tiempo globales para este bloque
 tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
@@ -410,7 +411,6 @@ def safe_apply_date(df_obj, col_name):
     return pd.Series(pd.NaT, index=df_obj.index)
 
 # --- INTERCEPTOR DE PAQUETERÍA (AUTOMATIZACIÓN "ENTREGADOS EN CDR") ---
-# Se ejecuta antes de renderizar cualquier vista para afectar Analítico y Operativo
 if not df_proceso.empty and col_estatus_envio and col_estatus:
     def verificar_entrega_paqueteria(row):
         rastreo = str(row.get(col_estatus_envio, '')).strip().lower()
@@ -447,7 +447,6 @@ if vista_actual == "📊 Analítico":
                 except: return 0.0
             dict_costo_ana = dict(zip(df_c_ana['LLAVE'], df_c_ana['Costo Compra'].apply(sf)))
             
-            # Cálculo de fecha de llegada para inyectar en "En Procesamiento"
             def parse_spanish_date_comp_a(d_str):
                 if not isinstance(d_str, str): return pd.NaT
                 d_str = d_str.lower().replace('-', '/') 
@@ -481,11 +480,9 @@ if vista_actual == "📊 Analítico":
         
         df_vel['F_Asig_D'] = safe_apply_date(df_vel, col_asignacion)
         
-        # Filtro: A partir del 4 de septiembre de 2026
         fecha_inicio_sistema = pd.to_datetime('2026-09-04')
         df_vel_mes = df_vel[df_vel['F_Asig_D'] >= fecha_inicio_sistema].copy()
         
-        # Excluimos Cancelados, PT y PDD de la velocidad
         if col_estatus:
             df_vel_mes = df_vel_mes[~df_vel_mes[col_estatus].astype(str).str.upper().isin(["CANCELADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS"])]
         
@@ -577,58 +574,64 @@ if vista_actual == "📊 Analítico":
 
     # --- 4. RESUMEN FINANCIERO MENSUAL ---
     st.markdown("#### 💰 4. Resumen Financiero Mensual")
-    st.caption("Evolución de montos de venta: Concretados (Facturados/Recibidos) vs. Mermas (PT y PDD).")
+    st.caption("Evolución de montos de venta basada en la Fecha de Asignación.")
     
     if col_asignacion and col_precio and col_estatus and not df_completo.empty:
         df_fin = df_completo.copy()
+        
+        # 1. Parsear Fechas de Asignación
         df_fin['F_Asig_D'] = safe_apply_date(df_fin, col_asignacion)
         
-        # Limpieza de precios para sumar
+        # 2. Limpiar Dinero
         def clean_money(val):
             try: return float(str(val).replace('$', '').replace(',', '').strip())
             except: return 0.0
-            
         df_fin['Monto'] = df_fin[col_precio].apply(clean_money)
-        df_fin = df_fin.dropna(subset=['F_Asig_D'])
+        
+        # 3. Categorización Financiera Exacta
+        def cat_financiera(e):
+            e_upper = str(e).upper().strip()
+            if "FACTURADO" in e_upper or "RECIBIDO" in e_upper or "ENTREGADO" in e_upper: return "✅ Concretado"
+            if "PÉRDIDA TOTAL" in e_upper or "PERDIDA TOTAL" in e_upper: return "💥 PT"
+            if "PAGO DE DAÑOS" in e_upper or "PAGO DE DANOS" in e_upper: return "💸 PDD"
+            if "CANCELADO" in e_upper: return "🚫 Cancelado"
+            return "⚙️ En Proceso"
+            
+        df_fin['Cat_Fin'] = df_fin[col_estatus].apply(cat_financiera)
+        
+        # 4. Filtrar datos obsoletos pero conservar los que no tienen fecha
+        mask_valida = (df_fin['F_Asig_D'].dt.year >= 2026) | (df_fin['F_Asig_D'].isna())
+        df_fin = df_fin[mask_valida].copy()
         
         if not df_fin.empty:
-            df_fin['Mes'] = df_fin['F_Asig_D'].dt.to_period('M')
-            
-            # Categorización financiera
-            def cat_financiera(e):
-                e_upper = str(e).upper().strip()
-                if "FACTURADO" in e_upper or "RECIBIDO" in e_upper or "ENTREGADO" in e_upper: return "✅ Concretado"
-                if "PÉRDIDA TOTAL" in e_upper or "PERDIDA TOTAL" in e_upper: return "💥 PT"
-                if "PAGO DE DAÑOS" in e_upper: return "💸 PDD"
-                return "⚙️ En Proceso / Otros"
+            # 5. Agrupación segura por mes
+            def format_mes(d):
+                if pd.isna(d): return "9999-99", "Sin Fecha Definida"
+                meses_es_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
+                return d.strftime('%Y-%m'), f"{meses_es_nombres[d.month]} {d.year}"
                 
-            df_fin['Cat_Fin'] = df_fin[col_estatus].apply(cat_financiera)
+            df_fin[['Mes_Sort', 'Mes_Str']] = df_fin['F_Asig_D'].apply(lambda x: pd.Series(format_mes(x)))
             
-            # Crear Pivot Table
-            pivot_fin = pd.pivot_table(df_fin, values='Monto', index='Mes', columns='Cat_Fin', aggfunc='sum', fill_value=0)
+            # Crear Tabla Dinámica
+            pivot_fin = pd.pivot_table(df_fin, values='Monto', index=['Mes_Sort', 'Mes_Str'], columns='Cat_Fin', aggfunc='sum', fill_value=0).reset_index()
+            pivot_fin = pivot_fin.sort_values('Mes_Sort')
             
-            # Asegurar que existan todas las columnas
-            for col_req in ['✅ Concretado', '💥 PT', '💸 PDD', '⚙️ En Proceso / Otros']:
+            # Asegurar existencia de columnas
+            for col_req in ['✅ Concretado', '⚙️ En Proceso', '💥 PT', '💸 PDD', '🚫 Cancelado']:
                 if col_req not in pivot_fin.columns: pivot_fin[col_req] = 0.0
                 
-            pivot_fin = pivot_fin.reset_index()
-            pivot_fin['Mes_Str'] = pivot_fin['Mes'].dt.strftime('%B %Y').str.title()
-            pivot_fin = pivot_fin.sort_values('Mes')
-            
-            # Agregar Acumulado
+            # Calcular Acumulado
             pivot_fin['📈 Acumulado Concretado'] = pivot_fin['✅ Concretado'].cumsum()
             
-            # Formatear como moneda
-            cols_dinero = ['✅ Concretado', '💥 PT', '💸 PDD', '⚙️ En Proceso / Otros', '📈 Acumulado Concretado']
+            # Formato de Moneda
+            cols_dinero = ['✅ Concretado', '⚙️ En Proceso', '💥 PT', '💸 PDD', '🚫 Cancelado', '📈 Acumulado Concretado']
             for c in cols_dinero:
                 pivot_fin[c] = pivot_fin[c].apply(lambda x: f"${x:,.2f}")
                 
-            # Mostrar tabla final
-            cols_mostrar = ['Mes_Str'] + cols_dinero
-            df_mostrar = pivot_fin[cols_mostrar].rename(columns={'Mes_Str': 'Mes Asignación'})
+            df_mostrar = pivot_fin[['Mes_Str'] + cols_dinero].rename(columns={'Mes_Str': 'Mes de Asignación'})
             st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
         else:
-            st.info("No hay fechas de asignación válidas para calcular el resumen financiero.")
+            st.info("No hay datos financieros para calcular.")
 
     st.markdown("---")
 
@@ -699,6 +702,259 @@ if vista_actual == "📊 Analítico":
                         st.dataframe(df_vista, use_container_width=True, hide_index=True)
         else: st.info("No hay pedidos activos en las etapas de flujo (Todos por confirmar, en PT o PDD).")
     else: st.info(f"No hay pedidos activos para {aseguradora_sel}.")
+
+# ------------------------------------------------------------------------------
+# --- VISTA 2: PANEL OPERATIVO ---
+# ------------------------------------------------------------------------------
+elif vista_actual == "⚙️ Panel Operativo":
+    st.markdown("### 📈 Indicadores Diarios")
+    
+    col_sin_rel = next((c for c in df_proceso.columns if str(c).strip().upper() in ["SINIESTRO RELACIONADO", "SINIESTRO"]), None)
+    
+    def get_agrupador(row):
+        rel = str(row.get(col_sin_rel, '')).strip() if col_sin_rel else ''
+        if rel and rel.upper() not in ['NAN', 'NONE', '']: return rel
+        return str(row.get(col_id, '')).strip()
+        
+    if not df_proceso.empty: df_proceso['Agrupador_Visual'] = df_proceso.apply(get_agrupador, axis=1)
+    if not df_recoleccion_total.empty: df_recoleccion_total['Agrupador_Visual'] = df_recoleccion_total.apply(get_agrupador, axis=1)
+
+    if col_vencimiento:
+        fechas_venc_dt = df_proceso[col_vencimiento].apply(parse_dt_safe_op)
+        vencidas_pasadas_kpi = len(df_proceso[(fechas_venc_dt < hoy_dt) & (df_proceso[col_vencimiento] != '') & (~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR"))])
+    else: vencidas_pasadas_kpi = 0
+        
+    vencen_hoy = len(df_proceso[df_proceso[col_vencimiento] == hoy_str]) if col_vencimiento else 0
+    recolecciones = len(df_recoleccion_total)
+    
+    excluir_kpi = ["PÉRDIDA TOTAL", "PAGO DE DAÑOS"]
+    por_confirmar_kpi = len(df_proceso[(df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_proceso[col_estatus].astype(str).str.strip() == "")) & (~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi))]) if col_estatus else 0
+    en_proceso = len(df_proceso[~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") & (~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi)) & (df_proceso[col_estatus].astype(str).str.strip() != "")]) if col_estatus else len(df_proceso)
+    partidas_por_facturar = len(df_trabajo[df_trabajo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"]) if col_estatus else 0
+    
+    kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
+    kpi1.metric("📦 En Proceso (Piezas)", en_proceso); kpi2.metric("⏳ Por Confirmar", por_confirmar_kpi); kpi3.metric("⚠️ Vencen Hoy", vencen_hoy)
+    kpi4.metric("❌ Vencidos", vencidas_pasadas_kpi); kpi5.metric("↩️ En Recolección", recolecciones); kpi6.metric("🧾 Por Facturar", partidas_por_facturar)
+
+    st.markdown("### 🎛️ Filtros de Búsqueda")
+    
+    dict_estados = {}
+    if not df_catalogo.empty and col_taller:
+        col_cat_tall = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
+        col_cat_est = next((c for c in df_catalogo.columns if "ESTADO" in str(c).upper()), None)
+        if col_cat_tall and col_cat_est:
+            dict_estados = dict(zip(df_catalogo[col_cat_tall].astype(str).str.strip().str.upper(), df_catalogo[col_cat_est].astype(str).str.strip().str.upper()))
+    
+    df_proceso['Estado_CDR'] = df_proceso[col_taller].astype(str).str.strip().str.upper().map(dict_estados).fillna("S/D") if col_taller else "S/D"
+    if not df_recoleccion_total.empty:
+        df_recoleccion_total['Estado_CDR'] = df_recoleccion_total[col_taller].astype(str).str.strip().str.upper().map(dict_estados).fillna("S/D") if col_taller else "S/D"
+
+    if col_estatus:
+        df_proceso = df_proceso[~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi)]
+
+    filtro_col0, filtro_col1, filtro_col2, filtro_col3, filtro_col4 = st.columns([1, 1.2, 1, 1.5, 1.5])
+    with filtro_col0: estado_sel = st.multiselect("🌎 Estado:", sorted([str(e) for e in df_proceso['Estado_CDR'].dropna().unique() if str(e).strip() != '']), placeholder="Todos...")
+    with filtro_col1: 
+        df_t1 = df_proceso.copy()
+        if estado_sel: df_t1 = df_t1[df_t1['Estado_CDR'].astype(str).isin(estado_sel)]
+        taller_sel = st.multiselect("🏢 Taller:", sorted([str(t) for t in df_t1[col_taller].dropna().unique() if str(t).strip() != '']) if col_taller else [], placeholder="Todos...")
+    with filtro_col2: 
+        df_t2 = df_t1.copy()
+        if taller_sel: df_t2 = df_t2[df_t2[col_taller].astype(str).isin(taller_sel)]
+        estatus_sel = st.multiselect("📊 Estatus:", sorted([str(e) for e in df_t2[col_estatus].dropna().unique() if str(e).strip() != '']) if col_estatus else [], placeholder="Todos...")
+    with filtro_col3:
+        df_t3 = df_t2.copy()
+        if estatus_sel: df_t3 = df_t3[df_t3[col_estatus].astype(str).isin(estatus_sel)]
+        siniestro_sel = st.multiselect(f"🚗 Siniestro - Vehículo:", sorted(list(df_t3['Filtro_Siniestro'].dropna().unique())) if 'Filtro_Siniestro' in df_t3.columns else [], placeholder="Todos...")
+    with filtro_col4:
+        df_t4 = df_t3.copy()
+        if siniestro_sel: df_t4 = df_t4[df_t4['Filtro_Siniestro'].isin(siniestro_sel)]
+        desc_sel = st.multiselect(f"⚙️ Refacción:", sorted(list(df_t4[col_desc].dropna().astype(str).unique())) if col_desc in df_t4.columns else [], placeholder="Todas...")
+
+    df_filtrado = df_proceso.copy()
+    if estado_sel: df_filtrado = df_filtrado[df_filtrado['Estado_CDR'].astype(str).isin(estado_sel)]
+    if taller_sel: df_filtrado = df_filtrado[df_filtrado[col_taller].astype(str).isin(taller_sel)]
+    if estatus_sel: df_filtrado = df_filtrado[df_filtrado[col_estatus].astype(str).isin(estatus_sel)]
+    if siniestro_sel: df_filtrado = df_filtrado[df_filtrado['Filtro_Siniestro'].isin(siniestro_sel)]
+    if desc_sel: df_filtrado = df_filtrado[df_filtrado[col_desc].astype(str).isin(desc_sel)]
+
+    def generar_llave_temp(id_val, desc_val):
+        id_str = str(id_val).strip().upper()
+        if id_str.endswith('.0'): id_str = id_str[:-2]
+        desc_str = ' '.join(str(desc_val).strip().upper().split())
+        return f"{id_str}_{desc_str}"
+
+    if not df_compras.empty:
+        df_compras_temp = df_compras.copy()
+        df_compras_temp['LLAVE_COMP'] = df_compras_temp.apply(lambda r: generar_llave_temp(r.get('Siniestro',''), r.get('Descripción Pieza','')), axis=1)
+        dict_prov = dict(zip(df_compras_temp['LLAVE_COMP'], df_compras_temp['Proveedor']))
+        dict_costo = dict(zip(df_compras_temp['LLAVE_COMP'], df_compras_temp['Costo Compra']))
+        df_filtrado['LLAVE_TEMP'] = df_filtrado.apply(lambda r: generar_llave_temp(r.get(col_id,''), r.get(col_desc,'')), axis=1)
+        df_filtrado['Proveedor'] = df_filtrado['LLAVE_TEMP'].map(dict_prov).fillna("")
+        def safe_float(v):
+            try: return float(str(v).replace('\$', '').replace(',', '').strip())
+            except: return 0.0
+        df_filtrado['Costo Compra'] = df_filtrado['LLAVE_TEMP'].map(dict_costo).apply(safe_float)
+    else:
+        df_filtrado['Proveedor'] = ""; df_filtrado['Costo Compra'] = 0.0
+
+    base_config = {}
+    if col_id and col_id in df_filtrado.columns: base_config[col_id] = st.column_config.TextColumn("Pedido / Siniestro", disabled=True)
+    if 'Vehiculo_Info' in df_filtrado.columns: base_config['Vehiculo_Info'] = st.column_config.TextColumn("Vehículo")
+    if col_taller: base_config[col_taller] = st.column_config.TextColumn("Taller")
+    if col_cant: base_config[col_cant] = st.column_config.TextColumn("Cant")
+    if col_desc: base_config[col_desc] = st.column_config.TextColumn("Descrip.") 
+    if col_precio: base_config[col_precio] = st.column_config.TextColumn("Precio")
+    if col_estatus: base_config[col_estatus] = st.column_config.TextColumn("Estatus", disabled=True)
+    if col_vencimiento: base_config[col_vencimiento] = st.column_config.TextColumn("Venc.")
+    if col_paqueteria: base_config[col_paqueteria] = st.column_config.SelectboxColumn("Paquetería", options=["", "PAQUETEXPRESS", "FEDEX", "DHL", "ESTAFETA", "AFIMEX"])
+    if col_guia: base_config[col_guia] = st.column_config.TextColumn("Guía")
+    if col_estatus_envio: base_config[col_estatus_envio] = st.column_config.TextColumn("📍 Rastreo", disabled=True)
+    if col_remision: base_config[col_remision] = st.column_config.TextColumn("Folio Remis")
+    if col_comentarios: base_config[col_comentarios] = st.column_config.TextColumn("Obs.") 
+
+    cond_confirmar = df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_filtrado[col_estatus].fillna('').astype(str).str.strip() == "")
+    df_por_confirmar = df_filtrado[cond_confirmar].copy() if col_estatus else pd.DataFrame()
+    
+    with st.expander(f"⏳ Piezas por Confirmar | {len(df_por_confirmar)} Partida(s)", expanded=False):
+        dfs_editados_conf = []
+        if not df_por_confirmar.empty:
+            for taller, df_taller in df_por_confirmar.groupby(col_taller):
+                with st.expander(f"🏢 {taller}", expanded=False):
+                    for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
+                        st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
+                        if permiso_edicion: 
+                            df_grupo['Confirmar Surtido'] = False; df_grupo['Cancelar'] = False; df_grupo['Pérdida Total'] = False; df_grupo['PDD'] = False
+                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar', 'Pérdida Total', 'PDD'] + [c for c in [col_comentarios] if c in df_grupo.columns]
+                            config_conf = base_config.copy()
+                            config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Pérdida Total": st.column_config.CheckboxColumn("💥 PT", default=False), "PDD": st.column_config.CheckboxColumn("💸 PDD", default=False), "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="\$ %.2f")})
+                            columnas_editables = ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar', 'Pérdida Total', 'PDD', col_comentarios]
+                            df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_conf, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_conf_{taller}_{siniestro_auto}")
+                            for col in df_grupo.columns:
+                                if col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
+                            dfs_editados_conf.append(df_editado_parcial)
+                        else:
+                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento, col_comentarios] if c in df_grupo.columns]
+                            st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
+        if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
+
+    regex_excluir = "CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO|PÉRDIDA TOTAL|PAGO DE DAÑOS"
+    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains(regex_excluir)) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy() if col_vencimiento else pd.DataFrame()
+    with st.expander(f"🚨 Vencimientos de Hoy | {len(df_vencimientos)} Partida(s)", expanded=False):
+        if not df_vencimientos.empty:
+            if permiso_edicion:
+                df_vencimientos['Cancelar'] = False; df_vencimientos['Nueva Fecha'] = pd.NaT
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento] if c in df_vencimientos.columns] + ['Cancelar', 'Nueva Fecha'] + [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_vencimientos.columns]
+                config_venc = base_config.copy()
+                config_venc.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
+                df_editado_venc = st.data_editor(df_vencimientos[cols_visibles], column_config=config_venc, disabled=[c for c in cols_visibles if c not in ['Cancelar', 'Nueva Fecha', col_comentarios, col_paqueteria, col_guia]], hide_index=True, use_container_width=True, key="ed_venc")
+                for col in df_vencimientos.columns:
+                    if col not in df_editado_venc.columns: df_editado_venc[col] = df_vencimientos[col].values
+            else:
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento, col_paqueteria, col_guia, col_comentarios] if c in df_vencimientos.columns]
+                st.dataframe(df_vencimientos[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
+                
+    if col_vencimiento and not df_filtrado.empty:
+        fechas_venc_filtro = df_filtrado[col_vencimiento].apply(parse_dt_safe_op)
+        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains(regex_excluir)) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy()
+    else: df_atrasadas = pd.DataFrame()
+    with st.expander(f"❌ Vencimientos Atrasados | {len(df_atrasadas)} Partida(s)", expanded=False):
+        if not df_atrasadas.empty:
+            if permiso_edicion:
+                df_atrasadas['Cancelar'] = False; df_atrasadas['Nueva Fecha'] = pd.NaT
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento] if c in df_atrasadas.columns] + ['Cancelar', 'Nueva Fecha'] + [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_atrasadas.columns]
+                config_atr = base_config.copy()
+                config_atr.update({"Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Nueva Fecha": st.column_config.DateColumn("📅 Nueva Fecha", format="DD/MMM/YYYY")})
+                df_editado_atrasadas = st.data_editor(df_atrasadas[cols_visibles], column_config=config_atr, disabled=[c for c in cols_visibles if c not in ['Cancelar', 'Nueva Fecha', col_comentarios, col_paqueteria, col_guia]], hide_index=True, use_container_width=True, key="ed_atr")
+                for col in df_atrasadas.columns:
+                    if col not in df_editado_atrasadas.columns: df_editado_atrasadas[col] = df_atrasadas[col].values
+            else:
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento, col_paqueteria, col_guia, col_comentarios] if c in df_atrasadas.columns]
+                st.dataframe(df_atrasadas[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
+
+    df_por_recibir = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper() == "ENTREGADO"].copy() if col_estatus else pd.DataFrame()
+    with st.expander(f"📥 Por Recibir (Entregados en CDR) | {len(df_por_recibir)} Partida(s)", expanded=False):
+        if not df_por_recibir.empty:
+            if permiso_edicion:
+                df_por_recibir['Marcar Recibido'] = False
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_recibir.columns] + ['Marcar Recibido'] + [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_por_recibir.columns]
+                config_cobro = base_config.copy()
+                config_cobro.update({"Marcar Recibido": st.column_config.CheckboxColumn("🏁 Marcar Recibido", default=False)})
+                df_editado_cobro = st.data_editor(df_por_recibir[cols_visibles], column_config=config_cobro, disabled=[c for c in cols_visibles if c not in ['Marcar Recibido', col_comentarios]], hide_index=True, use_container_width=True, key="ed_cobro")
+                for col in df_por_recibir.columns: 
+                    if col not in df_editado_cobro.columns: df_editado_cobro[col] = df_por_recibir[col].values
+            else:
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio, col_paqueteria, col_guia, col_comentarios] if c in df_por_recibir.columns]
+                st.dataframe(df_por_recibir[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
+
+    if col_estatus and col_estatus in df_filtrado.columns:
+        mask_asignados = (~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains(regex_excluir)) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")
+        df_asignados = df_filtrado[mask_asignados].copy()
+    else: df_asignados = df_filtrado.copy()
+    
+    with st.expander(f"📋 Pedidos Asignados (General) | {len(df_asignados)} Partida(s)", expanded=False):
+        dfs_editados = []
+        if not df_asignados.empty:
+            if col_estatus:
+                estatus_upper = df_asignados[col_estatus].astype(str).str.upper()
+                df_asignados['Entregado'] = estatus_upper.str.contains("ENTREGADO")
+                df_asignados['Recibido'] = estatus_upper.str.contains("RECIBIDO")
+                df_asignados['Cancelar'] = estatus_upper.str.contains("CANCELADO")
+            
+            for taller, df_taller in df_asignados.groupby(col_taller):
+                with st.expander(f"🏢 {taller}", expanded=False):
+                    for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
+                        st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
+                        if permiso_edicion:
+                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra'] + [c for c in [col_paqueteria, col_guia, col_estatus_envio, col_remision] if c in df_grupo.columns] + ['Entregado', 'Recibido', 'Cancelar'] + [c for c in [col_comentarios] if c in df_grupo.columns]
+                            config_pedidos = base_config.copy()
+                            config_pedidos.update({ "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="\$ %.2f"), col_estatus_envio: st.column_config.TextColumn("📍 Rastreo", disabled=True), "Entregado": st.column_config.CheckboxColumn("🚚 Ent", default=False), "Recibido": st.column_config.CheckboxColumn("🏁 Rec", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False) })
+                            columnas_editables = ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_remision, 'Entregado', 'Recibido', 'Cancelar', col_comentarios, col_vencimiento]
+                            df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_pedidos, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
+                            for col in df_grupo.columns:
+                                if col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
+                            dfs_editados.append(df_editado_parcial)
+                        else:
+                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento, col_paqueteria, col_guia, col_estatus_envio, col_remision, col_comentarios] if c in df_grupo.columns]
+                            st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
+        if dfs_editados: df_editado = pd.concat(dfs_editados, ignore_index=True)
+
+    df_reembolsos = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().str.contains("REEMBOLSO")].copy() if col_estatus else pd.DataFrame()
+    with st.expander(f"💸 Reembolsos | {len(df_reembolsos)} Partida(s)", expanded=False):
+        if not df_reembolsos.empty:
+            if permiso_edicion:
+                df_reembolsos['Marcar Reembolsado'] = False
+                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_estatus] if c in df_reembolsos.columns] + ['Marcar Reembolsado'] + [c for c in ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_comentarios] if c in df_reembolsos.columns]
+                config_reemb = base_config.copy()
+                config_reemb.update({"Marcar Reembolsado": st.column_config.CheckboxColumn("✅ Reembolsado", default=False)})
+                df_editado_reemb = st.data_editor(df_reembolsos[cols_visibles], column_config=config_reemb, disabled=[c for c in cols_visibles if c not in ['Marcar Reembolsado', col_comentarios]], hide_index=True, use_container_width=True, key="ed_reemb")
+                for col in df_reembolsos.columns: 
+                    if col not in df_editado_reemb.columns: df_editado_reemb[col] = df_reembolsos[col].values
+            else:
+                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_estatus, 'Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_comentarios] if c in df_reembolsos.columns]
+                st.dataframe(df_reembolsos[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
+
+    df_recoleccion = df_recoleccion_total.copy()
+    if 'Estado_CDR' in df_proceso.columns: 
+        df_recoleccion['Estado_CDR'] = df_recoleccion[col_taller].astype(str).str.strip().str.upper().map(dict_estados).fillna("S/D") if col_taller else "S/D"
+    if estado_sel: df_recoleccion = df_recoleccion[df_recoleccion['Estado_CDR'].astype(str).isin(estado_sel)]
+    if taller_sel: df_recoleccion = df_recoleccion[df_recoleccion[col_taller].astype(str).isin(taller_sel)]
+    if siniestro_sel:
+        ids_sel = [s.split(" - ")[0] for s in siniestro_sel]
+        df_recoleccion = df_recoleccion[df_recoleccion[col_id].isin(ids_sel)]
+    if desc_sel: df_recoleccion = df_recoleccion[df_recoleccion[col_desc].astype(str).isin(desc_sel)]
+
+    df_editado_rec = pd.DataFrame()
+    with st.expander(f"↩️ Piezas para Recolección | {len(df_recoleccion)} Partida(s)", expanded=False):
+        if not df_recoleccion.empty:
+            if permiso_edicion:
+                cols_rec = [c for c in [col_id, col_cant, col_desc, col_precio, col_estatus] if c in df_recoleccion.columns] + [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_recoleccion.columns]
+                df_editado_rec = st.data_editor(df_recoleccion[cols_rec], column_config=base_config, disabled=[c for c in cols_rec if c not in [col_paqueteria, col_guia, col_comentarios]], hide_index=True, use_container_width=True, key="ed_rec_panel")
+                for col in df_recoleccion.columns: 
+                    if col not in df_editado_rec.columns: df_editado_rec[col] = df_recoleccion[col].values
+            else:
+                cols_rec = [c for c in [col_id, col_cant, col_desc, col_precio, col_estatus, col_paqueteria, col_guia, col_comentarios] if c in df_recoleccion.columns]
+                st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
 
 # ------------------------------------------------------------------------------
 # --- VISTA 2: PANEL OPERATIVO ---

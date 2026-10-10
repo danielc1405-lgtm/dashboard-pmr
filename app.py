@@ -1724,8 +1724,16 @@ elif vista_actual == "🚚 Rutas":
         if total_paradas > 0:
             progreso = paradas_completadas / total_paradas
             st.progress(progreso, text=f"Avance de Ruta: {int(progreso*100)}%")
-    else:
-        st.caption("No hay viajes activos despachados en este momento.")
+            
+            # --- NUEVA TABLA DE ORDEN DE DESTINOS ---
+            st.markdown("#### 📍 Destinos del Día")
+            df_destinos = df_rutas.drop_duplicates(subset=['ID_RUTA']).copy()
+            df_destinos['No.'] = range(1, len(df_destinos) + 1)
+            df_destinos['Estado'] = df_destinos['ESTATUS'].apply(lambda x: "✅ Completado" if str(x).strip().upper() == 'COMPLETADO' else "⏳ Pendiente")
+            df_destinos = df_destinos[['No.', 'LUGAR', 'Estado']].rename(columns={'LUGAR': 'Destino'})
+            st.dataframe(df_destinos, hide_index=True, use_container_width=True)
+        else:
+            st.caption("No hay viajes activos despachados en este momento.")
         
     st.markdown("---")
     
@@ -1869,14 +1877,14 @@ elif vista_actual == "🚚 Rutas":
             
             df_comp_rutas = df_proceso[df_proceso[col_estatus].astype(str).str.upper().isin(["EN PROCESAMIENTO", "POR CONFIRMAR"])].copy()
             df_comp_rutas['LLAVE'] = df_comp_rutas.apply(lambda r: gen_llave_rutas(r.get(col_id,''), r.get(col_desc,'')), axis=1)
-            df_comp_rutas['Proveedor'] = df_comp_rutas['LLAVE'].map(dict_prov_rutas)
+            df_comp_rutas['Proveedor_Compra'] = df_comp_rutas['LLAVE'].map(dict_prov_rutas)
             
             # Filtrar solo las que sí tienen proveedor
-            df_comp_rutas = df_comp_rutas[df_comp_rutas['Proveedor'].notna() & (df_comp_rutas['Proveedor'] != '')]
+            df_comp_rutas = df_comp_rutas[df_comp_rutas['Proveedor_Compra'].notna() & (df_comp_rutas['Proveedor_Compra'] != '')]
             
             if not df_comp_rutas.empty:
                 df_comp_rutas['Enviar Hoy'] = False
-                for prov, df_prov in df_comp_rutas.groupby('Proveedor'):
+                for prov, df_prov in df_comp_rutas.groupby('Proveedor_Compra'):
                     with st.expander(f"🛒 {prov} | {len(df_prov)} piezas pedidas", expanded=False):
                         cols_ver = [c for c in ['Enviar Hoy', col_id, 'Vehiculo_Info', col_desc, col_estatus] if c in df_prov.columns]
                         cfg_comp = {
@@ -1892,6 +1900,8 @@ elif vista_actual == "🚚 Rutas":
                             seleccionados = ed_comp[ed_comp['Enviar Hoy'] == True]
                             if not seleccionados.empty:
                                 df_envio = df_prov.loc[seleccionados.index].copy()
+                                # Renombramos la columna temporalmente para que despachar_a_bd_rutas tome el proveedor
+                                df_envio['Proveedor'] = prov 
                                 if despachar_a_bd_rutas(df_envio, "compra", notas_comp):
                                     st.success("¡Visita de compra asignada!")
                                     st.rerun()

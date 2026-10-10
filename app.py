@@ -1688,166 +1688,286 @@ elif vista_actual == "🧾 Facturación":
 # === [BLOQUE 9: VISTAS - RUTAS, PRECIOS, CONSULTAS GLOBALES Y CUARTEL GENERAL] ===
 # ==============================================================================
 elif vista_actual == "🚚 Rutas":
-    st.markdown("### 🚚 Despachador de Rutas (Logística Local - Nuevo León)")
+    st.markdown("## 🚚 Despachador de Rutas (Logística Local - Nuevo León)")
     st.info("Selecciona los destinos que visitará el operador hoy. Desmarca las piezas que NO deseas enviar en este viaje.")
     
-    tab_entregas, tab_recolecciones, tab_compras, tab_cotizacion = st.tabs(["📦 Entregas (CDR)", "↩ Recolecciones (CDR)", "🛒 Compras", "🔎 Cotizaciones"])
+    doc = init_connection()
     
-    dict_dir_talleres = {}
-    dict_estado_talleres = {}
-    if not df_catalogo.empty:
-        col_cat_tall = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
-        col_cat_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
-        col_cat_est = next((c for c in df_catalogo.columns if "ESTADO" in str(c).upper()), None)
-        if col_cat_tall:
-            if col_cat_dir: dict_dir_talleres = dict(zip(df_catalogo[col_cat_tall].astype(str).str.strip().str.upper(), df_catalogo[col_cat_dir].astype(str).str.strip().str.upper()))
-            if col_cat_est: dict_estado_talleres = dict(zip(df_catalogo[col_cat_tall].astype(str).str.strip().str.upper(), df_catalogo[col_cat_est].astype(str).str.strip().str.upper()))
-            
-    dict_dir_provs = {}
-    if not df_proveedores.empty:
-        dict_dir_provs = dict(zip(df_proveedores['Proveedor'].astype(str).str.strip().str.upper(), df_proveedores['Dirección'].astype(str).str.strip().str.upper()))
-
-    def enviar_a_bd_rutas(tipo, lugar, direccion, df_partidas, col_vehiculo, col_vin, col_pieza, col_siniestro, notas_op=""):
-        try:
-            doc = init_connection()
-            ws_rutas = doc.worksheet("BD_RUTAS")
-            tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
-            ahora = datetime.datetime.now(tz_mx)
-            id_ruta = "R-" + ahora.strftime("%Y%m%d%H%M%S")
-            fecha_hoy = ahora.strftime("%d/%b/%Y").upper()
-            
-            filas_a_insertar = []
-            for _, row in df_partidas.iterrows():
-                v_veh = str(row.get(col_vehiculo, 'S/D')).strip() if col_vehiculo and pd.notna(row.get(col_vehiculo)) else "S/D"
-                v_vin = str(row.get(col_vin, '')).strip() if col_vin and pd.notna(row.get(col_vin)) else ""
-                v_sin = str(row.get(col_siniestro, 'S/D')).strip() if col_siniestro and pd.notna(row.get(col_siniestro)) else "S/D"
-                v_pza = str(row.get(col_pieza, 'S/D')).strip() if col_pieza and pd.notna(row.get(col_pieza)) else "S/D"
-                fila = [id_ruta, fecha_hoy, tipo, lugar.upper(), direccion.upper(), v_veh, v_vin, v_pza, v_sin, "Pendiente", "", "", notas_op]
-                filas_a_insertar.append(fila)
-                
-            if filas_a_insertar: ws_rutas.append_rows(filas_a_insertar, value_input_option='USER_ENTERED')
-            return True
-        except Exception as e: st.error(f"Error al enviar a BD_RUTAS: {e}"); return False
-
-    with tab_entregas:
-        if col_estatus and not df_trabajo.empty:
-            df_para_entrega = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().isin(["EN TRANSITO", "RECIBIDO"])].copy()
-            if not df_para_entrega.empty:
-                df_para_entrega['Estado_CDR'] = df_para_entrega[col_taller].astype(str).str.strip().str.upper().map(dict_estado_talleres).fillna("")
-                df_para_entrega = df_para_entrega[df_para_entrega['Estado_CDR'].str.contains("NUEVO LEÓN|NUEVO LEON|NL", case=False, na=False)]
-                
-            if not df_para_entrega.empty:
-                for taller, df_taller in df_para_entrega.groupby(col_taller):
-                    with st.expander(f"🏢 {taller} | {len(df_taller)} piezas en sistema", expanded=False):
-                        cols_ver = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_estatus, col_remision] if c in df_taller.columns]
-                        df_interactivo = df_taller[cols_ver].copy()
-                        df_interactivo.insert(0, 'Enviar Hoy', True)
-                        config_ent = {'Enviar Hoy': st.column_config.CheckboxColumn("Enviar Hoy", default=True)}
-                        for c in cols_ver: config_ent[c] = st.column_config.TextColumn(disabled=True)
-                        editado = st.data_editor(df_interactivo, column_config=config_ent, hide_index=True, use_container_width=True, key=f"ed_ent_{taller}")
-                        direccion_taller = dict_dir_talleres.get(str(taller).strip().upper(), "Dirección no registrada en catálogo")
-                        nota_op_ent = st.text_input("📝 Instrucciones / Notas:", key=f"nota_ent_{taller}", placeholder="Ej. Dejar con el jefe de taller")
-                        
-                        if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_ent_{taller}"):
-                            seleccionadas = editado[editado['Enviar Hoy'] == True]
-                            if not seleccionadas.empty:
-                                with st.spinner(f"Inyectando parada..."):
-                                    col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
-                                    exito = enviar_a_bd_rutas('entrega', taller, direccion_taller, df_taller.loc[seleccionadas.index], 'Vehiculo_Info', col_vin, col_desc, col_id, notas_op=nota_op_ent)
-                                    if exito: st.success(f"✅ ¡Enviado con {len(seleccionadas)} pieza(s)!"); time.sleep(1.5); st.rerun()
-                            else: st.warning("Selecciona al menos una pieza.")
-            else: st.success("✅ No hay entregas locales pendientes.")
-
-    with tab_recolecciones:
-        if col_estatus and not df_trabajo.empty:
-            df_para_recoleccion = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("RECOLEC")].copy()
-            if not df_para_recoleccion.empty:
-                df_para_recoleccion['Estado_CDR'] = df_para_recoleccion[col_taller].astype(str).str.strip().str.upper().map(dict_estado_talleres).fillna("")
-                df_para_recoleccion = df_para_recoleccion[df_para_recoleccion['Estado_CDR'].str.contains("NUEVO LEÓN|NUEVO LEON|NL", case=False, na=False)]
-                
-            if not df_para_recoleccion.empty:
-                for taller, df_taller in df_para_recoleccion.groupby(col_taller):
-                    with st.expander(f"🏢 {taller} | {len(df_taller)} piezas a recolectar", expanded=False):
-                        cols_ver = [c for c in [col_id, 'Vehiculo_Info', col_desc, col_estatus] if c in df_taller.columns]
-                        df_interactivo = df_taller[cols_ver].copy()
-                        df_interactivo.insert(0, 'Recoger Hoy', True)
-                        config_rec = {'Recoger Hoy': st.column_config.CheckboxColumn("Recoger Hoy", default=True)}
-                        for c in cols_ver: config_rec[c] = st.column_config.TextColumn(disabled=True)
-                        editado = st.data_editor(df_interactivo, column_config=config_rec, hide_index=True, use_container_width=True, key=f"ed_rec_{taller}")
-                        direccion_taller = dict_dir_talleres.get(str(taller).strip().upper(), "Dirección no registrada en catálogo")
-                        nota_op_rec = st.text_input("📝 Instrucciones / Notas:", key=f"nota_rec_{taller}", placeholder="Ej. Validar que venga completa")
-                        
-                        if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_rec_{taller}"):
-                            seleccionadas = editado[editado['Recoger Hoy'] == True]
-                            if not seleccionadas.empty:
-                                with st.spinner("Enviando..."):
-                                    col_vin = next((c for c in df_taller.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
-                                    exito = enviar_a_bd_rutas('recoleccion', taller, direccion_taller, df_taller.loc[seleccionadas.index], 'Vehiculo_Info', col_vin, col_desc, col_id, notas_op=nota_op_rec)
-                                    if exito: st.success(f"✅ ¡Recolección asignada!"); time.sleep(1.5); st.rerun()
-                            else: st.warning("Selecciona al menos una pieza.")
-            else: st.success("✅ No hay recolecciones locales pendientes.")
-                
-    with tab_compras:
-        if not df_compras.empty:
-            df_c_pend = df_compras[df_compras['Recibido'].astype(str).str.strip().str.upper().isin(['FALSE', 'NO', '0', 'FALSO', ''])].copy()
-            if not df_c_pend.empty:
-                for prov, df_prov in df_c_pend.groupby('Proveedor'):
-                    prov_limpio = str(prov).strip()
-                    if prov_limpio and prov_limpio.lower() != 'nan':
-                        with st.expander(f"🚚 {prov_limpio} | {len(df_prov)} compras pendientes", expanded=False):
-                            cols_ver = ['Siniestro', 'Vehículo', 'Descripción Pieza', 'Condición Pago']
-                            df_interactivo = df_prov[cols_ver].copy()
-                            df_interactivo.insert(0, 'Recolectar Hoy', True)
-                            config_comp = {'Recolectar Hoy': st.column_config.CheckboxColumn("Recolectar Hoy", default=True)}
-                            for c in cols_ver: config_comp[c] = st.column_config.TextColumn(disabled=True)
-                            editado = st.data_editor(df_interactivo, column_config=config_comp, hide_index=True, use_container_width=True, key=f"ed_comp_{prov_limpio}")
-                            direccion_prov = dict_dir_provs.get(prov_limpio.upper(), "Dirección no registrada")
-                            nota_op_comp = st.text_input("📝 Instrucciones / Notas:", key=f"nota_comp_{prov_limpio}", placeholder="Ej. Llevar cheque")
-                            
-                            if st.button(f"➕ Enviar Selección a {prov_limpio}", key=f"btn_comp_{prov_limpio}"):
-                                seleccionadas = editado[editado['Recolectar Hoy'] == True]
-                                if not seleccionadas.empty:
-                                    with st.spinner(f"Asignando visita..."):
-                                        exito = enviar_a_bd_rutas('compra', prov_limpio, direccion_prov, df_prov.loc[seleccionadas.index], 'Vehículo', None, 'Descripción Pieza', 'Siniestro', notas_op=nota_op_comp)
-                                        if exito: st.success(f"✅ ¡Visita enviada al celular!"); time.sleep(1.5); st.rerun()
-                                else: st.warning("Selecciona al menos una pieza.")
-            else: st.success("✅ Todas las compras han sido marcadas como recibidas.")
-        else: st.warning("La base de datos de compras está vacía.")
+    # --- 1. MONITOR EN VIVO ---
+    st.markdown("### 📡 Monitor de Ruta en Vivo")
+    try:
+        ws_rutas = doc.worksheet("BD_RUTAS")
+        datos_rutas = ws_rutas.get_all_values()
+        df_rutas = pd.DataFrame(datos_rutas[1:], columns=[str(h).strip().upper() for h in datos_rutas[0]]) if len(datos_rutas) > 1 else pd.DataFrame()
+    except Exception as e:
+        st.error(f"⚠️ No se encontró la hoja 'BD_RUTAS' en Google Sheets. Por favor créala con los encabezados correspondientes. Error: {e}")
+        df_rutas = pd.DataFrame()
         
-    with tab_cotizacion:
-        st.markdown("#### 🔎 Asignar Cotización / Visita Especial")
+    if not df_rutas.empty and 'ESTATUS' in df_rutas.columns:
+        df_rutas_pendientes = df_rutas[df_rutas['ESTATUS'].astype(str).str.upper() == 'PENDIENTE']
+        df_rutas_completados = df_rutas[df_rutas['ESTATUS'].astype(str).str.upper() == 'COMPLETADO']
+        
+        if 'ID_RUTA' in df_rutas.columns:
+            paradas_pendientes = df_rutas_pendientes['ID_RUTA'].nunique()
+            paradas_completadas = df_rutas_completados['ID_RUTA'].nunique()
+        else:
+            paradas_pendientes = len(df_rutas_pendientes)
+            paradas_completadas = len(df_rutas_completados)
+            
+        total_paradas = paradas_pendientes + paradas_completadas
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("🚩 Viajes Asignados", total_paradas)
+        col_m2.metric("✅ Completados por Operador", paradas_completadas)
+        col_m3.metric("⏳ Pendientes en Calle", paradas_pendientes)
+        
+        if total_paradas > 0:
+            progreso = paradas_completadas / total_paradas
+            st.progress(progreso, text=f"Avance de Ruta: {int(progreso*100)}%")
+    else:
+        st.caption("No hay viajes activos despachados en este momento.")
+        
+    st.markdown("---")
+    
+    # --- FUNCIÓN MAESTRA DE DESPACHO ---
+    def despachar_a_bd_rutas(df_seleccion, tipo_operacion, notas_general=""):
+        if df_seleccion.empty: return False
+        try:
+            filas_insertar = []
+            fecha_hoy = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y %H:%M")
+            # Determinar agrupador
+            if 'Taller' in df_seleccion.columns: col_agrupar = 'Taller'
+            elif 'Proveedor' in df_seleccion.columns: col_agrupar = 'Proveedor'
+            else: col_agrupar = df_seleccion.columns[0]
+            
+            # Buscar diccionario de direcciones (Si existe df_catalogo o df_proveedores)
+            dict_direcciones = {}
+            if 'Proveedor' in df_seleccion.columns and not df_proveedores.empty:
+                c_prov = next((c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper()), None)
+                c_dir = next((c for c in df_proveedores.columns if 'DIRECC' in str(c).upper()), None)
+                if c_prov and c_dir: dict_direcciones = dict(zip(df_proveedores[c_prov].astype(str).str.strip().str.upper(), df_proveedores[c_dir]))
+            elif 'Taller' in df_seleccion.columns and not df_catalogo.empty:
+                c_tall = next((c for c in df_catalogo.columns if 'TALLER' in str(c).upper()), None)
+                c_dir = next((c for c in df_catalogo.columns if 'DIRECC' in str(c).upper()), None)
+                if c_tall and c_dir: dict_direcciones = dict(zip(df_catalogo[c_tall].astype(str).str.strip().str.upper(), df_catalogo[c_dir]))
+
+            for lugar, grupo in df_seleccion.groupby(col_agrupar):
+                lugar_str = str(lugar).strip()
+                id_ruta = f"RT-{int(datetime.datetime.now(tz_mx).timestamp())}-{lugar_str[:3].upper()}"
+                direccion_calculada = dict_direcciones.get(lugar_str.upper(), "Ver Google Maps / Sin Dirección Registrada")
+                
+                vehiculo_calculado = str(grupo['Vehiculo_Info'].iloc[0]) if 'Vehiculo_Info' in grupo.columns else "S/D"
+                vin_calculado = str(grupo.get(col_vin, "S/D").iloc[0]) if col_vin and col_vin in grupo.columns else "S/D"
+                
+                for _, row in grupo.iterrows():
+                    siniestro = str(row.get(col_id, row.get('Pedido / Siniestro', ''))) if col_id else ''
+                    pieza = str(row.get(col_desc, row.get('Descrip.', ''))) if col_desc else ''
+                    # Estructura obligatoria para BD_RUTAS
+                    # ["ID_RUTA", "FECHA", "TIPO_OPERACION", "LUGAR", "DIRECCION", "VEHICULO", "VIN", "PIEZA", "SINIESTRO", "NOTA", "ESTATUS"]
+                    fila = [id_ruta, fecha_hoy, tipo_operacion.upper(), lugar_str, direccion_calculada, vehiculo_calculado, vin_calculado, pieza, siniestro, notas_general, "PENDIENTE"]
+                    filas_insertar.append(fila)
+            
+            if filas_insertar:
+                ws_r = doc.worksheet("BD_RUTAS")
+                if len(ws_r.get_all_values()) == 0: # Si la hoja está vacía, creamos encabezados
+                    ws_r.append_row(["ID_RUTA", "FECHA", "TIPO_OPERACION", "LUGAR", "DIRECCION", "VEHICULO", "VIN", "PIEZA", "SINIESTRO", "NOTA", "ESTATUS"])
+                ws_r.append_rows(filas_insertar, value_input_option='USER_ENTERED')
+                return True
+        except Exception as e:
+            st.error(f"Error al despachar: {e}")
+            return False
+        return False
+
+    # --- PESTAÑAS DE OPERACIÓN ---
+    tab_entregas, tab_recolecciones, tab_compras, tab_cotizaciones = st.tabs(["📦 Entregas (CDR)", "↩️ Recolecciones (CDR)", "🛒 Compras", "🔎 Cotizaciones"])
+    
+    # ---------------------------------------------------------
+    # TAB 1: ENTREGAS
+    # ---------------------------------------------------------
+    with tab_entregas:
+        df_ent = df_proceso[df_proceso[col_estatus].astype(str).str.upper() == "EN TRANSITO"].copy() if not df_proceso.empty and col_estatus else pd.DataFrame()
+        if not df_ent.empty:
+            df_ent['Enviar Hoy'] = False
+            for taller, df_taller in df_ent.groupby(col_taller):
+                with st.expander(f"🏢 {taller} | {len(df_taller)} piezas en sistema", expanded=False):
+                    cols_ver = [c for c in ['Enviar Hoy', col_id, 'Vehiculo_Info', col_desc, col_estatus, col_remision] if c in df_taller.columns]
+                    cfg = {
+                        "Enviar Hoy": st.column_config.CheckboxColumn("🚚 Enviar Hoy", default=False),
+                        col_id: st.column_config.TextColumn("Pedido / Siniestro", disabled=True),
+                        'Vehiculo_Info': st.column_config.TextColumn("Vehículo", disabled=True),
+                        col_desc: st.column_config.TextColumn("Descripción", disabled=True)
+                    }
+                    ed_ent = st.data_editor(df_taller[cols_ver], column_config=cfg, hide_index=True, use_container_width=True, key=f"ent_{taller}")
+                    
+                    notas_ent = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Dejar con el jefe de taller", key=f"notas_ent_{taller}")
+                    
+                    if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_ent_{taller}"):
+                        seleccionados = ed_ent[ed_ent['Enviar Hoy'] == True]
+                        if not seleccionados.empty:
+                            df_envio = df_taller.loc[seleccionados.index].copy()
+                            if despachar_a_bd_rutas(df_envio, "entrega", notas_ent):
+                                st.success("¡Destino agregado a la ruta del operador!")
+                                st.rerun()
+                        else: st.warning("Selecciona al menos una pieza.")
+        else:
+            st.success("No hay piezas 'En Tránsito' pendientes de envío a CDR.")
+
+    # ---------------------------------------------------------
+    # TAB 2: RECOLECCIONES
+    # ---------------------------------------------------------
+    with tab_recolecciones:
+        # Buscamos en df_recoleccion_total (que proviene de Unificada) 
+        df_rec = df_recoleccion_total[df_recoleccion_total[col_estatus].astype(str).str.upper() == "EN PROCESO DE RECOLECCIÓN"].copy() if not df_recoleccion_total.empty and col_estatus else pd.DataFrame()
+        
+        # Le pegamos las de Histórico si es que andan por ahí
+        if 'df_historico' in globals() and not df_historico.empty and col_estatus in df_historico.columns:
+            df_rec_hist = df_historico[df_historico[col_estatus].astype(str).str.upper() == "EN PROCESO DE RECOLECCIÓN"].copy()
+            if not df_rec_hist.empty:
+                if 'Vehiculo_Info' not in df_rec_hist.columns: df_rec_hist['Vehiculo_Info'] = "Vehículo Histórico S/D"
+                df_rec = pd.concat([df_rec, df_rec_hist], ignore_index=True)
+
+        if not df_rec.empty:
+            df_rec['Enviar Hoy'] = False
+            for taller, df_taller in df_rec.groupby(col_taller):
+                with st.expander(f"↩️ {taller} | {len(df_taller)} piezas a recolectar", expanded=False):
+                    cols_ver = [c for c in ['Enviar Hoy', col_id, 'Vehiculo_Info', col_desc, col_estatus, col_paqueteria, col_guia, col_comentarios] if c in df_taller.columns]
+                    cfg_rec = {
+                        "Enviar Hoy": st.column_config.CheckboxColumn("🚚 Enviar Hoy", default=False),
+                        col_id: st.column_config.TextColumn("Siniestro", disabled=True),
+                        'Vehiculo_Info': st.column_config.TextColumn("Vehículo", disabled=True),
+                        col_desc: st.column_config.TextColumn("Descripción", disabled=True)
+                    }
+                    ed_rec = st.data_editor(df_taller[cols_ver], column_config=cfg_rec, hide_index=True, use_container_width=True, key=f"rec_{taller}")
+                    
+                    notas_rec = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Pedir acuse de recibo físico", key=f"notas_rec_{taller}")
+                    
+                    if st.button(f"➕ Enviar Selección a Ruta", key=f"btn_rec_{taller}"):
+                        seleccionados = ed_rec[ed_rec['Enviar Hoy'] == True]
+                        if not seleccionados.empty:
+                            df_envio = df_taller.loc[seleccionados.index].copy()
+                            if despachar_a_bd_rutas(df_envio, "recoleccion", notas_rec):
+                                st.success("¡Recolección asignada al operador!")
+                                st.rerun()
+                        else: st.warning("Selecciona al menos una pieza.")
+        else:
+            st.success("No hay recolecciones con estatus 'EN PROCESO DE RECOLECCIÓN'.")
+
+    # ---------------------------------------------------------
+    # TAB 3: COMPRAS
+    # ---------------------------------------------------------
+    with tab_compras:
+        if not df_compras.empty and not df_proceso.empty:
+            # Recrear llave para cruzar
+            def gen_llave_rutas(id_val, desc_val):
+                id_str = str(id_val).strip().upper()
+                if id_str.endswith('.0'): id_str = id_str[:-2]
+                return f"{id_str}_{' '.join(str(desc_val).strip().upper().split())}"
+                
+            df_comp_temp = df_compras.copy()
+            df_comp_temp['LLAVE'] = df_comp_temp.apply(lambda r: gen_llave_rutas(r.get('Siniestro',''), r.get('Descripción Pieza','')), axis=1)
+            dict_prov_rutas = dict(zip(df_comp_temp['LLAVE'], df_comp_temp['Proveedor']))
+            
+            df_comp_rutas = df_proceso[df_proceso[col_estatus].astype(str).str.upper().isin(["EN PROCESAMIENTO", "POR CONFIRMAR"])].copy()
+            df_comp_rutas['LLAVE'] = df_comp_rutas.apply(lambda r: gen_llave_rutas(r.get(col_id,''), r.get(col_desc,'')), axis=1)
+            df_comp_rutas['Proveedor'] = df_comp_rutas['LLAVE'].map(dict_prov_rutas)
+            
+            # Filtrar solo las que sí tienen proveedor
+            df_comp_rutas = df_comp_rutas[df_comp_rutas['Proveedor'].notna() & (df_comp_rutas['Proveedor'] != '')]
+            
+            if not df_comp_rutas.empty:
+                df_comp_rutas['Enviar Hoy'] = False
+                for prov, df_prov in df_comp_rutas.groupby('Proveedor'):
+                    with st.expander(f"🛒 {prov} | {len(df_prov)} piezas pedidas", expanded=False):
+                        cols_ver = [c for c in ['Enviar Hoy', col_id, 'Vehiculo_Info', col_desc, col_estatus] if c in df_prov.columns]
+                        cfg_comp = {
+                            "Enviar Hoy": st.column_config.CheckboxColumn("🚚 Recoger Hoy", default=False),
+                            col_id: st.column_config.TextColumn("Siniestro", disabled=True),
+                            col_desc: st.column_config.TextColumn("Pieza a recoger", disabled=True)
+                        }
+                        ed_comp = st.data_editor(df_prov[cols_ver], column_config=cfg_comp, hide_index=True, use_container_width=True, key=f"comp_{prov}")
+                        
+                        notas_comp = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Pagar en efectivo al llegar", key=f"notas_comp_{prov}")
+                        
+                        if st.button(f"➕ Enviar al Operador a {prov}", key=f"btn_comp_{prov}"):
+                            seleccionados = ed_comp[ed_comp['Enviar Hoy'] == True]
+                            if not seleccionados.empty:
+                                df_envio = df_prov.loc[seleccionados.index].copy()
+                                if despachar_a_bd_rutas(df_envio, "compra", notas_comp):
+                                    st.success("¡Visita de compra asignada!")
+                                    st.rerun()
+                            else: st.warning("Selecciona al menos una pieza.")
+            else:
+                st.info("No hay piezas en procesamiento con proveedor asignado.")
+        else:
+            st.info("Falta información de compras para cruzar datos.")
+
+    # ---------------------------------------------------------
+    # TAB 4: COTIZACIONES EVENTUALES
+    # ---------------------------------------------------------
+    with tab_cotizaciones:
+        st.markdown("### 🔎 Asignar Cotización / Visita Especial")
         st.caption("Usa esta pestaña para enviar al operador a revisar piezas sin una orden de compra formal.")
         
-        col_cot1, col_cot2 = st.columns(2)
-        with col_cot1:
-            sel_lugar = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", lista_proveedores + ["➕ [ ESCRIBIR OTRO NUEVO... ]"])
-            lugar_cot = st.text_input("Escribe el nombre del nuevo lugar *") if sel_lugar == "➕ [ ESCRIBIR OTRO NUEVO... ]" else sel_lugar
-        with col_cot2:
-            lugar_base = lugar_cot.split(' - ')[0].strip() if ' - ' in lugar_cot else lugar_cot
-            dir_sugerida = dict_dir_provs.get(lugar_base.upper(), "") if lugar_base else ""
-            dir_cot = st.text_input("Dirección o Zona", value=dir_sugerida)
+        lista_provs = sorted([str(p).strip().upper() for p in df_proveedores[next(c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper())].dropna().unique()]) if not df_proveedores.empty else []
+        
+        with st.form("form_cotizacion_ruta"):
+            c1, c2 = st.columns(2)
+            with c1: 
+                # Input dinámico: permite seleccionar o escribir
+                prov_eventual = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", ["-- ESCRIBIR NUEVO --"] + lista_provs)
+                nuevo_prov = ""
+                if prov_eventual == "-- ESCRIBIR NUEVO --":
+                    nuevo_prov = st.text_input("Ingresa el Nombre del Nuevo Proveedor *").strip().upper()
+            with c2:
+                dir_eventual = st.text_input("Dirección o Zona (Para que navegue el chofer)")
+                vin_eventual = st.text_input("VIN / Número de Serie")
+                
+            st.markdown("**Piezas a buscar**")
+            p1, p2 = st.columns(2)
+            pieza1 = p1.text_input("1. Descripción de la pieza *")
+            pieza2 = p2.text_input("2. Descripción de la pieza (Opcional)")
             
-        col_cot3, col_cot4 = st.columns(2)
-        vehiculo_cot = col_cot3.text_input("Vehículo *")
-        vin_cot = col_cot4.text_input("VIN / Número de Serie")
-        
-        st.markdown("**Piezas a buscar ***")
-        df_p_vacia = pd.DataFrame([{"Número de Parte": "", "Descripción": ""}])
-        config_columnas_cot = {"Número de Parte": st.column_config.TextColumn("No. de Parte (Opcional)", width="medium"), "Descripción": st.column_config.TextColumn("Descripción de la Pieza", width="large")}
-        df_piezas_cot = st.data_editor(df_p_vacia, num_rows="dynamic", use_container_width=True, key="tabla_cotizaciones", hide_index=True, column_config=config_columnas_cot)
-        nota_cot = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Solo tomar fotos", key="nota_cot_manual")
-        
-        if st.button("➕ Enviar Cotización a la Ruta", type="primary", use_container_width=True):
-            piezas_validas = df_piezas_cot[(df_piezas_cot["Descripción"].str.strip() != "") | (df_piezas_cot["Número de Parte"].str.strip() != "")]
-            if lugar_cot.strip() and vehiculo_cot.strip() and not piezas_validas.empty:
-                df_cot_list = []
-                for _, row_p in piezas_validas.iterrows():
-                    np = str(row_p['Número de Parte']).strip(); desc = str(row_p['Descripción']).strip()
-                    texto_pieza = f"{np} - {desc}".strip(" - ") if np and desc else (np if np else desc)
-                    df_cot_list.append({'Vehiculo_C': vehiculo_cot.upper(), 'VIN_C': vin_cot.upper(), 'Pieza_C': texto_pieza.upper(), 'Sin_C': 'COTIZACIÓN'})
-                exito = enviar_a_bd_rutas('cotizacion', lugar_cot, dir_cot, pd.DataFrame(df_cot_list), 'Vehiculo_C', 'VIN_C', 'Pieza_C', 'Sin_C', notas_op=nota_cot)
-                if exito: st.success(f"✅ ¡Cotización en {lugar_cot} enviada!"); time.sleep(1.5); st.rerun()
-            else: st.error("❌ Completa Lugar, Vehículo y agrega al menos la descripción o número de parte.")
+            notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Solo tomar fotos")
+            
+            btn_cot = st.form_submit_button("➕ Enviar Cotización a la Ruta", type="primary")
+            
+            if btn_cot:
+                nombre_final = nuevo_prov if prov_eventual == "-- ESCRIBIR NUEVO --" else prov_eventual
+                if not nombre_final or not pieza1:
+                    st.error("⚠️ El Lugar y al menos 1 Pieza son obligatorios.")
+                else:
+                    # Si es nuevo, lo guardamos en BD_PROVEEDORES silenciosamente
+                    if prov_eventual == "-- ESCRIBIR NUEVO --":
+                        try:
+                            ws_p = doc.worksheet("BD_PROVEEDORES")
+                            # Estructura básica: Nombre, Categoria, Dirección, etc. Rellenamos lo básico.
+                            headers_p = ws_p.row_values(1)
+                            fila_prov = [""] * len(headers_p)
+                            if headers_p: 
+                                fila_prov[0] = nombre_final
+                                if len(fila_prov) > 1: fila_prov[1] = "EVENTUAL (CREADO DESDE RUTA)"
+                                if len(fila_prov) > 3: fila_prov[3] = dir_eventual
+                            ws_p.append_row(fila_prov)
+                        except: pass
+                    
+                    # Armar dataframe temporal para reutilizar la función maestra
+                    piezas_lista = [pieza1]
+                    if pieza2: piezas_lista.append(pieza2)
+                    
+                    datos_cot = {
+                        'Proveedor': [nombre_final] * len(piezas_lista),
+                        'Vehiculo_Info': ["Cotización Especial"] * len(piezas_lista),
+                        'Descrip.': piezas_lista
+                    }
+                    if col_vin: datos_cot[col_vin] = [vin_eventual] * len(piezas_lista)
+                    if col_id: datos_cot[col_id] = ["N/A"] * len(piezas_lista)
+                    
+                    df_cot = pd.DataFrame(datos_cot)
+                    
+                    if despachar_a_bd_rutas(df_cot, "cotizacion", notas_eventual):
+                        st.success(f"¡Cotización enviada a {nombre_final} exitosamente!")
+                        time.sleep(1)
+                        st.rerun()
 
 elif vista_actual == "Precios Promedio":
     st.markdown("## 💲 Precios Promedio Históricos")

@@ -239,7 +239,7 @@ else:
                             if filas_a_actualizar:
                                 celdas_cambio = []
                                 for fila_idx in filas_a_actualizar:
-                                    celdas_cambio.append(gspread.Cell(row=fila_idx, col=10, value="Completado"))
+                                    celdas_cambio.append(gspread.Cell(row=fila_idx, col=11, value="Completado"))
                                 
                                 ws_rutas.update_cells(celdas_cambio, value_input_option='USER_ENTERED')
                                 st.success("¡Listo! ✅")

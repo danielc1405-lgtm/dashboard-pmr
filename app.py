@@ -1725,12 +1725,26 @@ elif vista_actual == "🚚 Rutas":
             progreso = paradas_completadas / total_paradas
             st.progress(progreso, text=f"Avance de Ruta: {int(progreso*100)}%")
             
-            # --- NUEVA TABLA DE ORDEN DE DESTINOS ---
+            # --- NUEVA TABLA ENRIQUECIDA DE DESTINOS ---
             st.markdown("#### 📍 Destinos del Día")
-            df_destinos = df_rutas.drop_duplicates(subset=['ID_RUTA']).copy()
-            df_destinos['No.'] = range(1, len(df_destinos) + 1)
-            df_destinos['Estado'] = df_destinos['ESTATUS'].apply(lambda x: "✅ Completado" if str(x).strip().upper() == 'COMPLETADO' else "⏳ Pendiente")
-            df_destinos = df_destinos[['No.', 'LUGAR', 'Estado']].rename(columns={'LUGAR': 'Destino'})
+            
+            # Agrupar para juntar múltiples piezas en un mismo destino
+            df_resumen = df_rutas.groupby('ID_RUTA').agg({
+                'TIPO_OPERACION': 'first',
+                'LUGAR': 'first',
+                'SINIESTRO': lambda x: ", ".join(x.unique()),
+                'VEHICULO': 'first',
+                'PIEZA': 'count',
+                'ESTATUS': 'first'
+            }).reset_index()
+            
+            df_resumen['No.'] = range(1, len(df_resumen) + 1)
+            df_resumen['Estado'] = df_resumen['ESTATUS'].apply(lambda x: "✅ Completado" if str(x).strip().upper() == 'COMPLETADO' else "⏳ Pendiente")
+            df_resumen['Operación'] = df_resumen['TIPO_OPERACION'].str.upper() + " (" + df_resumen['PIEZA'].astype(str) + " pzas)"
+            
+            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'VEHICULO', 'Estado']].rename(
+                columns={'LUGAR': 'Lugar a Visitar', 'SINIESTRO': 'Siniestro(s)', 'VEHICULO': 'Vehículo'}
+            )
             st.dataframe(df_destinos, hide_index=True, use_container_width=True)
         else:
             st.caption("No hay viajes activos despachados en este momento.")
@@ -1743,18 +1757,20 @@ elif vista_actual == "🚚 Rutas":
         try:
             filas_insertar = []
             fecha_hoy = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y %H:%M")
-            # Determinar agrupador
-            if 'Taller' in df_seleccion.columns: col_agrupar = 'Taller'
-            elif 'Proveedor' in df_seleccion.columns: col_agrupar = 'Proveedor'
-            else: col_agrupar = df_seleccion.columns[0]
             
-            # Buscar diccionario de direcciones (Si existe df_catalogo o df_proveedores)
+            # 1. Determinar agrupador estricto según la operación (Evita el bug del Taller en Compras)
+            if tipo_operacion.lower() in ['compra', 'cotizacion']:
+                col_agrupar = 'Proveedor' if 'Proveedor' in df_seleccion.columns else df_seleccion.columns[0]
+            else:
+                col_agrupar = 'Taller' if 'Taller' in df_seleccion.columns else df_seleccion.columns[0]
+            
+            # 2. Buscar el diccionario de direcciones correcto
             dict_direcciones = {}
-            if 'Proveedor' in df_seleccion.columns and not df_proveedores.empty:
+            if tipo_operacion.lower() in ['compra', 'cotizacion'] and not df_proveedores.empty:
                 c_prov = next((c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper()), None)
                 c_dir = next((c for c in df_proveedores.columns if 'DIRECC' in str(c).upper()), None)
                 if c_prov and c_dir: dict_direcciones = dict(zip(df_proveedores[c_prov].astype(str).str.strip().str.upper(), df_proveedores[c_dir]))
-            elif 'Taller' in df_seleccion.columns and not df_catalogo.empty:
+            elif tipo_operacion.lower() in ['entrega', 'recoleccion'] and not df_catalogo.empty:
                 c_tall = next((c for c in df_catalogo.columns if 'TALLER' in str(c).upper()), None)
                 c_dir = next((c for c in df_catalogo.columns if 'DIRECC' in str(c).upper()), None)
                 if c_tall and c_dir: dict_direcciones = dict(zip(df_catalogo[c_tall].astype(str).str.strip().str.upper(), df_catalogo[c_dir]))
@@ -1770,14 +1786,21 @@ elif vista_actual == "🚚 Rutas":
                 for _, row in grupo.iterrows():
                     siniestro = str(row.get(col_id, row.get('Pedido / Siniestro', ''))) if col_id else ''
                     pieza = str(row.get(col_desc, row.get('Descrip.', ''))) if col_desc else ''
+                    
+                    # 3. LIGAR DESTINO FINAL EN NOTAS (El "toque maestro" para el chofer)
+                    nota_final = notas_general
+                    if tipo_operacion.lower() == 'compra':
+                        taller_destino = str(row.get('Taller', ''))
+                        if taller_destino and taller_destino.lower() != 'nan':
+                            nota_final = f"Llevar a: {taller_destino} | {notas_general}".strip(" |")
+
                     # Estructura obligatoria para BD_RUTAS
-                    # ["ID_RUTA", "FECHA", "TIPO_OPERACION", "LUGAR", "DIRECCION", "VEHICULO", "VIN", "PIEZA", "SINIESTRO", "NOTA", "ESTATUS"]
-                    fila = [id_ruta, fecha_hoy, tipo_operacion.upper(), lugar_str, direccion_calculada, vehiculo_calculado, vin_calculado, pieza, siniestro, notas_general, "PENDIENTE"]
+                    fila = [id_ruta, fecha_hoy, tipo_operacion.upper(), lugar_str, direccion_calculada, vehiculo_calculado, vin_calculado, pieza, siniestro, nota_final, "PENDIENTE"]
                     filas_insertar.append(fila)
             
             if filas_insertar:
                 ws_r = doc.worksheet("BD_RUTAS")
-                if len(ws_r.get_all_values()) == 0: # Si la hoja está vacía, creamos encabezados
+                if len(ws_r.get_all_values()) == 0: 
                     ws_r.append_row(["ID_RUTA", "FECHA", "TIPO_OPERACION", "LUGAR", "DIRECCION", "VEHICULO", "VIN", "PIEZA", "SINIESTRO", "NOTA", "ESTATUS"])
                 ws_r.append_rows(filas_insertar, value_input_option='USER_ENTERED')
                 return True

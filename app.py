@@ -381,6 +381,7 @@ if not modo_consulta:
 # === [BLOQUE 6: VISTAS - ANALÍTICO Y OPERATIVO] ===
 # ==============================================================================
 import plotly.graph_objects as go
+import pandas as pd
 
 # Variables de tiempo globales para este bloque
 tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
@@ -415,7 +416,7 @@ if not df_proceso.empty and col_estatus_envio and col_estatus:
         rastreo = str(row.get(col_estatus_envio, '')).strip().lower()
         estatus_actual = str(row.get(col_estatus, '')).strip().upper()
         if "delivery" in rastreo or "entregado" in rastreo:
-            if estatus_actual not in ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN", "PÉRDIDA TOTAL"]:
+            if estatus_actual not in ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN", "PÉRDIDA TOTAL", "PAGO DE DAÑOS"]:
                 return "ENTREGADO"
         return row[col_estatus]
         
@@ -462,7 +463,7 @@ if vista_actual == "📊 Analítico":
             df_c_ana['Fecha Llegada'] = df_c_ana['Llegada_Calc'].dt.strftime('%d/%b/%y').fillna('-')
             dict_llegada_ana = dict(zip(df_c_ana['LLAVE'], df_c_ana['Fecha Llegada']))
 
-    # --- 1. VELOCIDAD LOGÍSTICA (INICIO: 4 DE SEPTIEMBRE 2026) ---
+    # --- 1. VELOCIDAD LOGÍSTICA ---
     st.markdown("#### ⏱️ 1. Velocidad Logística (Desde el 04/Sep/2026)")
     st.caption("Promedios de tiempo calculados con datos reales desde el inicio del uso del sistema.")
     if col_asignacion and col_fecha_confi and not df_completo.empty:
@@ -484,9 +485,9 @@ if vista_actual == "📊 Analítico":
         fecha_inicio_sistema = pd.to_datetime('2026-09-04')
         df_vel_mes = df_vel[df_vel['F_Asig_D'] >= fecha_inicio_sistema].copy()
         
-        # Excluimos PT y Cancelados de la velocidad
+        # Excluimos Cancelados, PT y PDD de la velocidad
         if col_estatus:
-            df_vel_mes = df_vel_mes[~df_vel_mes[col_estatus].astype(str).str.upper().isin(["CANCELADO", "PÉRDIDA TOTAL"])]
+            df_vel_mes = df_vel_mes[~df_vel_mes[col_estatus].astype(str).str.upper().isin(["CANCELADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS"])]
         
         if not df_vel_mes.empty:
             df_vel_mes['F_Conf_D'] = safe_apply_date(df_vel_mes, col_fecha_confi)
@@ -551,7 +552,6 @@ if vista_actual == "📊 Analítico":
             df_m['M_Lim'] = df_m[col_marca].astype(str).str.strip().str.upper()
             df_m['Mod_Lim'] = df_m[col_modelo].astype(str).str.strip().str.upper()
             
-            # Filtro para evitar marcas y modelos vacíos o "S/D"
             df_m = df_m[(df_m['M_Lim'] != '') & (df_m['M_Lim'] != 'NAN') & (df_m['M_Lim'] != 'S/D')]
             df_m = df_m[(df_m['Mod_Lim'] != '') & (df_m['Mod_Lim'] != 'NAN') & (df_m['Mod_Lim'] != 'S/D')]
             
@@ -575,8 +575,65 @@ if vista_actual == "📊 Analítico":
 
     st.markdown("---")
 
-    # --- 3. MONITOR LOGÍSTICO (AGRUPADO INTELIGENTE CON RASTREO Y ETA) ---
-    st.markdown(f"#### 📋 4. Monitor Logístico en Curso ({aseguradora_sel.upper()})")
+    # --- 4. RESUMEN FINANCIERO MENSUAL ---
+    st.markdown("#### 💰 4. Resumen Financiero Mensual")
+    st.caption("Evolución de montos de venta: Concretados (Facturados/Recibidos) vs. Mermas (PT y PDD).")
+    
+    if col_asignacion and col_precio and col_estatus and not df_completo.empty:
+        df_fin = df_completo.copy()
+        df_fin['F_Asig_D'] = safe_apply_date(df_fin, col_asignacion)
+        
+        # Limpieza de precios para sumar
+        def clean_money(val):
+            try: return float(str(val).replace('$', '').replace(',', '').strip())
+            except: return 0.0
+            
+        df_fin['Monto'] = df_fin[col_precio].apply(clean_money)
+        df_fin = df_fin.dropna(subset=['F_Asig_D'])
+        
+        if not df_fin.empty:
+            df_fin['Mes'] = df_fin['F_Asig_D'].dt.to_period('M')
+            
+            # Categorización financiera
+            def cat_financiera(e):
+                e_upper = str(e).upper().strip()
+                if "FACTURADO" in e_upper or "RECIBIDO" in e_upper or "ENTREGADO" in e_upper: return "✅ Concretado"
+                if "PÉRDIDA TOTAL" in e_upper or "PERDIDA TOTAL" in e_upper: return "💥 PT"
+                if "PAGO DE DAÑOS" in e_upper: return "💸 PDD"
+                return "⚙️ En Proceso / Otros"
+                
+            df_fin['Cat_Fin'] = df_fin[col_estatus].apply(cat_financiera)
+            
+            # Crear Pivot Table
+            pivot_fin = pd.pivot_table(df_fin, values='Monto', index='Mes', columns='Cat_Fin', aggfunc='sum', fill_value=0)
+            
+            # Asegurar que existan todas las columnas
+            for col_req in ['✅ Concretado', '💥 PT', '💸 PDD', '⚙️ En Proceso / Otros']:
+                if col_req not in pivot_fin.columns: pivot_fin[col_req] = 0.0
+                
+            pivot_fin = pivot_fin.reset_index()
+            pivot_fin['Mes_Str'] = pivot_fin['Mes'].dt.strftime('%B %Y').str.title()
+            pivot_fin = pivot_fin.sort_values('Mes')
+            
+            # Agregar Acumulado
+            pivot_fin['📈 Acumulado Concretado'] = pivot_fin['✅ Concretado'].cumsum()
+            
+            # Formatear como moneda
+            cols_dinero = ['✅ Concretado', '💥 PT', '💸 PDD', '⚙️ En Proceso / Otros', '📈 Acumulado Concretado']
+            for c in cols_dinero:
+                pivot_fin[c] = pivot_fin[c].apply(lambda x: f"${x:,.2f}")
+                
+            # Mostrar tabla final
+            cols_mostrar = ['Mes_Str'] + cols_dinero
+            df_mostrar = pivot_fin[cols_mostrar].rename(columns={'Mes_Str': 'Mes Asignación'})
+            st.dataframe(df_mostrar, use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay fechas de asignación válidas para calcular el resumen financiero.")
+
+    st.markdown("---")
+
+    # --- 5. MONITOR LOGÍSTICO ---
+    st.markdown(f"#### 📋 5. Monitor Logístico en Curso ({aseguradora_sel.upper()})")
     st.caption("Visión depurada de refacciones activas, agrupadas por su estatus logístico actual.")
     
     if not df_proceso.empty:
@@ -588,19 +645,16 @@ if vista_actual == "📊 Analítico":
             df_mon['Proveedor'] = df_mon['LLAVE'].map(dict_prov_ana).fillna("-")
             df_mon['Llegada Est.'] = df_mon['LLAVE'].map(dict_llegada_ana).fillna("-")
             
-            # Formateo de fechas
             c_env_disp = buscar_col_ana(["FECHA", "ENVIO"])
             c_rec_disp = buscar_col_ana(["FECHA", "RECIB"])
             
             for est in estatus_validos:
                 df_est = df_mon[df_mon[col_estatus].astype(str).str.upper() == est]
                 if not df_est.empty:
-                    # Lógica de visualización de columnas por estatus
                     if est == "EN PROCESAMIENTO":
                         titulo = f"⚙️ En Procesamiento | {len(df_est)} Partida(s)"
                         cols_ver = [col_taller, col_id, 'Vehiculo_Info', col_desc, 'Proveedor', 'Llegada Est.']
                         rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', 'Llegada Est.': 'Llegada Prevista'}
-                        
                     elif est == "EN TRANSITO":
                         titulo = f"🚚 En Tránsito | {len(df_est)} Partida(s)"
                         cols_ver = [col_taller, col_id, 'Vehiculo_Info']
@@ -608,11 +662,9 @@ if vista_actual == "📊 Analítico":
                         if col_guia and col_guia in df_est.columns: cols_ver.append(col_guia)
                         if col_estatus_envio and col_estatus_envio in df_est.columns: cols_ver.append(col_estatus_envio)
                         if c_env_disp and c_env_disp in df_est.columns: cols_ver.append(c_env_disp)
-                        
                         rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_paqueteria: 'Paquetería', col_guia: 'Guía'}
                         if col_estatus_envio: rename_dict[col_estatus_envio] = 'Rastreo API'
                         if c_env_disp: rename_dict[c_env_disp] = 'F. Envío'
-                        
                     elif est == "ENTREGADO":
                         titulo = f"📥 Entregados a Taller (Pedir Recepción en Sistema) | {len(df_est)} Partida(s)"
                         cols_ver = [col_taller, col_id, 'Vehiculo_Info']
@@ -620,11 +672,9 @@ if vista_actual == "📊 Analítico":
                         if col_guia and col_guia in df_est.columns: cols_ver.append(col_guia)
                         if col_estatus_envio and col_estatus_envio in df_est.columns: cols_ver.append(col_estatus_envio)
                         if c_rec_disp and c_rec_disp in df_est.columns: cols_ver.append(c_rec_disp)
-                        
                         rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_paqueteria: 'Paquetería', col_guia: 'Guía'}
                         if col_estatus_envio: rename_dict[col_estatus_envio] = 'Rastreo API'
                         if c_rec_disp: rename_dict[c_rec_disp] = 'F. Entrega'
-                        
                     else:
                         titulo = f"⚙️ {est.title()} | {len(df_est)} Partida(s)"
                         cols_ver = [col_taller, col_id, 'Vehiculo_Info', col_desc]
@@ -633,22 +683,21 @@ if vista_actual == "📊 Analítico":
                     with st.expander(titulo, expanded=(est in ["ENTREGADO", "EN TRANSITO"])):
                         df_vista = df_est[cols_ver].copy()
                         df_vista.rename(columns=rename_dict, inplace=True)
-                        
-                        # Traducción Inteligente de API (Evitar Falsos Positivos en Locales)
                         if 'Rastreo API' in df_vista.columns:
                             def format_rastreo(r):
                                 g = str(r.get('Guía', '')).strip()
                                 api = str(r.get('Rastreo API', '')).strip().lower()
-                                if g in ['', 'nan', 'none']: 
-                                    return "Ruta Local / Sin Guía"
-                                elif api in ["falta información", "falta informacion", "", "nan", "none"]: 
+                                if g in ['', 'nan', 'none']: return "Ruta Local / Sin Guía"
+                                if api in ["falta información", "falta informacion", "", "nan", "none"]:
+                                    fecha_envio_str = str(r.get('F. Envío', ''))
+                                    fecha_envio_dt = parse_dt_safe_op(fecha_envio_str)
+                                    if pd.notna(fecha_envio_dt):
+                                        if (hoy_dt - fecha_envio_dt).days > 3: return "⚠️ API no responde (Revisar manual)"
                                     return "Recién documentado (En sitio)"
                                 return r.get('Rastreo API', '')
-                            
                             df_vista['Rastreo API'] = df_vista.apply(format_rastreo, axis=1)
-                            
                         st.dataframe(df_vista, use_container_width=True, hide_index=True)
-        else: st.info("No hay pedidos activos en las etapas de flujo (Todos por confirmar o en PT).")
+        else: st.info("No hay pedidos activos en las etapas de flujo (Todos por confirmar, en PT o PDD).")
     else: st.info(f"No hay pedidos activos para {aseguradora_sel}.")
 
 # ------------------------------------------------------------------------------
@@ -675,9 +724,10 @@ elif vista_actual == "⚙️ Panel Operativo":
     vencen_hoy = len(df_proceso[df_proceso[col_vencimiento] == hoy_str]) if col_vencimiento else 0
     recolecciones = len(df_recoleccion_total)
     
-    # Filtramos visualmente "PÉRDIDA TOTAL" de los KPI
-    por_confirmar_kpi = len(df_proceso[(df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_proceso[col_estatus].astype(str).str.strip() == "")) & (~df_proceso[col_estatus].astype(str).str.upper().isin(["PÉRDIDA TOTAL"]))]) if col_estatus else 0
-    en_proceso = len(df_proceso[~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") & (~df_proceso[col_estatus].astype(str).str.upper().isin(["PÉRDIDA TOTAL"])) & (df_proceso[col_estatus].astype(str).str.strip() != "")]) if col_estatus else len(df_proceso)
+    # Filtramos PT y PDD de los KPI visuales
+    excluir_kpi = ["PÉRDIDA TOTAL", "PAGO DE DAÑOS"]
+    por_confirmar_kpi = len(df_proceso[(df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_proceso[col_estatus].astype(str).str.strip() == "")) & (~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi))]) if col_estatus else 0
+    en_proceso = len(df_proceso[~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") & (~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi)) & (df_proceso[col_estatus].astype(str).str.strip() != "")]) if col_estatus else len(df_proceso)
     partidas_por_facturar = len(df_trabajo[df_trabajo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"]) if col_estatus else 0
     
     kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
@@ -697,12 +747,11 @@ elif vista_actual == "⚙️ Panel Operativo":
     if not df_recoleccion_total.empty:
         df_recoleccion_total['Estado_CDR'] = df_recoleccion_total[col_taller].astype(str).str.strip().str.upper().map(dict_estados).fillna("S/D") if col_taller else "S/D"
 
-    # Retiramos los PT del flujo normal visual
+    # Retiramos los PT y PDD del flujo normal visual
     if col_estatus:
-        df_proceso = df_proceso[~df_proceso[col_estatus].astype(str).str.upper().isin(["PÉRDIDA TOTAL"])]
+        df_proceso = df_proceso[~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi)]
 
     filtro_col0, filtro_col1, filtro_col2, filtro_col3, filtro_col4 = st.columns([1, 1.2, 1, 1.5, 1.5])
-    
     with filtro_col0: estado_sel = st.multiselect("🌎 Estado:", sorted([str(e) for e in df_proceso['Estado_CDR'].dropna().unique() if str(e).strip() != '']), placeholder="Todos...")
     with filtro_col1: 
         df_t1 = df_proceso.copy()
@@ -735,27 +784,11 @@ elif vista_actual == "⚙️ Panel Operativo":
         return f"{id_str}_{desc_str}"
 
     if not df_compras.empty:
-        def parse_spanish_date_comp(d_str):
-            if pd.isna(d_str) or str(d_str).strip() == '': return pd.NaT
-            d_str = str(d_str).lower().replace('-', '/') 
-            meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
-            for text, num in meses.items():
-                if text in d_str: d_str = d_str.replace(text, num); break
-            try: return pd.to_datetime(d_str, format='%d/%m/%y', errors='coerce')
-            except: return pd.NaT
-
         df_compras_temp = df_compras.copy()
         df_compras_temp['LLAVE_COMP'] = df_compras_temp.apply(lambda r: generar_llave_temp(r.get('Siniestro',''), r.get('Descripción Pieza','')), axis=1)
         
-        df_compras_temp['F_Compra_Dt'] = df_compras_temp['Fecha Compra'].apply(parse_spanish_date_comp)
-        df_compras_temp['ETA_Num'] = pd.to_numeric(df_compras_temp['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
-        df_compras_temp['Llegada_Calc'] = df_compras_temp['F_Compra_Dt'] + pd.to_timedelta(df_compras_temp['ETA_Num'], unit='d')
-        df_compras_temp['Fecha Llegada'] = df_compras_temp['Llegada_Calc'].dt.strftime('%d/%b/%y').fillna('-')
-        
         dict_prov = dict(zip(df_compras_temp['LLAVE_COMP'], df_compras_temp['Proveedor']))
         dict_costo = dict(zip(df_compras_temp['LLAVE_COMP'], df_compras_temp['Costo Compra']))
-        dict_llegada = dict(zip(df_compras_temp['LLAVE_COMP'], df_compras_temp['Fecha Llegada']))
-        
         df_filtrado['LLAVE_TEMP'] = df_filtrado.apply(lambda r: generar_llave_temp(r.get(col_id,''), r.get(col_desc,'')), axis=1)
         df_filtrado['Proveedor'] = df_filtrado['LLAVE_TEMP'].map(dict_prov).fillna("")
         
@@ -763,9 +796,8 @@ elif vista_actual == "⚙️ Panel Operativo":
             try: return float(str(v).replace('\$', '').replace(',', '').strip())
             except: return 0.0
         df_filtrado['Costo Compra'] = df_filtrado['LLAVE_TEMP'].map(dict_costo).apply(safe_float)
-        df_filtrado['Llegada Est.'] = df_filtrado['LLAVE_TEMP'].map(dict_llegada).fillna("-")
     else:
-        df_filtrado['Proveedor'] = ""; df_filtrado['Costo Compra'] = 0.0; df_filtrado['Llegada Est.'] = "-"
+        df_filtrado['Proveedor'] = ""; df_filtrado['Costo Compra'] = 0.0
 
     base_config = {}
     if col_id and col_id in df_filtrado.columns: base_config[col_id] = st.column_config.TextColumn("Pedido / Siniestro", disabled=True)
@@ -793,11 +825,11 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion: 
-                            df_grupo['Confirmar Surtido'] = False; df_grupo['Cancelar'] = False; df_grupo['Pérdida Total'] = False
-                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar', 'Pérdida Total'] + [c for c in [col_comentarios] if c in df_grupo.columns]
+                            df_grupo['Confirmar Surtido'] = False; df_grupo['Cancelar'] = False; df_grupo['Pérdida Total'] = False; df_grupo['PDD'] = False
+                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar', 'Pérdida Total', 'PDD'] + [c for c in [col_comentarios] if c in df_grupo.columns]
                             config_conf = base_config.copy()
-                            config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Pérdida Total": st.column_config.CheckboxColumn("💥 PT", default=False), "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="\$ %.2f")})
-                            columnas_editables = ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar', 'Pérdida Total', col_comentarios]
+                            config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Pérdida Total": st.column_config.CheckboxColumn("💥 PT", default=False), "PDD": st.column_config.CheckboxColumn("💸 PDD", default=False), "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="\$ %.2f")})
+                            columnas_editables = ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar', 'Pérdida Total', 'PDD', col_comentarios]
                             df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_conf, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_conf_{taller}_{siniestro_auto}")
                             for col in df_grupo.columns:
                                 if col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
@@ -807,7 +839,8 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
 
-    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO|PÉRDIDA TOTAL")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy() if col_vencimiento else pd.DataFrame()
+    regex_excluir = "CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO|PÉRDIDA TOTAL|PAGO DE DAÑOS"
+    df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains(regex_excluir)) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy() if col_vencimiento else pd.DataFrame()
     with st.expander(f"🚨 Vencimientos de Hoy | {len(df_vencimientos)} Partida(s)", expanded=False):
         if not df_vencimientos.empty:
             if permiso_edicion:
@@ -824,7 +857,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 
     if col_vencimiento and not df_filtrado.empty:
         fechas_venc_filtro = df_filtrado[col_vencimiento].apply(parse_dt_safe_op)
-        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO|PÉRDIDA TOTAL")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy()
+        df_atrasadas = df_filtrado[(fechas_venc_filtro < hoy_dt) & (df_filtrado[col_vencimiento] != '') & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains(regex_excluir)) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy()
     else: df_atrasadas = pd.DataFrame()
     with st.expander(f"❌ Vencimientos Atrasados | {len(df_atrasadas)} Partida(s)", expanded=False):
         if not df_atrasadas.empty:
@@ -856,7 +889,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                 st.dataframe(df_por_recibir[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
 
     if col_estatus and col_estatus in df_filtrado.columns:
-        mask_asignados = (~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains("CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|REEMBOLSO|PÉRDIDA TOTAL")) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")
+        mask_asignados = (~df_filtrado[col_estatus].fillna('').astype(str).str.upper().str.contains(regex_excluir)) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")
         df_asignados = df_filtrado[mask_asignados].copy()
     else: df_asignados = df_filtrado.copy()
     
@@ -874,9 +907,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion:
-                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra', 'Llegada Est.'] + [c for c in [col_paqueteria, col_guia, col_estatus_envio, col_remision] if c in df_grupo.columns] + ['Entregado', 'Recibido', 'Cancelar'] + [c for c in [col_comentarios] if c in df_grupo.columns]
+                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra'] + [c for c in [col_paqueteria, col_guia, col_estatus_envio, col_remision] if c in df_grupo.columns] + ['Entregado', 'Recibido', 'Cancelar'] + [c for c in [col_comentarios] if c in df_grupo.columns]
                             config_pedidos = base_config.copy()
-                            config_pedidos.update({ "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="\$ %.2f"), "Llegada Est.": st.column_config.TextColumn("📅 Llegada", disabled=True), col_estatus_envio: st.column_config.TextColumn("📍 Rastreo", disabled=True), "Entregado": st.column_config.CheckboxColumn("🚚 Ent", default=False), "Recibido": st.column_config.CheckboxColumn("🏁 Rec", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False) })
+                            config_pedidos.update({ "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo", format="\$ %.2f"), col_estatus_envio: st.column_config.TextColumn("📍 Rastreo", disabled=True), "Entregado": st.column_config.CheckboxColumn("🚚 Ent", default=False), "Recibido": st.column_config.CheckboxColumn("🏁 Rec", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False) })
                             columnas_editables = ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_remision, 'Entregado', 'Recibido', 'Cancelar', col_comentarios, col_vencimiento]
                             df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_pedidos, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                             for col in df_grupo.columns:
@@ -2143,6 +2176,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 
                 nuevo_estatus = None
                 if row.get('Pérdida Total'): nuevo_estatus = "PÉRDIDA TOTAL"
+                elif row.get('PDD'): nuevo_estatus = "PAGO DE DAÑOS"
                 elif row.get('Cancelar'): nuevo_estatus = "CANCELADO"
                 elif row.get('Confirmar Surtido'): nuevo_estatus = "EN PROCESAMIENTO"
                 

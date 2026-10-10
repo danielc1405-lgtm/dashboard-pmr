@@ -27,7 +27,12 @@ def init_connection():
 # 1. SISTEMA DE LOGIN Y ESTILOS CSS
 # ==========================================
 if 'autenticado' not in st.session_state:
-    st.session_state['autenticado'] = False
+    # Intentar auto-login si el celular recuerda el parámetro en la URL
+    if 'usr' in st.query_params:
+        st.session_state['autenticado'] = True
+        st.session_state['usuario_actual'] = st.query_params['usr']
+    else:
+        st.session_state['autenticado'] = False
 
 st.markdown("""
     <style>
@@ -76,8 +81,12 @@ if not st.session_state['autenticado']:
                 
                 match = df_usuarios[(df_usuarios['Usuario'] == usuario_input) & (df_usuarios['Password'] == password_input)]
                 if not match.empty:
+                    nombre_usuario = match.iloc[0]['Nombre Completo']
                     st.session_state['autenticado'] = True
-                    st.session_state['usuario_actual'] = match.iloc[0]['Nombre Completo']
+                    st.session_state['usuario_actual'] = nombre_usuario
+                    
+                    # Guardar el token en la URL de forma silenciosa
+                    st.query_params['usr'] = nombre_usuario
                     st.rerun()
                 else: st.error("❌ Usuario o contraseña incorrectos.")
             except Exception as e: st.error(f"Error al conectar con la base de usuarios: {e}")

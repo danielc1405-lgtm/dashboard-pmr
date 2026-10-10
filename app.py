@@ -1753,7 +1753,7 @@ elif vista_actual == "🚚 Rutas":
 
             for lugar, grupo in df_seleccion.groupby(col_agrupar):
                 lugar_str = str(lugar).strip()
-                id_ruta = f"RT-{int(datetime.datetime.now(tz_mx).timestamp())}-{lugar_str[:3].upper()}"
+                id_ruta = f"RT-{datetime.datetime.now(tz_mx).strftime('%y%m%d-%H%M')}-{lugar_str[:3].upper()}"
                 direccion_calculada = dict_direcciones.get(lugar_str.upper(), "Ver Google Maps / Sin Dirección Registrada")
                 
                 vehiculo_calculado = str(grupo['Vehiculo_Info'].iloc[0]) if 'Vehiculo_Info' in grupo.columns else "S/D"

@@ -164,6 +164,8 @@ with col_btn:
 # ==============================================================================
 # === [BLOQUE 4: CARGA Y PROCESAMIENTO DE DATOS] ===
 # ==============================================================================
+import re
+
 def obtener_dataframe(nombre_hoja, silent=False):
     try:
         doc = init_connection()
@@ -179,11 +181,9 @@ def obtener_dataframe(nombre_hoja, silent=False):
 
 @st.cache_data(ttl=600)  
 def cargar_datos():
-    # --- AHORA SÍ, CARGAMOS LA BD VIVA Y LA HISTÓRICA CORRECTAMENTE ---
     df_uni = obtener_dataframe("BD_UNIFICADA")
     df_hist = obtener_dataframe("BD_HISTORICO", silent=True)
     
-    # Fusionar si hay histórico
     if not df_hist.empty:
         df_uni = pd.concat([df_uni, df_hist], ignore_index=True)
         
@@ -200,9 +200,8 @@ def cargar_datos():
     if not df_uni.empty and 'Siniestro Relacionado' in df_uni.columns: 
         df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
         
-    return df_uni, df_comp, df_cat, df_inv, df_prov, df_hist # <-- Añadimos df_hist a los datos cacheados
+    return df_uni, df_comp, df_cat, df_inv, df_prov, df_hist
 
-# Extraemos los DataFrames
 df_completo, df_compras, df_catalogo, df_inventario, df_proveedores, df_historico = cargar_datos()
 
 aseguradora_filtro = aseguradora_sel.strip().upper()
@@ -246,7 +245,7 @@ if not df_trabajo_completo.empty:
     def estandarizar_fechas_mx(fecha_val):
         if pd.isna(fecha_val) or str(fecha_val).strip() in ['', 'None', 'nan', 'NaT']: return ""
         d_str = str(fecha_val).strip().lower().replace('-', '/')
-        if re.match(r'^\d{2}/[a-z]{3}/\d{2}\$', d_str): return d_str 
+        if re.match(r'^\d{2}/[a-z]{3}/\d{2}$', d_str): return d_str 
         if d_str.replace('.','',1).isdigit():
             val = float(d_str)
             if val > 30000:
@@ -283,6 +282,14 @@ if not df_trabajo_completo.empty:
     df_trabajo_completo['Vehiculo_Info'] = df_trabajo_completo.apply(armar_vehiculo, axis=1)
     df_trabajo_completo['Filtro_Siniestro'] = df_trabajo_completo[col_id].astype(str).str.strip() + " | " + df_trabajo_completo['Vehiculo_Info']
     df_trabajo = df_trabajo_completo.copy()
+    
+    if modo_consulta: df_proceso = df_trabajo.copy()
+    else: df_proceso = df_trabajo[~df_trabajo[col_estatus].astype(str).str.upper().str.contains("CANCELADO|RECIBIDO|FACTURADO|RECOLEC")].copy() if col_estatus else df_trabajo.copy()
+        
+    df_recoleccion_total = df_trabajo[df_trabajo[col_estatus].astype(str).str.upper().str.contains("RECOLEC")].copy() if col_estatus else pd.DataFrame()
+else:
+    col_id = col_taller = col_marca = col_modelo = col_desc = col_origen = col_cant = col_precio = col_estatus = col_vencimiento = col_asignacion = col_fecha_confi = col_paqueteria = col_guia = col_estatus_envio = col_remision = col_comentarios = col_aseg = None
+    df_trabajo = df_proceso = df_recoleccion_total = pd.DataFrame()
 
 # ==============================================================================
 # === [BLOQUE 5: NOTIFICACIONES Y BANDEJA PDF] ===

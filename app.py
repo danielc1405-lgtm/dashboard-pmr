@@ -1734,7 +1734,7 @@ elif vista_actual == "🚚 Rutas":
                 'LUGAR': 'first',
                 'SINIESTRO': lambda x: ", ".join(x.unique()),
                 'VEHICULO': 'first',
-                'NOTA': 'first', # <--- AQUÍ AGREGAMOS LA NOTA QUE TRAE EL DESTINO FINAL
+                'NOTA': 'first', 
                 'PIEZA': 'count',
                 'ESTATUS': 'first'
             }).reset_index()
@@ -1743,19 +1743,38 @@ elif vista_actual == "🚚 Rutas":
             df_resumen['Estado'] = df_resumen['ESTATUS'].apply(lambda x: "✅ Completado" if str(x).strip().upper() == 'COMPLETADO' else "⏳ Pendiente")
             df_resumen['Operación'] = df_resumen['TIPO_OPERACION'].str.upper() + " (" + df_resumen['PIEZA'].astype(str) + " pzas)"
             
-            # Agregamos 'NOTA' a la vista final y la renombramos a "Instrucción / Destino Final"
-            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'VEHICULO', 'NOTA', 'Estado']].rename(
+            # Limpiar la nota para separar instrucciones de destino si existen
+            def extraer_destino(nota):
+                nota_str = str(nota)
+                if "Llevar a:" in nota_str:
+                    return nota_str.split(" | ")[0].strip()
+                elif "Foráneo" in nota_str:
+                    return "🏢 FORÁNEO (Llevar a Base)"
+                return "Mismo Lugar (Taller)"
+                
+            def extraer_instruccion(nota):
+                nota_str = str(nota)
+                if " | " in nota_str:
+                    return nota_str.split(" | ")[1].strip()
+                elif "Llevar a:" not in nota_str and "Foráneo" not in nota_str:
+                    return nota_str
+                return ""
+
+            df_resumen['Destino Final'] = df_resumen['NOTA'].apply(extraer_destino)
+            df_resumen['Instrucción'] = df_resumen['NOTA'].apply(extraer_instruccion)
+            
+            # Agregamos 'Destino Final' a la vista
+            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'Destino Final', 'VEHICULO', 'Instrucción', 'Estado']].rename(
                 columns={
                     'LUGAR': 'Lugar a Visitar', 
                     'SINIESTRO': 'Siniestro(s)', 
-                    'VEHICULO': 'Vehículo',
-                    'NOTA': 'Instrucción / Destino Final'
+                    'VEHICULO': 'Vehículo'
                 }
             )
             st.dataframe(df_destinos, hide_index=True, use_container_width=True)
         else:
             st.caption("No hay viajes activos despachados en este momento.")
-        
+            
     st.markdown("---")
     
     # --- FUNCIÓN MAESTRA DE DESPACHO ---
@@ -1805,7 +1824,12 @@ elif vista_actual == "🚚 Rutas":
                         taller_destino = str(row.get('Taller', '')).strip()
                         if taller_destino and taller_destino.lower() != 'nan':
                             estado_taller = dict_estado_talleres.get(taller_destino.upper(), "")
-                            es_local = "NUEVO LEON" in estado_taller.replace("Ó", "O") or "NL" in estado_taller
+                            
+                            # Logica para detectar estado local (Nuevo León)
+                            es_local = False
+                            estado_str = str(estado_taller).upper().replace("Ó", "O")
+                            if "NUEVO LEON" in estado_str or "NL" in estado_str or "N.L" in estado_str:
+                                es_local = True
                             
                             if es_local:
                                 nota_final = f"Llevar a: {taller_destino} | {notas_general}".strip(" |")

@@ -2290,9 +2290,83 @@ elif vista_actual == "🔍 Consultas":
     else: st.warning("La base de datos está vacía.")
 
 elif vista_actual == "🛠️ Cuartel General":
+    import io
     st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")
-    st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, reimpresiones y rutas locales.")
+    st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, mantenimientos y la planeación del Plan B Offline.")
     
+    # --- SISTEMA DE RESPALDO LOCAL Y LIMPIEZA ---
+    st.markdown("#### 💾 Sistema de Respaldo y Limpieza (Plan B Offline)")
+    st.caption("Descarga el historial a tu computadora para consultar información sin internet y limpia la nube para mantener la app del celular ultra rápida.")
+    
+    col_resp1, col_resp2 = st.columns(2)
+    
+    with col_resp1:
+        st.markdown("**1. Descargar Historial Local**")
+        if st.button("📥 Generar Respaldo de Rutas (Excel)", use_container_width=True):
+            with st.spinner("Empaquetando datos..."):
+                try:
+                    doc = init_connection()
+                    ws_rutas = doc.worksheet("BD_RUTAS")
+                    datos = ws_rutas.get_all_values()
+                    
+                    if len(datos) > 1:
+                        df_respaldo = pd.DataFrame(datos[1:], columns=datos[0])
+                        
+                        # Crear archivo Excel en la memoria temporal
+                        buffer = io.BytesIO()
+                        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                            df_respaldo.to_excel(writer, index=False, sheet_name='Historial_Rutas')
+                        
+                        st.download_button(
+                            label="💾 Guardar Excel en mi PC",
+                            data=buffer.getvalue(),
+                            file_name=f"Respaldo_Rutas_PMR_{datetime.datetime.now(tz_mx).strftime('%Y%m%d_%H%M')}.xlsx",
+                            mime="application/vnd.ms-excel",
+                            type="primary",
+                            use_container_width=True
+                        )
+                    else:
+                        st.warning("La base de rutas está vacía.")
+                except Exception as e:
+                    st.error(f"Error generando el respaldo: {e}")
+
+    with col_resp2:
+        st.markdown("**2. Mantenimiento de Nube**")
+        if st.button("🧹 Purgar Viajes Antiguos", use_container_width=True):
+            with st.spinner("Limpiando el servidor de Google..."):
+                try:
+                    doc = init_connection()
+                    ws_rutas = doc.worksheet("BD_RUTAS")
+                    datos = ws_rutas.get_all_values()
+                    
+                    if len(datos) > 1:
+                        df_rutas_limpieza = pd.DataFrame(datos[1:], columns=[str(h).strip().upper() for h in datos[0]])
+                        
+                        # Definir la regla: ¿Qué sobrevive a la purga? (Los pendientes y los de fecha de hoy)
+                        fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
+                        cond_pendientes = df_rutas_limpieza['ESTATUS'].astype(str).str.upper() == 'PENDIENTE'
+                        cond_hoy = df_rutas_limpieza['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
+                        
+                        df_a_conservar = df_rutas_limpieza[cond_pendientes | cond_hoy].copy()
+                        filas_eliminadas = len(df_rutas_limpieza) - len(df_a_conservar)
+                        
+                        # Si hay algo que borrar, actualizamos la hoja
+                        if filas_eliminadas > 0:
+                            ws_rutas.clear()
+                            filas_nuevas = [datos[0]] # Regresamos los encabezados
+                            filas_nuevas.extend(df_a_conservar.values.tolist())
+                            ws_rutas.update(range_name='A1', values=filas_nuevas, value_input_option='USER_ENTERED')
+                            st.success(f"✅ Nube optimizada. Se eliminaron {filas_eliminadas} viajes antiguos.")
+                        else:
+                            st.info("La base ya está optimizada. No hay viajes viejos para borrar.")
+                    else:
+                        st.info("No hay datos para limpiar.")
+                except Exception as e:
+                    st.error(f"Error en el mantenimiento: {e}")
+                    
+    st.markdown("---")
+    
+    # --- REPORTE DE BUGS E IDEAS ---
     st.markdown("#### 🐛 Reporte de Bugs e Ideas (Checklist Activo):")
     try:
         doc = init_connection(); ws_notas = doc.worksheet("BD_NOTAS")

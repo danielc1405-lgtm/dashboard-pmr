@@ -1700,14 +1700,21 @@ elif vista_actual == "🚚 Rutas":
         datos_rutas = ws_rutas.get_all_values()
         df_rutas = pd.DataFrame(datos_rutas[1:], columns=[str(h).strip().upper() for h in datos_rutas[0]]) if len(datos_rutas) > 1 else pd.DataFrame()
     except Exception as e:
-        st.error(f"⚠️ No se encontró la hoja 'BD_RUTAS' en Google Sheets. Por favor créala con los encabezados correspondientes. Error: {e}")
+        st.error(f"⚠️ No se encontró la hoja 'BD_RUTAS' en Google Sheets. Error: {e}")
         df_rutas = pd.DataFrame()
         
     if not df_rutas.empty and 'ESTATUS' in df_rutas.columns:
-        df_rutas_pendientes = df_rutas[df_rutas['ESTATUS'].astype(str).str.upper() == 'PENDIENTE']
-        df_rutas_completados = df_rutas[df_rutas['ESTATUS'].astype(str).str.upper() == 'COMPLETADO']
+        # FILTRO INTELIGENTE: Dejar los pendientes (cualquier fecha) y los completados (solo HOY)
+        fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
+        cond_pendientes = df_rutas['ESTATUS'].astype(str).str.upper() == 'PENDIENTE'
+        cond_hoy = df_rutas['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
         
-        if 'ID_RUTA' in df_rutas.columns:
+        df_rutas_dia = df_rutas[cond_pendientes | cond_hoy].copy()
+        
+        df_rutas_pendientes = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'PENDIENTE']
+        df_rutas_completados = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'COMPLETADO']
+        
+        if 'ID_RUTA' in df_rutas_dia.columns:
             paradas_pendientes = df_rutas_pendientes['ID_RUTA'].nunique()
             paradas_completadas = df_rutas_completados['ID_RUTA'].nunique()
         else:
@@ -1728,8 +1735,8 @@ elif vista_actual == "🚚 Rutas":
             # --- NUEVA TABLA ENRIQUECIDA DE DESTINOS ---
             st.markdown("#### 📍 Destinos del Día")
             
-            # Agrupar para juntar múltiples piezas en un mismo destino
-            df_resumen = df_rutas.groupby('ID_RUTA').agg({
+            # Agrupar usando el df filtrado (df_rutas_dia)
+            df_resumen = df_rutas_dia.groupby('ID_RUTA').agg({
                 'TIPO_OPERACION': 'first',
                 'LUGAR': 'first',
                 'SINIESTRO': lambda x: ", ".join(x.unique()),
@@ -1743,33 +1750,33 @@ elif vista_actual == "🚚 Rutas":
             df_resumen['Estado'] = df_resumen['ESTATUS'].apply(lambda x: "✅ Completado" if str(x).strip().upper() == 'COMPLETADO' else "⏳ Pendiente")
             df_resumen['Operación'] = df_resumen['TIPO_OPERACION'].str.upper() + " (" + df_resumen['PIEZA'].astype(str) + " pzas)"
             
-            # Limpiar la nota para separar instrucciones de destino si existen
+            # --- FUNCIONES DE LIMPIEZA VISUAL ---
             def extraer_destino(nota):
-                nota_str = str(nota)
-                if "Llevar a:" in nota_str:
-                    return nota_str.split(" | ")[0].strip()
-                elif "Foráneo" in nota_str:
-                    return "🏢 FORÁNEO (Llevar a Base)"
-                return "Mismo Lugar (Taller)"
+                n = str(nota)
+                if "Llevar a: " in n: return n.split("Llevar a: ")[1].split(" | ")[0]
+                elif "Foráneo: " in n: return f"{n.split('Foráneo: ')[1].split(')')[0]} (Foráneo -> Base)"
+                return "Mismo Lugar"
                 
             def extraer_instruccion(nota):
-                nota_str = str(nota)
-                if " | " in nota_str:
-                    return nota_str.split(" | ")[1].strip()
-                elif "Llevar a:" not in nota_str and "Foráneo" not in nota_str:
-                    return nota_str
+                n = str(nota)
+                if " | " in n: return n.split(" | ", 1)[1]
+                elif "Llevar a: " not in n and "Foráneo: " not in n: return n
                 return ""
+                
+            def acortar_vehiculo(v_str):
+                partes = str(v_str).split('|')
+                if len(partes) >= 2:
+                    auto = partes[0].strip()
+                    palabras = auto.split()
+                    return f"{' '.join(palabras[:2]) if len(palabras) >= 2 else auto} | {partes[1].strip()}"
+                return str(v_str)
 
             df_resumen['Destino Final'] = df_resumen['NOTA'].apply(extraer_destino)
             df_resumen['Instrucción'] = df_resumen['NOTA'].apply(extraer_instruccion)
+            df_resumen['Vehículo Corto'] = df_resumen['VEHICULO'].apply(acortar_vehiculo)
             
-            # Agregamos 'Destino Final' a la vista
-            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'Destino Final', 'VEHICULO', 'Instrucción', 'Estado']].rename(
-                columns={
-                    'LUGAR': 'Lugar a Visitar', 
-                    'SINIESTRO': 'Siniestro(s)', 
-                    'VEHICULO': 'Vehículo'
-                }
+            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'Destino Final', 'Vehículo Corto', 'Instrucción', 'Estado']].rename(
+                columns={'LUGAR': 'Lugar a Visitar', 'SINIESTRO': 'Siniestro(s)', 'Vehículo Corto': 'Vehículo'}
             )
             st.dataframe(df_destinos, hide_index=True, use_container_width=True)
         else:
@@ -1825,7 +1832,7 @@ elif vista_actual == "🚚 Rutas":
                         if taller_destino and taller_destino.lower() != 'nan':
                             estado_taller = dict_estado_talleres.get(taller_destino.upper(), "")
                             
-                            # Logica para detectar estado local (Nuevo León)
+                            # Lógica para detectar estado local (Nuevo León)
                             es_local = False
                             estado_str = str(estado_taller).upper().replace("Ó", "O")
                             if "NUEVO LEON" in estado_str or "NL" in estado_str or "N.L" in estado_str:
@@ -1834,7 +1841,7 @@ elif vista_actual == "🚚 Rutas":
                             if es_local:
                                 nota_final = f"Llevar a: {taller_destino} | {notas_general}".strip(" |")
                             else:
-                                nota_final = f"Foráneo (Llevar a Base) | {notas_general}".strip(" |")
+                                nota_final = f"Dejar en Base (Foráneo: {taller_destino}) | {notas_general}".strip(" |")
 
                     # Estructura obligatoria para BD_RUTAS
                     fila = [id_ruta, fecha_hoy, tipo_operacion.upper(), lugar_str, direccion_calculada, vehiculo_calculado, vin_calculado, pieza, siniestro, nota_final, "PENDIENTE"]

@@ -1734,6 +1734,7 @@ elif vista_actual == "🚚 Rutas":
                 'LUGAR': 'first',
                 'SINIESTRO': lambda x: ", ".join(x.unique()),
                 'VEHICULO': 'first',
+                'NOTA': 'first', # <--- AQUÍ AGREGAMOS LA NOTA QUE TRAE EL DESTINO FINAL
                 'PIEZA': 'count',
                 'ESTATUS': 'first'
             }).reset_index()
@@ -1742,8 +1743,14 @@ elif vista_actual == "🚚 Rutas":
             df_resumen['Estado'] = df_resumen['ESTATUS'].apply(lambda x: "✅ Completado" if str(x).strip().upper() == 'COMPLETADO' else "⏳ Pendiente")
             df_resumen['Operación'] = df_resumen['TIPO_OPERACION'].str.upper() + " (" + df_resumen['PIEZA'].astype(str) + " pzas)"
             
-            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'VEHICULO', 'Estado']].rename(
-                columns={'LUGAR': 'Lugar a Visitar', 'SINIESTRO': 'Siniestro(s)', 'VEHICULO': 'Vehículo'}
+            # Agregamos 'NOTA' a la vista final y la renombramos a "Instrucción / Destino Final"
+            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'VEHICULO', 'NOTA', 'Estado']].rename(
+                columns={
+                    'LUGAR': 'Lugar a Visitar', 
+                    'SINIESTRO': 'Siniestro(s)', 
+                    'VEHICULO': 'Vehículo',
+                    'NOTA': 'Instrucción / Destino Final'
+                }
             )
             st.dataframe(df_destinos, hide_index=True, use_container_width=True)
         else:
@@ -1758,22 +1765,27 @@ elif vista_actual == "🚚 Rutas":
             filas_insertar = []
             fecha_hoy = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y %H:%M")
             
-            # 1. Determinar agrupador estricto según la operación (Evita el bug del Taller en Compras)
+            # 1. Determinar agrupador estricto según la operación
             if tipo_operacion.lower() in ['compra', 'cotizacion']:
                 col_agrupar = 'Proveedor' if 'Proveedor' in df_seleccion.columns else df_seleccion.columns[0]
             else:
                 col_agrupar = 'Taller' if 'Taller' in df_seleccion.columns else df_seleccion.columns[0]
             
-            # 2. Buscar el diccionario de direcciones correcto
+            # 2. Buscar el diccionario de direcciones y ESTADOS (Para saber si es local o foráneo)
             dict_direcciones = {}
-            if tipo_operacion.lower() in ['compra', 'cotizacion'] and not df_proveedores.empty:
-                c_prov = next((c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper()), None)
-                c_dir = next((c for c in df_proveedores.columns if 'DIRECC' in str(c).upper()), None)
-                if c_prov and c_dir: dict_direcciones = dict(zip(df_proveedores[c_prov].astype(str).str.strip().str.upper(), df_proveedores[c_dir]))
-            elif tipo_operacion.lower() in ['entrega', 'recoleccion'] and not df_catalogo.empty:
+            dict_estado_talleres = {}
+            
+            if not df_catalogo.empty:
                 c_tall = next((c for c in df_catalogo.columns if 'TALLER' in str(c).upper()), None)
                 c_dir = next((c for c in df_catalogo.columns if 'DIRECC' in str(c).upper()), None)
-                if c_tall and c_dir: dict_direcciones = dict(zip(df_catalogo[c_tall].astype(str).str.strip().str.upper(), df_catalogo[c_dir]))
+                c_est = next((c for c in df_catalogo.columns if 'ESTADO' in str(c).upper()), None)
+                if c_tall and c_dir: dict_direcciones.update(dict(zip(df_catalogo[c_tall].astype(str).str.strip().str.upper(), df_catalogo[c_dir])))
+                if c_tall and c_est: dict_estado_talleres = dict(zip(df_catalogo[c_tall].astype(str).str.strip().str.upper(), df_catalogo[c_est].astype(str).str.strip().str.upper()))
+                
+            if not df_proveedores.empty:
+                c_prov = next((c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper()), None)
+                c_dir_p = next((c for c in df_proveedores.columns if 'DIRECC' in str(c).upper()), None)
+                if c_prov and c_dir_p: dict_direcciones.update(dict(zip(df_proveedores[c_prov].astype(str).str.strip().str.upper(), df_proveedores[c_dir_p])))
 
             for lugar, grupo in df_seleccion.groupby(col_agrupar):
                 lugar_str = str(lugar).strip()
@@ -1787,12 +1799,18 @@ elif vista_actual == "🚚 Rutas":
                     siniestro = str(row.get(col_id, row.get('Pedido / Siniestro', ''))) if col_id else ''
                     pieza = str(row.get(col_desc, row.get('Descrip.', ''))) if col_desc else ''
                     
-                    # 3. LIGAR DESTINO FINAL EN NOTAS (El "toque maestro" para el chofer)
+                    # 3. LIGAR DESTINO FINAL (LOCAL VS FORÁNEO) EN NOTAS
                     nota_final = notas_general
                     if tipo_operacion.lower() == 'compra':
-                        taller_destino = str(row.get('Taller', ''))
+                        taller_destino = str(row.get('Taller', '')).strip()
                         if taller_destino and taller_destino.lower() != 'nan':
-                            nota_final = f"Llevar a: {taller_destino} | {notas_general}".strip(" |")
+                            estado_taller = dict_estado_talleres.get(taller_destino.upper(), "")
+                            es_local = "NUEVO LEON" in estado_taller.replace("Ó", "O") or "NL" in estado_taller
+                            
+                            if es_local:
+                                nota_final = f"Llevar a: {taller_destino} | {notas_general}".strip(" |")
+                            else:
+                                nota_final = f"Foráneo (Llevar a Base) | {notas_general}".strip(" |")
 
                     # Estructura obligatoria para BD_RUTAS
                     fila = [id_ruta, fecha_hoy, tipo_operacion.upper(), lugar_str, direccion_calculada, vehiculo_calculado, vin_calculado, pieza, siniestro, nota_final, "PENDIENTE"]

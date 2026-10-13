@@ -162,7 +162,7 @@ with col_btn:
     espacio_spinner = st.empty()
 
 # ==============================================================================
-# === [BLOQUE 4: CARGA Y PROCESAMIENTO DE DATOS] ===
+# === [BLOQUE 4: CARGA Y PROCESAMIENTO DE DATOS (LAZY LOADING)] ===
 # ==============================================================================
 import re
 
@@ -173,37 +173,61 @@ def obtener_dataframe(nombre_hoja, silent=False):
         datos = ws.get_all_values()
         if not datos: return pd.DataFrame()
         headers = [str(h).strip() for h in datos[0]]
-        df = pd.DataFrame(datos[1:], columns=headers)
-        return df
+        return pd.DataFrame(datos[1:], columns=headers)
     except Exception as e:
         if not silent: st.error(f"Error cargando hoja {nombre_hoja}: {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=600)  
-def cargar_datos():
-    df_uni = obtener_dataframe("BD_UNIFICADA")
-    df_hist = obtener_dataframe("BD_HISTORICO", silent=True)
-    
-    if not df_hist.empty:
-        df_uni = pd.concat([df_uni, df_hist], ignore_index=True)
-        
-    df_comp = obtener_dataframe("BD_COMPRAS", silent=True)
+# --- CACHÉ INDEPENDIENTE POR MÓDULO ---
+@st.cache_data(ttl=600)
+def cargar_base_viva(): return obtener_dataframe("BD_UNIFICADA")
+
+@st.cache_data(ttl=600)
+def cargar_historico(): return obtener_dataframe("BD_HISTORICO", silent=True)
+
+@st.cache_data(ttl=600)
+def cargar_compras(): return obtener_dataframe("BD_COMPRAS", silent=True)
+
+@st.cache_data(ttl=600)
+def cargar_catalogos():
     df_cat = obtener_dataframe("BD_TALLERES", silent=True)
     if df_cat.empty: df_cat = obtener_dataframe("Catálogo", silent=True)
-    try: 
-        df_inv = obtener_dataframe("BD_INVENTARIO", silent=True)
-        if not df_inv.empty and 'Sin Existencia' in df_inv.columns:
-            df_inv['Sin Existencia'] = df_inv['Sin Existencia'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'X', 'V', 'VERDADERO'])
-    except: df_inv = pd.DataFrame()
     df_prov = obtener_dataframe("BD_PROVEEDORES", silent=True)
-    
-    if not df_uni.empty and 'Siniestro Relacionado' in df_uni.columns: 
-        df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
-        
-    return df_uni, df_comp, df_cat, df_inv, df_prov, df_hist
+    return df_cat, df_prov
 
-df_completo, df_compras, df_catalogo, df_inventario, df_proveedores, df_historico = cargar_datos()
+@st.cache_data(ttl=600)
+def cargar_inventario():
+    df_inv = obtener_dataframe("BD_INVENTARIO", silent=True)
+    if not df_inv.empty and 'Sin Existencia' in df_inv.columns:
+        df_inv['Sin Existencia'] = df_inv['Sin Existencia'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'X', 'V', 'VERDADERO'])
+    return df_inv
 
+# --- LÓGICA DE CARGA DIFERIDA (LAZY LOADING) ---
+df_uni = cargar_base_viva()
+if not df_uni.empty and 'Siniestro Relacionado' in df_uni.columns: 
+    df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
+
+# Solo carga el histórico si la pestaña realmente lo requiere
+df_historico = pd.DataFrame()
+if vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio", "📝 Remisiones", "🛠️ Cuartel General"] or modo_consulta:
+    df_historico = cargar_historico()
+
+df_completo = df_uni.copy()
+if not df_historico.empty and vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio"]:
+    df_completo = pd.concat([df_completo, df_historico], ignore_index=True)
+
+# Solo carga compras si la pestaña lo requiere
+df_compras = cargar_compras() if vista_actual in ["🛒 Compras", "📊 Analítico", "⚙️ Panel Operativo", "🚚 Rutas"] else pd.DataFrame()
+
+# Solo carga catálogos si la pestaña los usa
+df_catalogo = pd.DataFrame(); df_proveedores = pd.DataFrame()
+if vista_actual in ["⚙️ Panel Operativo", "🛒 Compras", "🚚 Rutas", "🏢 Directorio", "📝 Remisiones", "🔍 Consultas"]:
+    df_catalogo, df_proveedores = cargar_catalogos()
+
+# Solo carga inventario si entras a su pestaña
+df_inventario = cargar_inventario() if vista_actual == "📦 Inventario" else pd.DataFrame()
+
+# --- PROCESAMIENTO DE DATOS ---
 aseguradora_filtro = aseguradora_sel.strip().upper()
 palabra_clave_aseg = "MULTI" if "MULTI" in aseguradora_filtro else "GNP"
 
@@ -262,8 +286,10 @@ if not df_trabajo_completo.empty:
             return f"{dt.day:02d}/{meses[dt.month]}/{dt.strftime('%y')}"
         except: return str(fecha_val) 
 
-    for c in [col_asignacion, col_vencimiento, col_fecha_confi]:
-        if c and c in df_trabajo_completo.columns: df_trabajo_completo[c] = df_trabajo_completo[c].apply(estandarizar_fechas_mx)
+    # Optimización: Solo formatear fechas si la vista actual lo requiere visualmente o para filtros
+    if vista_actual in ["⚙️ Panel Operativo", "📊 Analítico", "🛒 Compras", "🔍 Consultas"]:
+        for c in [col_asignacion, col_vencimiento, col_fecha_confi]:
+            if c and c in df_trabajo_completo.columns: df_trabajo_completo[c] = df_trabajo_completo[c].apply(estandarizar_fechas_mx)
 
     def armar_vehiculo(row):
         m = str(row.get(col_marca, '')).strip().upper()
@@ -2369,50 +2395,62 @@ elif vista_actual == "🛠️ Cuartel General":
 
     # --- CENTRO DE COMANDO DE BOTS ---
     st.markdown("#### 🤖 Centro de Comando de Bots (Extracción y Alertas)")
-    st.caption("Ejecuta los procesos de extracción y revisión en segundo plano. Los resultados aparecerán aquí mismo.")
+    st.caption("Ejecuta los procesos de extracción directamente desde el servidor.")
     
     col_bot1, col_bot2 = st.columns(2)
     
     with col_bot1:
-        st.markdown("**1. Revisión de Estatus Crítico**")
-        if st.button("🚨 Ejecutar Escaneo de Base Maestra", use_container_width=True):
-            with st.spinner("Analizando vencimientos en segundo plano..."):
-                try:
-                    # capture_output=True atrapa todo lo que el bot imprime en la consola negra
-                    # Reemplaza 'tu_bot_estatus.py' con el nombre real de tu archivo
-                    resultado = subprocess.run(['python', 'gnp_inpart.py'], capture_output=True, text=True, check=True)
-                    st.success("✅ Análisis completado.")
-                    
-                    with st.expander("Ver Consola de Resultados", expanded=True):
-                        # st.code replicará el fondo negro y la fuente monospace de tu consola
-                        st.code(resultado.stdout, language="bash")
-                except FileNotFoundError:
-                    st.error("⚠️ No se encontró el archivo del bot. Asegúrate de que esté en la misma carpeta.")
-                except subprocess.CalledProcessError as e:
-                    st.error("⚠️ El bot arrojó un error durante su ejecución.")
-                    with st.expander("Ver detalle del error"):
-                        st.code(e.stderr, language="bash")
-                except Exception as e:
-                    st.error(f"Error inesperado: {e}")
+        st.markdown("**1. Extractor de Portales a Base Maestra**")
+        with st.form("form_lanzador_bots"):
+            st.info("Selecciona el portal a escanear. El modo 'Oculto' es más rápido; el 'Visual' abrirá el navegador en el servidor.")
+            bot_seleccionado = st.selectbox("Seleccionar Portal:", ["GNP Inpart", "Multiasistencia"])
+            modo_extraccion = st.radio("Modo de Ejecución:", ["Oculto (Rápido)", "Visual (Ver Chrome)"], horizontal=True)
+            
+            btn_extraer = st.form_submit_button("🚀 Iniciar Extracción", type="primary", use_container_width=True)
+            
+            if btn_extraer:
+                archivo_ejecutar = "gnp_inpart.py" if bot_seleccionado == "GNP Inpart" else "sincronizador_multiasistencia.py"
+                arg_modo = "--oculto" if "Oculto" in modo_extraccion else "--visual"
+                
+                with st.spinner(f"Preparando entorno y ejecutando {bot_seleccionado}... (Esto puede tomar varios minutos)"):
+                    try:
+                        # 1. Instalar el navegador oculto de Playwright en el servidor (es rápido y solo lo hace si falta)
+                        subprocess.run(['python', '-m', 'playwright', 'install', 'chromium'], check=False)
+                        
+                        # 2. Ejecutamos el bot y capturamos toda su salida en tiempo real
+                        resultado = subprocess.run(['python', archivo_ejecutar, arg_modo], capture_output=True, text=True, check=True)
+                        st.success(f"✅ Extracción de {bot_seleccionado} finalizada con éxito.")
+                        
+                        # Extraer solo la parte final para las alertas de WhatsApp
+                        salida_completa = resultado.stdout
+                        if "REPORTES LISTOS PARA COPIAR" in salida_completa:
+                            reportes_wa = salida_completa.split("REPORTES LISTOS PARA COPIAR")[1]
+                            st.session_state['temp_wa_alerts'] = "REPORTES LISTOS PARA COPIAR" + reportes_wa
+                        else:
+                            st.session_state['temp_wa_alerts'] = "No se generaron nuevos reportes de WhatsApp en esta extracción."
+                            
+                        with st.expander("Ver Consola de Ejecución Completa", expanded=True):
+                            st.code(salida_completa, language="bash")
+                            
+                    except FileNotFoundError:
+                        st.error(f"⚠️ No se encontró el archivo '{archivo_ejecutar}' en el directorio del Dashboard.")
+                    except subprocess.CalledProcessError as e:
+                        st.error("⚠️ El bot arrojó un error durante su ejecución o fue interrumpido.")
+                        with st.expander("Ver detalle del error"):
+                            st.code(e.stderr + "\n" + e.stdout, language="bash")
+                    except Exception as e:
+                        st.error(f"Error inesperado al lanzar el bot: {e}")
 
     with col_bot2:
         st.markdown("**2. Generador de Mensajes (WhatsApp)**")
-        if st.button("📱 Generar Plantillas de Asignación", use_container_width=True):
-            with st.spinner("Extrayendo nuevas asignaciones..."):
-                try:
-                    # Reemplaza 'tu_bot_whatsapp.py' con el nombre real de tu archivo
-                    resultado = subprocess.run(['python', 'sincronizador_multiasistencia.py'], capture_output=True, text=True, check=True)
-                    st.success("✅ Mensajes generados.")
-                    
-                    with st.expander("Mensajes Listos para Enviar", expanded=True):
-                        # text_area permite seleccionar y copiar el texto fácilmente
-                        st.text_area("Copia el texto y pégalo en WhatsApp Web:", value=resultado.stdout, height=200)
-                except FileNotFoundError:
-                    st.error("⚠️ No se encontró el archivo del bot.")
-                except subprocess.CalledProcessError as e:
-                    st.error("⚠️ El bot arrojó un error durante su ejecución.")
-                    with st.expander("Ver detalle del error"):
-                        st.code(e.stderr, language="bash")
+        st.caption("Los mensajes de nuevas asignaciones se generarán automáticamente al terminar la extracción exitosa.")
+        
+        texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
+        st.text_area("Copia el texto y pégalo en WhatsApp Web:", value=texto_wa, height=280)
+        
+        if st.button("🧹 Limpiar Bandeja de WhatsApp", use_container_width=True):
+            st.session_state['temp_wa_alerts'] = ""
+            st.rerun()
 
     st.markdown("---")
     

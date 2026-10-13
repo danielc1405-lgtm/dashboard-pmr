@@ -2322,12 +2322,66 @@ elif vista_actual == "🛠️ Cuartel General":
     import sys
     import os
 
+    st.markdown("### 🛠️ Cuartel General PMR (Sala de Máquinas)")
+    st.info("Desde aquí controlaremos respaldos, mantenimientos, bots automatizados y la lista de tareas pendientes.")
+
     # --- REDISEÑO VISUAL: COLUMNA IZQUIERDA (70%) Y DERECHA (30%) ---
     col_izq, col_der = st.columns([2.5, 1.2], gap="large")
 
     with col_izq:
         # ==========================================
-        # SECCIÓN 1: BOTS Y AUTOMATIZACIÓN
+        # SECCIÓN 1: MANTENIMIENTO Y RESPALDO (ARRIBA)
+        # ==========================================
+        st.markdown("#### 💾 Mantenimiento y Respaldo")
+        c_resp1, c_resp2 = st.columns(2)
+        
+        with c_resp1:
+            st.caption("1. Descargar historial local (Plan B)")
+            if st.button("📥 Generar Respaldo de Rutas", use_container_width=True, key="btn_respaldo_rutas"):
+                with st.spinner("Empaquetando datos..."):
+                    try:
+                        doc = init_connection()
+                        ws_rutas = doc.worksheet("BD_RUTAS")
+                        datos = ws_rutas.get_all_values()
+                        if len(datos) > 1:
+                            df_respaldo = pd.DataFrame(datos[1:], columns=datos[0])
+                            buffer = io.BytesIO()
+                            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                                df_respaldo.to_excel(writer, index=False, sheet_name='Historial_Rutas')
+                            st.download_button(label="💾 Descargar Excel", data=buffer.getvalue(), file_name=f"Respaldo_Rutas_PMR_{datetime.datetime.now(tz_mx).strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.ms-excel", type="primary", use_container_width=True, key="dl_excel_rutas")
+                        else: st.warning("La base de rutas está vacía.")
+                    except Exception as e: st.error(f"Error: {e}")
+
+        with c_resp2:
+            st.caption("2. Purgar nube (Mantener app rápida)")
+            if st.button("🧹 Limpiar Viajes Antiguos", use_container_width=True, key="btn_limpiar_nube"):
+                with st.spinner("Limpiando el servidor..."):
+                    try:
+                        doc = init_connection()
+                        ws_rutas = doc.worksheet("BD_RUTAS")
+                        datos = ws_rutas.get_all_values()
+                        if len(datos) > 1:
+                            df_rutas_limpieza = pd.DataFrame(datos[1:], columns=[str(h).strip().upper() for h in datos[0]])
+                            fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
+                            cond_pendientes = df_rutas_limpieza['ESTATUS'].astype(str).str.upper() == 'PENDIENTE'
+                            cond_hoy = df_rutas_limpieza['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
+                            df_a_conservar = df_rutas_limpieza[cond_pendientes | cond_hoy].copy()
+                            filas_eliminadas = len(df_rutas_limpieza) - len(df_a_conservar)
+                            
+                            if filas_eliminadas > 0:
+                                ws_rutas.clear()
+                                filas_nuevas = [datos[0]]
+                                filas_nuevas.extend(df_a_conservar.values.tolist())
+                                ws_rutas.update(range_name='A1', values=filas_nuevas, value_input_option='USER_ENTERED')
+                                st.success(f"✅ Nube optimizada. Se eliminaron {filas_eliminadas} viajes.")
+                            else: st.info("La base ya está optimizada.")
+                        else: st.info("No hay datos para limpiar.")
+                    except Exception as e: st.error(f"Error: {e}")
+
+        st.markdown("---")
+
+        # ==========================================
+        # SECCIÓN 2: BOTS Y AUTOMATIZACIÓN (ABAJO)
         # ==========================================
         st.markdown("#### 🤖 Centro de Mando: Bots")
         c_bot1, c_bot2 = st.columns(2)
@@ -2337,15 +2391,14 @@ elif vista_actual == "🛠️ Cuartel General":
                 st.caption("Extracción directa a Base Maestra")
                 bot_seleccionado = st.selectbox("Seleccionar Portal:", ["GNP Inpart", "Multiasistencia"], label_visibility="collapsed")
                 modo_extraccion = st.radio("Modo de Ejecución:", ["Oculto (Rápido)", "Visual (Ver Chrome)"], horizontal=True)
-                
                 btn_extraer = st.form_submit_button("🚀 Iniciar Extracción", type="primary", use_container_width=True)
         
         with c_bot2:
             st.caption("Mensajes generados (WhatsApp)")
             texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
-            st.text_area("Copia el texto y pégalo en WhatsApp Web:", value=texto_wa, height=130, label_visibility="collapsed")
+            st.text_area("Copia el texto y pégalo en WhatsApp Web:", value=texto_wa, height=130, label_visibility="collapsed", key="txt_area_wa")
             
-            if st.button("🧹 Limpiar Bandeja de WhatsApp", use_container_width=True):
+            if st.button("🧹 Limpiar Bandeja de WhatsApp", use_container_width=True, key="btn_limpiar_wa"):
                 st.session_state['temp_wa_alerts'] = ""
                 st.rerun()
 
@@ -2380,7 +2433,7 @@ elif vista_actual == "🛠️ Cuartel General":
                             
                         # 5. La terminal
                         with st.expander("Ver Consola de Ejecución", expanded=True):
-                            st.text_area("Terminal", value=salida_completa, height=350, disabled=True, label_visibility="collapsed")
+                            st.text_area("Terminal", value=salida_completa, height=350, disabled=True, label_visibility="collapsed", key="txt_area_terminal")
                             
                         st.rerun() # Forzamos recarga para que el texto de WhatsApp aparezca arriba
                             
@@ -2389,63 +2442,12 @@ elif vista_actual == "🛠️ Cuartel General":
                     except subprocess.CalledProcessError as e:
                         st.error("⚠️ El bot arrojó un error o fue interrumpido.")
                         with st.expander("Ver detalle del error", expanded=True):
-                            st.text_area("Error Terminal", value=e.stderr + "\n" + e.stdout, height=250, disabled=True, label_visibility="collapsed")
+                            st.text_area("Error Terminal", value=e.stderr + "\n" + e.stdout, height=250, disabled=True, label_visibility="collapsed", key="txt_area_err")
                     except Exception as e:
                         st.error(f"Error inesperado: {e}")
                     finally:
                         if os.path.exists("credentials.json"):
                             os.remove("credentials.json")
-
-        st.markdown("---")
-
-        # ==========================================
-        # SECCIÓN 2: MANTENIMIENTO Y RESPALDO
-        # ==========================================
-        st.markdown("#### 💾 Mantenimiento y Respaldo")
-        c_resp1, c_resp2 = st.columns(2)
-        
-        with c_resp1:
-            st.caption("1. Descargar historial local (Plan B)")
-            if st.button("📥 Generar Respaldo de Rutas", use_container_width=True):
-                with st.spinner("Empaquetando datos..."):
-                    try:
-                        doc = init_connection()
-                        ws_rutas = doc.worksheet("BD_RUTAS")
-                        datos = ws_rutas.get_all_values()
-                        if len(datos) > 1:
-                            df_respaldo = pd.DataFrame(datos[1:], columns=datos[0])
-                            buffer = io.BytesIO()
-                            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                                df_respaldo.to_excel(writer, index=False, sheet_name='Historial_Rutas')
-                            st.download_button(label="💾 Descargar Excel", data=buffer.getvalue(), file_name=f"Respaldo_Rutas_PMR_{datetime.datetime.now(tz_mx).strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.ms-excel", type="primary", use_container_width=True)
-                        else: st.warning("La base de rutas está vacía.")
-                    except Exception as e: st.error(f"Error: {e}")
-
-        with c_resp2:
-            st.caption("2. Purgar nube (Mantener app rápida)")
-            if st.button("🧹 Limpiar Viajes Antiguos", use_container_width=True):
-                with st.spinner("Limpiando el servidor..."):
-                    try:
-                        doc = init_connection()
-                        ws_rutas = doc.worksheet("BD_RUTAS")
-                        datos = ws_rutas.get_all_values()
-                        if len(datos) > 1:
-                            df_rutas_limpieza = pd.DataFrame(datos[1:], columns=[str(h).strip().upper() for h in datos[0]])
-                            fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
-                            cond_pendientes = df_rutas_limpieza['ESTATUS'].astype(str).str.upper() == 'PENDIENTE'
-                            cond_hoy = df_rutas_limpieza['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
-                            df_a_conservar = df_rutas_limpieza[cond_pendientes | cond_hoy].copy()
-                            filas_eliminadas = len(df_rutas_limpieza) - len(df_a_conservar)
-                            
-                            if filas_eliminadas > 0:
-                                ws_rutas.clear()
-                                filas_nuevas = [datos[0]]
-                                filas_nuevas.extend(df_a_conservar.values.tolist())
-                                ws_rutas.update(range_name='A1', values=filas_nuevas, value_input_option='USER_ENTERED')
-                                st.success(f"✅ Nube optimizada. Se eliminaron {filas_eliminadas} viajes.")
-                            else: st.info("La base ya está optimizada.")
-                        else: st.info("No hay datos para limpiar.")
-                    except Exception as e: st.error(f"Error: {e}")
 
     # ==========================================
     # SECCIÓN 3: PANEL LATERAL (LISTA DE TAREAS)
@@ -2474,7 +2476,7 @@ elif vista_actual == "🛠️ Cuartel General":
                     st.info("¡Todo al día! Buen trabajo.")
                 else:
                     for _, row in df_pendientes.iterrows():
-                        marcado = st.checkbox(f"**{row['Nota']}**\n\n*(Reportado: {row['Fecha']})*", key=f"nota_{row['GS_Row']}")
+                        marcado = st.checkbox(f"**{row['Nota']}**\n\n*(Reportado: {row['Fecha']})*", key=f"nota_cg_{row['GS_Row']}")
                         if marcado:
                             ws_notas.update_cell(row['GS_Row'], 3, "COMPLETADO")
                             st.toast(f"Tarea completada: {row['Nota']}", icon="✅"); time.sleep(0.5); st.rerun()

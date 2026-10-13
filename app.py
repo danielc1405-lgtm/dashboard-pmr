@@ -921,18 +921,24 @@ elif vista_actual == "⚙️ Panel Operativo":
     df_por_recibir = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper() == "ENTREGADO"].copy() if col_estatus else pd.DataFrame()
     with st.expander(f"📥 Por Recibir (Entregados en CDR) | {len(df_por_recibir)} Partida(s)", expanded=False):
         if not df_por_recibir.empty:
+            # Detecta "Fecha Recibido" (Columna Y de tu Sheet) o "Fecha Entrega"
+            c_f_entrega = next((c for c in df_por_recibir.columns if any(x in str(c).upper() for x in ["FECHA REC", "FECHA ENT", "LLEGADA"])), None)
+            if c_f_entrega:
+                df_por_recibir[c_f_entrega] = df_por_recibir[c_f_entrega].apply(estandarizar_fechas_mx)
+                base_config[c_f_entrega] = st.column_config.TextColumn("📅 F. Entrega", disabled=True)
+            
+            col_fecha_lista = [c_f_entrega] if c_f_entrega else []
+
             if permiso_edicion:
                 df_por_recibir['Marcar Recibido'] = False
-                # Agregamos col_estatus_envio a la vista
-                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_recibir.columns] + ['Marcar Recibido'] + [c for c in [col_paqueteria, col_guia, col_estatus_envio, col_comentarios] if c in df_por_recibir.columns]
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_recibir.columns] + ['Marcar Recibido'] + [c for c in [col_paqueteria, col_guia] + col_fecha_lista + [col_comentarios] if c in df_por_recibir.columns]
                 config_cobro = base_config.copy()
                 config_cobro.update({"Marcar Recibido": st.column_config.CheckboxColumn("🏁 Marcar Recibido", default=False)})
                 df_editado_cobro = st.data_editor(df_por_recibir[cols_visibles], column_config=config_cobro, disabled=[c for c in cols_visibles if c not in ['Marcar Recibido', col_comentarios]], hide_index=True, use_container_width=True, key="ed_cobro")
                 for col in df_por_recibir.columns: 
                     if col not in df_editado_cobro.columns: df_editado_cobro[col] = df_por_recibir[col].values
             else:
-                # Agregamos col_estatus_envio a la vista (modo lectura)
-                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio, col_paqueteria, col_guia, col_estatus_envio, col_comentarios] if c in df_por_recibir.columns]
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio, col_paqueteria, col_guia] + col_fecha_lista + [col_comentarios] if c in df_por_recibir.columns]
                 st.dataframe(df_por_recibir[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
 
     if col_estatus and col_estatus in df_filtrado.columns:
@@ -2400,56 +2406,64 @@ elif vista_actual == "🛠️ Cuartel General":
             texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
             st.text_area("Copia el texto y pégalo en WhatsApp Web:", value=texto_wa, height=130, label_visibility="collapsed", key="txt_area_wa")
             
-            if st.button("🧹 Limpiar Bandeja de WhatsApp", use_container_width=True, key="btn_limpiar_wa"):
+            if st.button("🧹 Limpiar Bandeja y Consola", use_container_width=True, key="btn_limpiar_wa"):
                 st.session_state['temp_wa_alerts'] = ""
+                st.session_state['temp_bot_log'] = ""
+                st.session_state['temp_bot_status'] = ""
                 st.rerun()
-
-        # Contenedor para que la terminal aparezca aquí abajo sin romper la pantalla
-        espacio_terminal = st.empty()
 
         if btn_extraer:
             archivo_ejecutar = "gnp_inpart.py" if bot_seleccionado == "GNP Inpart" else "sincronizador_multiasistencia.py"
             arg_modo = "--oculto" if "Oculto" in modo_extraccion else "--visual"
             
-            with espacio_terminal.container():
-                with st.spinner(f"Ejecutando {bot_seleccionado}... (Esto tomará unos minutos)"):
-                    try:
-                        # 1. Credenciales temporales
-                        with open("credentials.json", "w", encoding="utf-8") as f:
-                            f.write(st.secrets["google_credentials"])
-                            
-                        # 2. Instalar dependencias ocultas
-                        subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+            with st.spinner(f"Ejecutando {bot_seleccionado}... (Esto tomará unos minutos)"):
+                try:
+                    # 1. Credenciales temporales
+                    with open("credentials.json", "w", encoding="utf-8") as f:
+                        f.write(st.secrets["google_credentials"])
                         
-                        # 3. Ejecutar Bot
-                        resultado = subprocess.run([sys.executable, archivo_ejecutar, arg_modo], capture_output=True, text=True, check=True)
-                        st.success(f"✅ {bot_seleccionado} finalizado.")
+                    # 2. Instalar dependencias ocultas
+                    subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+                    
+                    # 3. Ejecutar Bot (usamos check=False para atrapar cualquier salida aunque tarde o falle parcialmente)
+                    resultado = subprocess.run([sys.executable, archivo_ejecutar, arg_modo], capture_output=True, text=True, check=False)
+                    salida_completa = (resultado.stdout or "") + "\n" + (resultado.stderr or "")
+                    
+                    # Guardamos la consola en memoria para que NO desaparezca al recargar
+                    st.session_state['temp_bot_log'] = salida_completa
+                    
+                    if resultado.returncode == 0:
+                        st.session_state['temp_bot_status'] = f"✅ Extracción de {bot_seleccionado} finalizada con éxito."
+                    else:
+                        st.session_state['temp_bot_status'] = f"⚠️ {bot_seleccionado} terminó con advertencias (revisa la consola abajo)."
+                    
+                    # 4. Procesar WhatsApp
+                    if "REPORTES LISTOS PARA COPIAR" in salida_completa:
+                        reportes_wa = salida_completa.split("REPORTES LISTOS PARA COPIAR")[1]
+                        st.session_state['temp_wa_alerts'] = "REPORTES LISTOS PARA COPIAR" + reportes_wa
+                    else:
+                        st.session_state['temp_wa_alerts'] = "No se detectaron siniestros nuevos para reportar por WhatsApp en esta corrida."
                         
-                        # 4. Procesar WhatsApp
-                        salida_completa = resultado.stdout
-                        if "REPORTES LISTOS PARA COPIAR" in salida_completa:
-                            reportes_wa = salida_completa.split("REPORTES LISTOS PARA COPIAR")[1]
-                            st.session_state['temp_wa_alerts'] = "REPORTES LISTOS PARA COPIAR" + reportes_wa
-                        else:
-                            st.session_state['temp_wa_alerts'] = "No se generaron nuevos reportes de WhatsApp en esta extracción."
-                            
-                        # 5. La terminal
-                        with st.expander("Ver Consola de Ejecución", expanded=True):
-                            st.text_area("Terminal", value=salida_completa, height=350, disabled=True, label_visibility="collapsed", key="txt_area_terminal")
-                            
-                        st.rerun() # Forzamos recarga para que el texto de WhatsApp aparezca arriba
-                            
-                    except FileNotFoundError:
-                        st.error(f"⚠️ No se encontró el archivo '{archivo_ejecutar}'.")
-                    except subprocess.CalledProcessError as e:
-                        st.error("⚠️ El bot arrojó un error o fue interrumpido.")
-                        with st.expander("Ver detalle del error", expanded=True):
-                            st.text_area("Error Terminal", value=e.stderr + "\n" + e.stdout, height=250, disabled=True, label_visibility="collapsed", key="txt_area_err")
-                    except Exception as e:
-                        st.error(f"Error inesperado: {e}")
-                    finally:
-                        if os.path.exists("credentials.json"):
-                            os.remove("credentials.json")
+                    # 5. ¡CRÍTICO!: Limpiar el caché de Streamlit para que los pedidos nuevos se vean al instante
+                    st.cache_data.clear()
+                    st.rerun()
+                        
+                except Exception as e:
+                    st.error(f"Error inesperado al lanzar el bot: {e}")
+                finally:
+                    if os.path.exists("credentials.json"):
+                        os.remove("credentials.json")
+
+        # --- MOSTRAR SIEMPRE LA CONSOLA GUARDADA DEBAJO DE LOS BOTONES ---
+        if st.session_state.get('temp_bot_status'):
+            if "✅" in st.session_state['temp_bot_status']:
+                st.success(st.session_state['temp_bot_status'])
+            else:
+                st.warning(st.session_state['temp_bot_status'])
+                
+        if st.session_state.get('temp_bot_log'):
+            with st.expander("🖥️ Ver Consola de Ejecución Completa (Qué hizo el robot)", expanded=True):
+                st.text_area("Terminal", value=st.session_state['temp_bot_log'], height=320, disabled=True, label_visibility="collapsed", key="txt_area_terminal_fija")
 
     # ==========================================
     # SECCIÓN 3: PANEL LATERAL (LISTA DE TAREAS)

@@ -19,25 +19,26 @@ meses_map = {
     'jul': 7, 'ago': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dic': 12
 }
 
+PATRON_MESES = r"(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic)"
+
 def convertir_a_formato_mx(fecha_raw):
     if not fecha_raw: return ""
     f_str = str(fecha_raw).strip().lower()
-    for palabra in [' de ', ' del ']:
-        f_str = f_str.replace(palabra, ' ')
     
-    match = re.search(r"(\d{1,2})\s+([a-záéíóú]+)\s+(\d{2,4})", f_str)
+    # Busca estrictamente: Día + Nombre de Mes Real + Año de 4 dígitos (Ej. "12 De Octubre Del 2026")
+    match = re.search(rf"(\d{{1,2}})\s+(?:de\s+)?({PATRON_MESES})\s+(?:de\s+|del\s+)?(\d{{4}})", f_str, re.IGNORECASE)
     if match:
         try:
             dia = int(match.group(1))
-            mes_str = match.group(2)[:3]
+            mes_str = match.group(2)[:3].lower()
             anio = int(match.group(3))
-            if anio < 100: anio += 2000
-            mes = meses_map.get(mes_str, 1)
-            dt = datetime.datetime(anio, mes, dia)
-            meses_cortos = {1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep', 10:'oct', 11:'nov', 12:'dic'}
-            return f"{dt.day:02d}/{meses_cortos[dt.month]}/{dt.strftime('%y')}"
+            mes = meses_map.get(mes_str)
+            if mes:
+                dt = datetime.datetime(anio, mes, dia)
+                meses_cortos = {1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep', 10:'oct', 11:'nov', 12:'dic'}
+                return f"{dt.day:02d}/{meses_cortos[dt.month]}/{dt.strftime('%y')}"
         except: pass
-    return str(fecha_raw)
+    return ""
 
 def conectar_sheets():
     print("Conectando a Google Sheets...")
@@ -69,16 +70,13 @@ def rastrear_paquetexpress(guia, page):
                         # 1. Extraer quién recibió
                         match_recibe = re.search(r"recibi[oó]\s+([^\n\r]+)", item, re.IGNORECASE)
                         if match_recibe:
-                            persona = match_recibe.group(1).strip().title()
+                            persona = match_recibe.group(1).strip()
                             estatus_final_api = f"Entregado ({persona})"
                         else:
                             estatus_final_api = "Entregado"
                         
-                        # 2. Extraer la fecha del evento de entrega
-                        match_fecha = re.search(r"(\d{1,2}\s+(?:de\s+)?[a-záéíóú]+\s+(?:de\s+|del\s+)?\d{2,4})", item, re.IGNORECASE)
-                        if match_fecha:
-                            fecha_cruda = match_fecha.group(1)
-                            fecha_entrega_formateada = convertir_a_formato_mx(fecha_cruda)
+                        # 2. Extraer la fecha validando que contenga un mes real (ignora "11:52 Horas")
+                        fecha_entrega_formateada = convertir_a_formato_mx(item)
                         break
             except Exception as ex:
                 print(f"  ⚠️ Detalle menor extrayendo firma/fecha de {guia}: {ex}")
@@ -93,15 +91,13 @@ def rastrear_paquetexpress(guia, page):
 # 3. LÓGICA PRINCIPAL
 # ==========================================
 def ejecutar_laboratorio():
-    print("Iniciando Motor de Rastreo Inteligente (Con Fecha y Receptor)...")
+    print("Iniciando Motor de Rastreo Inteligente (Con Fecha Exacta y Receptor)...")
     doc = conectar_sheets()
     hojas_a_procesar = [doc.worksheet("BD_UNIFICADA")]
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True) 
         page = browser.new_page()
-        
-        # Cache por guía para no consultar 3 veces la misma guía si un siniestro tiene 3 piezas
         cache_guias = {}
         
         for ws in hojas_a_procesar:
@@ -132,10 +128,10 @@ def ejecutar_laboratorio():
                 fila_guia = str(fila[idx_guia]).strip()
                 valor_fecha_actual = str(fila[idx_fecha_recibido]).strip() if (idx_fecha_recibido is not None and len(fila) > idx_fecha_recibido) else ""
                 
-                # CONDICIÓN MEJORADA:
-                # 1. Está EN TRANSITO, o
-                # 2. Está ENTREGADO pero la columna de Fecha Recibido sigue vacía
-                requiere_rastreo = (fila_estatus == "EN TRANSITO") or (fila_estatus == "ENTREGADO" and not valor_fecha_actual)
+                # Detecta si la fecha está vacía o si tiene el error anterior ("Horas", "/09", "/10", "/12")
+                fecha_invalida = (not valor_fecha_actual) or ("HORAS" in valor_fecha_actual.upper()) or any(valor_fecha_actual.endswith(x) for x in ["/09", "/10", "/12"])
+                
+                requiere_rastreo = (fila_estatus == "EN TRANSITO") or (fila_estatus == "ENTREGADO" and fecha_invalida)
                 
                 if requiere_rastreo and fila_paqueteria == "PAQUETEXPRESS" and fila_guia:
                     if fila_guia in cache_guias:
@@ -150,12 +146,10 @@ def ejecutar_laboratorio():
                     if nuevo_estatus_envio != "Pendiente de actualización":
                         celdas_a_actualizar.append(gspread.Cell(row=i+2, col=idx_estatus_envio+1, value=nuevo_estatus_envio))
                         
-                        # Si ya se entregó en Paquetexpress y seguía EN TRANSITO, lo pasamos a ENTREGADO
                         if "ENTREGADO" in nuevo_estatus_envio.upper() and fila_estatus == "EN TRANSITO":
                             celdas_a_actualizar.append(gspread.Cell(row=i+2, col=idx_estatus+1, value="ENTREGADO"))
                         
-                        # Guardamos la fecha en la columna "Fecha Recibido"
-                        if idx_fecha_recibido is not None and fecha_recibido_extraida and not valor_fecha_actual:
+                        if idx_fecha_recibido is not None and fecha_recibido_extraida and fecha_invalida:
                             celdas_a_actualizar.append(gspread.Cell(row=i+2, col=idx_fecha_recibido+1, value=fecha_recibido_extraida))
 
             if celdas_a_actualizar:

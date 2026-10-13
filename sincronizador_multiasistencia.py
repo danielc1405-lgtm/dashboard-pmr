@@ -508,9 +508,9 @@ def vaciar_a_base_maestra(partidas_web):
                                 desc_val = g_val(r, c_desc)
                                 
                                 if dias_restantes < 0:
-                                    partidas_vencidas_db.append(f"❌ VENCIDO hace {abs(dias_restantes):02d} día(s): {sin_val:<10} | {taller_val:<20} | 1x {desc_val} ({estatus})")
+                                    partidas_vencidas_db.append(f"❌ {abs(dias_restantes):02d} día(s): {sin_val:<10} | {taller_val:<20} | 1x {desc_val} ({estatus})")
                                 elif dias_restantes == 0:
-                                    partidas_hoy_db.append(f"⚠️ VENCE HOY: {sin_val:<10} | {taller_val:<20} | 1x {desc_val} ({estatus})")
+                                    partidas_hoy_db.append(f"⚠️ {sin_val:<10} | {taller_val:<20} | 1x {desc_val} ({estatus})")
 
         revisar_criticos(ws_uni, mapa_uni)
         if ws_hist: revisar_criticos(ws_hist, mapa_hist)

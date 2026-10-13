@@ -683,21 +683,21 @@ if vista_actual == "📊 Analítico":
     # --- 5. MONITOR LOGÍSTICO ---
     st.markdown(f"#### 📋 5. Monitor Logístico en Curso ({aseguradora_sel.upper()})")
     st.caption("Visión depurada de refacciones activas, agrupadas por su estatus logístico actual.")
-    
     if not df_proceso.empty:
         estatus_validos = ["ENTREGADO", "EN TRANSITO", "EN PROCESAMIENTO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN"]
         df_mon = df_proceso[df_proceso[col_estatus].astype(str).str.upper().isin(estatus_validos)].copy()
-        
+            
         if not df_mon.empty:
             df_mon['LLAVE'] = df_mon.apply(lambda r: gen_llave_ana(r.get(col_id,''), r.get(col_desc,'')), axis=1)
             df_mon['Proveedor'] = df_mon['LLAVE'].map(dict_prov_ana).fillna("-")
             df_mon['Llegada Est.'] = df_mon['LLAVE'].map(dict_llegada_ana).fillna("-")
-            
+                
             c_env_disp = buscar_col_ana(["FECHA", "ENVIO"])
             c_rec_disp = buscar_col_ana(["FECHA", "RECIB"])
-            
+            if not c_rec_disp: c_rec_disp = buscar_col_ana(["FECHA", "ENTREG"])
+                
             for est in estatus_validos:
-                df_est = df_mon[df_mon[col_estatus].astype(str).str.upper() == est]
+                df_est = df_mon[df_mon[col_estatus].astype(str).str.upper() == est].copy()
                 if not df_est.empty:
                     if est == "EN PROCESAMIENTO":
                         titulo = f"⚙️ En Procesamiento | {len(df_est)} Partida(s)"
@@ -718,16 +718,17 @@ if vista_actual == "📊 Analítico":
                         cols_ver = [col_taller, col_id, 'Vehiculo_Info']
                         if col_paqueteria and col_paqueteria in df_est.columns: cols_ver.append(col_paqueteria)
                         if col_guia and col_guia in df_est.columns: cols_ver.append(col_guia)
-                        if col_estatus_envio and col_estatus_envio in df_est.columns: cols_ver.append(col_estatus_envio)
-                        if c_rec_disp and c_rec_disp in df_est.columns: cols_ver.append(c_rec_disp)
+                        # Quitamos Rastreo API y dejamos únicamente la Fecha de Entrega (Fecha Recibido)
+                        if c_rec_disp and c_rec_disp in df_est.columns:
+                            df_est[c_rec_disp] = df_est[c_rec_disp].apply(estandarizar_fechas_mx)
+                            cols_ver.append(c_rec_disp)
                         rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_paqueteria: 'Paquetería', col_guia: 'Guía'}
-                        if col_estatus_envio: rename_dict[col_estatus_envio] = 'Rastreo API'
-                        if c_rec_disp: rename_dict[c_rec_disp] = 'F. Entrega'
+                        if c_rec_disp: rename_dict[c_rec_disp] = '📅 F. Entrega'
                     else:
                         titulo = f"⚙️ {est.title()} | {len(df_est)} Partida(s)"
                         cols_ver = [col_taller, col_id, 'Vehiculo_Info', col_desc]
                         rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza'}
-                        
+                            
                     with st.expander(titulo, expanded=(est in ["ENTREGADO", "EN TRANSITO"])):
                         df_vista = df_est[cols_ver].copy()
                         df_vista.rename(columns=rename_dict, inplace=True)
@@ -2329,122 +2330,116 @@ elif vista_actual == "🛠️ Cuartel General":
     import subprocess
     import sys
     import os
+    import re
 
     st.markdown("### 🛠️ Cuartel General PMR (Sala de Máquinas)")
-    st.info("Desde aquí controlaremos respaldos, mantenimientos, bots automatizados y la lista de tareas pendientes.")
+    
+    # --- SUB-PESTAÑAS ESTILO DIRECTORIO (100% ANCHO PARA CADA MÓDULO) ---
+    tab_bots, tab_mant = st.tabs(["🤖 Centro de Bots y Alertas", "💾 Mantenimiento y Pendientes"])
 
-    # --- REDISEÑO VISUAL: COLUMNA IZQUIERDA (70%) Y DERECHA (30%) ---
-    col_izq, col_der = st.columns([2.5, 1.2], gap="large")
+    # =========================================================================
+    # PESTAÑA 1: CENTRO DE BOTS Y ALERTAS (PANTALLA COMPLETA)
+    # =========================================================================
+    with tab_bots:
+        col_ctrl, col_wa = st.columns([1.1, 1.9], gap="large")
 
-    with col_izq:
-        # ==========================================
-        # SECCIÓN 1: MANTENIMIENTO Y RESPALDO (ARRIBA)
-        # ==========================================
-        st.markdown("#### 💾 Mantenimiento y Respaldo")
-        c_resp1, c_resp2 = st.columns(2)
-        
-        with c_resp1:
-            st.caption("1. Descargar historial local (Plan B)")
-            if st.button("📥 Generar Respaldo de Rutas", use_container_width=True, key="btn_respaldo_rutas"):
-                with st.spinner("Empaquetando datos..."):
-                    try:
-                        doc = init_connection()
-                        ws_rutas = doc.worksheet("BD_RUTAS")
-                        datos = ws_rutas.get_all_values()
-                        if len(datos) > 1:
-                            df_respaldo = pd.DataFrame(datos[1:], columns=datos[0])
-                            buffer = io.BytesIO()
-                            with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                                df_respaldo.to_excel(writer, index=False, sheet_name='Historial_Rutas')
-                            st.download_button(label="💾 Descargar Excel", data=buffer.getvalue(), file_name=f"Respaldo_Rutas_PMR_{datetime.datetime.now(tz_mx).strftime('%Y%m%d_%H%M')}.xlsx", mime="application/vnd.ms-excel", type="primary", use_container_width=True, key="dl_excel_rutas")
-                        else: st.warning("La base de rutas está vacía.")
-                    except Exception as e: st.error(f"Error: {e}")
-
-        with c_resp2:
-            st.caption("2. Purgar nube (Mantener app rápida)")
-            if st.button("🧹 Limpiar Viajes Antiguos", use_container_width=True, key="btn_limpiar_nube"):
-                with st.spinner("Limpiando el servidor..."):
-                    try:
-                        doc = init_connection()
-                        ws_rutas = doc.worksheet("BD_RUTAS")
-                        datos = ws_rutas.get_all_values()
-                        if len(datos) > 1:
-                            df_rutas_limpieza = pd.DataFrame(datos[1:], columns=[str(h).strip().upper() for h in datos[0]])
-                            fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
-                            cond_pendientes = df_rutas_limpieza['ESTATUS'].astype(str).str.upper() == 'PENDIENTE'
-                            cond_hoy = df_rutas_limpieza['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
-                            df_a_conservar = df_rutas_limpieza[cond_pendientes | cond_hoy].copy()
-                            filas_eliminadas = len(df_rutas_limpieza) - len(df_a_conservar)
-                            
-                            if filas_eliminadas > 0:
-                                ws_rutas.clear()
-                                filas_nuevas = [datos[0]]
-                                filas_nuevas.extend(df_a_conservar.values.tolist())
-                                ws_rutas.update(range_name='A1', values=filas_nuevas, value_input_option='USER_ENTERED')
-                                st.success(f"✅ Nube optimizada. Se eliminaron {filas_eliminadas} viajes.")
-                            else: st.info("La base ya está optimizada.")
-                        else: st.info("No hay datos para limpiar.")
-                    except Exception as e: st.error(f"Error: {e}")
-
-        st.markdown("---")
-
-        # ==========================================
-        # SECCIÓN 2: BOTS Y AUTOMATIZACIÓN (ABAJO)
-        # ==========================================
-        st.markdown("#### 🤖 Centro de Mando: Bots")
-        c_bot1, c_bot2 = st.columns(2)
-
-        with c_bot1:
+        with col_ctrl:
             with st.form("form_lanzador_bots_master"):
-                st.caption("Extracción directa a Base Maestra")
-                bot_seleccionado = st.selectbox("Seleccionar Portal:", ["GNP Inpart", "Multiasistencia"], label_visibility="collapsed")
-                modo_extraccion = st.radio("Modo de Ejecución:", ["Oculto (Rápido)", "Visual (Ver Chrome)"], horizontal=True)
-                btn_extraer = st.form_submit_button("🚀 Iniciar Extracción", type="primary", use_container_width=True)
-        
-        with c_bot2:
-            st.caption("Mensajes generados (WhatsApp)")
-            texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
-            st.text_area("Copia el texto y pégalo en WhatsApp Web:", value=texto_wa, height=130, label_visibility="collapsed", key="txt_area_wa")
-            
+                st.markdown("**1. Panel de Ejecución**")
+                st.caption("Selecciona el robot que deseas correr en el servidor:")
+                bot_seleccionado = st.selectbox(
+                    "Seleccionar Robot:", 
+                    ["GNP Inpart", "Multiasistencia", "Paquetexpress (Rastreo)"], 
+                    label_visibility="collapsed"
+                )
+                modo_extraccion = st.radio(
+                    "Modo de Ejecución:", 
+                    ["Oculto (Rápido)", "Visual (Ver Chrome)"], 
+                    horizontal=True
+                )
+                st.write("")
+                btn_extraer = st.form_submit_button("🚀 Iniciar Robot", type="primary", use_container_width=True)
+
             if st.button("🧹 Limpiar Bandeja y Consola", use_container_width=True, key="btn_limpiar_wa"):
-                st.session_state['temp_wa_alerts'] = ""
-                st.session_state['temp_bot_log'] = ""
-                st.session_state['temp_bot_status'] = ""
+                st.session_state.pop('temp_wa_alerts', None)
+                st.session_state.pop('temp_bot_log', None)
+                st.session_state.pop('temp_bot_status', None)
+                st.session_state.pop('temp_bot_resumen', None)
                 st.rerun()
 
+        with col_wa:
+            with st.container(border=True):
+                st.markdown("**2. Mensajes Generados (WhatsApp)**")
+                st.caption("Copia el bloque de nuevas asignaciones y pégalo directo en WhatsApp Web:")
+                texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
+                # Sin 'key' fijo para que Streamlit refresque el contenido en cada ejecución
+                st.text_area("WhatsApp Output", value=texto_wa, height=175, label_visibility="collapsed")
+
+        # --- LÓGICA DE EJECUCIÓN DEL ROBOT ---
         if btn_extraer:
-            archivo_ejecutar = "gnp_inpart.py" if bot_seleccionado == "GNP Inpart" else "sincronizador_multiasistencia.py"
+            if bot_seleccionado == "GNP Inpart":
+                archivo_ejecutar = "gnp_inpart.py"
+            elif bot_seleccionado == "Multiasistencia":
+                archivo_ejecutar = "sincronizador_multiasistencia.py"
+            else:
+                archivo_ejecutar = "motor_rastreo.py"
+                
             arg_modo = "--oculto" if "Oculto" in modo_extraccion else "--visual"
             
-            with st.spinner(f"Ejecutando {bot_seleccionado}... (Esto tomará unos minutos)"):
+            with st.spinner(f"Ejecutando {bot_seleccionado}... (Esto puede tomar unos minutos)"):
                 try:
                     # 1. Credenciales temporales
                     with open("credentials.json", "w", encoding="utf-8") as f:
                         f.write(st.secrets["google_credentials"])
                         
-                    # 2. Instalar dependencias ocultas
+                    # 2. Asegurar navegador en servidor
                     subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
                     
-                    # 3. Ejecutar Bot (usamos check=False para atrapar cualquier salida aunque tarde o falle parcialmente)
-                    resultado = subprocess.run([sys.executable, archivo_ejecutar, arg_modo], capture_output=True, text=True, check=False)
-                    salida_completa = (resultado.stdout or "") + "\n" + (resultado.stderr or "")
+                    # 3. Ejecutar script
+                    cmd = [sys.executable, archivo_ejecutar]
+                    if bot_seleccionado != "Paquetexpress (Rastreo)":
+                        cmd.append(arg_modo)
+                        
+                    resultado = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                    salida_completa = ((resultado.stdout or "") + "\n" + (resultado.stderr or "")).strip()
                     
-                    # Guardamos la consola en memoria para que NO desaparezca al recargar
-                    st.session_state['temp_bot_log'] = salida_completa
+                    # 4. Calcular resumen de pedidos revisados
+                    if bot_seleccionado == "Paquetexpress (Rastreo)":
+                        guias_rev = len(re.findall(r"Buscando gu[íi]a:", salida_completa))
+                        st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_seleccionado}):** Se consultaron **{guias_rev}** guías únicas en Paquetexpress."
+                    else:
+                        revisados = "0"
+                        m_multi = re.search(r"Quedan\s+(\d+)\s+siniestros", salida_completa)
+                        m_gnp = re.search(r"Total le[íi]dos[^:]*:\s*(\d+)", salida_completa)
+                        if m_multi: revisados = m_multi.group(1)
+                        elif m_gnp: revisados = m_gnp.group(1)
+                        st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_seleccionado}):** Se revisaron **{revisados}** pedidos activos en el portal."
+                    
+                    # 5. Extraer limpiamente el bloque de WhatsApp
+                    if "REPORTES LISTOS PARA COPIAR" in salida_completa:
+                        parte_wa = re.split(r"REPORTES LISTOS PARA COPIAR(?: A WHATSAPP)?", salida_completa)[1]
+                        for corte in ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "!!!!!"]:
+                            if corte in parte_wa:
+                                parte_wa = parte_wa.split(corte)[0]
+                        parte_wa = re.sub(r'^[=\s]+', '', parte_wa).strip()
+                        st.session_state['temp_wa_alerts'] = parte_wa
+                    elif bot_seleccionado != "Paquetexpress (Rastreo)":
+                        st.session_state['temp_wa_alerts'] = "No hubo asignaciones nuevas para enviar por WhatsApp en esta corrida."
+
+                    # 6. Filtrar líneas repetitivas de '[1/26] procesado...' para dejar una consola limpia
+                    lineas_limpias = []
+                    for linea in salida_completa.splitlines():
+                        if re.match(r"^\[\d+/\d+\]\s*\|\s*Siniestro .* procesado\.$", linea.strip()):
+                            continue
+                        lineas_limpias.append(linea)
+                    st.session_state['temp_bot_log'] = "\n".join(lineas_limpias).strip()
                     
                     if resultado.returncode == 0:
-                        st.session_state['temp_bot_status'] = f"✅ Extracción de {bot_seleccionado} finalizada con éxito."
+                        st.session_state['temp_bot_status'] = f"✅ Ejecución de {bot_seleccionado} finalizada con éxito."
                     else:
-                        st.session_state['temp_bot_status'] = f"⚠️ {bot_seleccionado} terminó con advertencias (revisa la consola abajo)."
-                    
-                    # 4. Procesar WhatsApp
-                    if "REPORTES LISTOS PARA COPIAR" in salida_completa:
-                        reportes_wa = salida_completa.split("REPORTES LISTOS PARA COPIAR")[1]
-                        st.session_state['temp_wa_alerts'] = "REPORTES LISTOS PARA COPIAR" + reportes_wa
-                    else:
-                        st.session_state['temp_wa_alerts'] = "No se detectaron siniestros nuevos para reportar por WhatsApp en esta corrida."
+                        st.session_state['temp_bot_status'] = f"⚠️ {bot_seleccionado} terminó con advertencias (revisa el detalle abajo)."
                         
-                    # 5. ¡CRÍTICO!: Limpiar el caché de Streamlit para que los pedidos nuevos se vean al instante
+                    # 7. Limpiar caché de datos para reflejar cambios en todas las pestañas de inmediato
                     st.cache_data.clear()
                     st.rerun()
                         
@@ -2454,51 +2449,118 @@ elif vista_actual == "🛠️ Cuartel General":
                     if os.path.exists("credentials.json"):
                         os.remove("credentials.json")
 
-        # --- MOSTRAR SIEMPRE LA CONSOLA GUARDADA DEBAJO DE LOS BOTONES ---
+        # --- SECCIÓN INFERIOR (ANCHO COMPLETO): RESUMEN Y REPORTE GRIS ---
         if st.session_state.get('temp_bot_status'):
-            if "✅" in st.session_state['temp_bot_status']:
-                st.success(st.session_state['temp_bot_status'])
-            else:
-                st.warning(st.session_state['temp_bot_status'])
+            st.markdown("---")
+            c_stat1, c_stat2 = st.columns(2)
+            with c_stat1:
+                if "✅" in st.session_state['temp_bot_status']:
+                    st.success(st.session_state['temp_bot_status'])
+                else:
+                    st.warning(st.session_state['temp_bot_status'])
+            with c_stat2:
+                if st.session_state.get('temp_bot_resumen'):
+                    st.info(st.session_state['temp_bot_resumen'])
                 
         if st.session_state.get('temp_bot_log'):
-            with st.expander("🖥️ Ver Consola de Ejecución Completa (Qué hizo el robot)", expanded=True):
-                st.text_area("Terminal", value=st.session_state['temp_bot_log'], height=320, disabled=True, label_visibility="collapsed", key="txt_area_terminal_fija")
+            with st.expander("🖥️ Ver Reporte de Ejecución y Alertas Críticas", expanded=True):
+                # Sin 'key' fijo para garantizar que siempre muestre la corrida más reciente
+                st.text_area("Terminal Output", value=st.session_state['temp_bot_log'], height=320, disabled=True, label_visibility="collapsed")
 
-    # ==========================================
-    # SECCIÓN 3: PANEL LATERAL (LISTA DE TAREAS)
-    # ==========================================
-    with col_der:
-        st.markdown("#### 📌 Tareas y Pendientes")
-        try:
-            doc = init_connection(); ws_notas = doc.worksheet("BD_NOTAS")
-            datos_notas = ws_notas.get_all_values()
-            if not datos_notas: ws_notas.append_row(["Fecha", "Nota", "Estatus"]); datos_notas = [["Fecha", "Nota", "Estatus"]]
-            df_notas = pd.DataFrame(datos_notas[1:], columns=datos_notas[0])
-            
-            with st.form("form_nueva_nota", clear_on_submit=True):
-                nueva_nota = st.text_input("Nueva tarea o idea:", placeholder="Ej. Extraer placas...", label_visibility="collapsed")
-                if st.form_submit_button("➕ Agregar", use_container_width=True):
-                    if nueva_nota.strip():
+    # =========================================================================
+    # PESTAÑA 2: MANTENIMIENTO Y PENDIENTES
+    # =========================================================================
+    with tab_mant:
+        col_m1, col_m2 = st.columns([1.2, 1.8], gap="large")
+        
+        with col_m1:
+            st.markdown("#### 💾 Respaldo y Limpieza de Rutas")
+            with st.container(border=True):
+                st.markdown("**1. Descargar Historial Local (Plan B)**")
+                st.caption("Descarga un archivo Excel con todas las rutas registradas.")
+                if st.button("📥 Generar Respaldo de Rutas", use_container_width=True, key="btn_respaldo_rutas"):
+                    with st.spinner("Empaquetando datos..."):
+                        try:
+                            doc = init_connection()
+                            ws_rutas = doc.worksheet("BD_RUTAS")
+                            datos = ws_rutas.get_all_values()
+                            if len(datos) > 1:
+                                df_respaldo = pd.DataFrame(datos[1:], columns=datos[0])
+                                buffer = io.BytesIO()
+                                with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+                                    df_respaldo.to_excel(writer, index=False, sheet_name='Historial_Rutas')
+                                st.download_button(
+                                    label="💾 Descargar Excel", 
+                                    data=buffer.getvalue(), 
+                                    file_name=f"Respaldo_Rutas_PMR_{datetime.datetime.now(tz_mx).strftime('%Y%m%d_%H%M')}.xlsx", 
+                                    mime="application/vnd.ms-excel", 
+                                    type="primary", 
+                                    use_container_width=True, 
+                                    key="dl_excel_rutas"
+                                )
+                            else: st.warning("La base de rutas está vacía.")
+                        except Exception as e: st.error(f"Error: {e}")
+
+            with st.container(border=True):
+                st.markdown("**2. Purgar Nube (Optimizar App Móvil)**")
+                st.caption("Conserva únicamente los viajes pendientes y los del día de hoy.")
+                if st.button("🧹 Limpiar Viajes Antiguos", use_container_width=True, key="btn_limpiar_nube"):
+                    with st.spinner("Limpiando el servidor..."):
+                        try:
+                            doc = init_connection()
+                            ws_rutas = doc.worksheet("BD_RUTAS")
+                            datos = ws_rutas.get_all_values()
+                            if len(datos) > 1:
+                                df_rutas_limpieza = pd.DataFrame(datos[1:], columns=[str(h).strip().upper() for h in datos[0]])
+                                fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
+                                cond_pendientes = df_rutas_limpieza['ESTATUS'].astype(str).str.upper() == 'PENDIENTE'
+                                cond_hoy = df_rutas_limpieza['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
+                                df_a_conservar = df_rutas_limpieza[cond_pendientes | cond_hoy].copy()
+                                filas_eliminadas = len(df_rutas_limpieza) - len(df_a_conservar)
+                                
+                                if filas_eliminadas > 0:
+                                    ws_rutas.clear()
+                                    filas_nuevas = [datos[0]]
+                                    filas_nuevas.extend(df_a_conservar.values.tolist())
+                                    ws_rutas.update(range_name='A1', values=filas_nuevas, value_input_option='USER_ENTERED')
+                                    st.success(f"✅ Nube optimizada. Se eliminaron {filas_eliminadas} viajes.")
+                                else: st.info("La base ya está optimizada.")
+                            else: st.info("No hay datos para limpiar.")
+                        except Exception as e: st.error(f"Error: {e}")
+
+        with col_m2:
+            st.markdown("#### 📌 Tareas, Bugs y Pendientes")
+            try:
+                doc = init_connection(); ws_notas = doc.worksheet("BD_NOTAS")
+                datos_notas = ws_notas.get_all_values()
+                if not datos_notas: ws_notas.append_row(["Fecha", "Nota", "Estatus"]); datos_notas = [["Fecha", "Nota", "Estatus"]]
+                df_notas = pd.DataFrame(datos_notas[1:], columns=datos_notas[0])
+                
+                with st.form("form_nueva_nota", clear_on_submit=True):
+                    c_in, c_bt = st.columns([3, 1])
+                    with c_in:
+                        nueva_nota = st.text_input("Nueva tarea o idea:", placeholder="Escribe aquí un pendiente o idea...", label_visibility="collapsed")
+                    with c_bt:
+                        sub_nota = st.form_submit_button("➕ Agregar", use_container_width=True)
+                    if sub_nota and nueva_nota.strip():
                         fecha_str = datetime.datetime.now().strftime("%d/%b/%y %H:%M")
                         ws_notas.append_row([fecha_str, nueva_nota.strip(), "PENDIENTE"], value_input_option='USER_ENTERED')
-                        st.success("Guardado."); time.sleep(1); st.rerun()
+                        st.success("Guardado."); time.sleep(0.5); st.rerun()
 
-            st.markdown("**Por resolver:**")
-            if not df_notas.empty:
-                df_notas['GS_Row'] = df_notas.index + 2
-                df_pendientes = df_notas[df_notas['Estatus'].astype(str).str.upper() != 'COMPLETADO']
-                if df_pendientes.empty: 
-                    st.info("¡Todo al día! Buen trabajo.")
-                else:
-                    for _, row in df_pendientes.iterrows():
-                        marcado = st.checkbox(f"**{row['Nota']}**\n\n*(Reportado: {row['Fecha']})*", key=f"nota_cg_{row['GS_Row']}")
-                        if marcado:
-                            ws_notas.update_cell(row['GS_Row'], 3, "COMPLETADO")
-                            st.toast(f"Tarea completada: {row['Nota']}", icon="✅"); time.sleep(0.5); st.rerun()
-            else: st.info("¡Todo al día!")
-        except gspread.exceptions.WorksheetNotFound: st.error("⚠️ Para usar esta función, crea una pestaña llamada **BD_NOTAS** en Google Sheets.")
-        except Exception as e: st.error(f"⚠️ Error al cargar: {e}")
+                if not df_notas.empty:
+                    df_notas['GS_Row'] = df_notas.index + 2
+                    df_pendientes = df_notas[df_notas['Estatus'].astype(str).str.upper() != 'COMPLETADO']
+                    if df_pendientes.empty: 
+                        st.info("¡Todo al día! Buen trabajo.")
+                    else:
+                        for _, row in df_pendientes.iterrows():
+                            marcado = st.checkbox(f"**{row['Nota']}** *(Reportado: {row['Fecha']})*", key=f"nota_cg_{row['GS_Row']}")
+                            if marcado:
+                                ws_notas.update_cell(row['GS_Row'], 3, "COMPLETADO")
+                                st.toast(f"Tarea completada: {row['Nota']}", icon="✅"); time.sleep(0.5); st.rerun()
+                else: st.info("¡Todo al día!")
+            except gspread.exceptions.WorksheetNotFound: st.error("⚠️ Crea la pestaña **BD_NOTAS** en Google Sheets.")
+            except Exception as e: st.error(f"⚠️ Error al cargar notas: {e}")
 
 # ==============================================================================
 # === [BLOQUE 10: MOTOR DE GUARDADO Y SINCRONIZACIÓN] ===

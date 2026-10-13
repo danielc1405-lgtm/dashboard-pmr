@@ -2291,8 +2291,9 @@ elif vista_actual == "🔍 Consultas":
 
 elif vista_actual == "🛠️ Cuartel General":
     import io
+    import subprocess
     st.markdown("### 🛠️ Cuartel General PMR (Solo Administración)")
-    st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, mantenimientos y la planeación del Plan B Offline.")
+    st.info("Bienvenido a la sala de máquinas. Desde aquí controlaremos respaldos, mantenimientos, bots automatizados y la planeación del Plan B Offline.")
     
     # --- SISTEMA DE RESPALDO LOCAL Y LIMPIEZA ---
     st.markdown("#### 💾 Sistema de Respaldo y Limpieza (Plan B Offline)")
@@ -2364,6 +2365,55 @@ elif vista_actual == "🛠️ Cuartel General":
                 except Exception as e:
                     st.error(f"Error en el mantenimiento: {e}")
                     
+    st.markdown("---")
+
+    # --- CENTRO DE COMANDO DE BOTS ---
+    st.markdown("#### 🤖 Centro de Comando de Bots (Extracción y Alertas)")
+    st.caption("Ejecuta los procesos de extracción y revisión en segundo plano. Los resultados aparecerán aquí mismo.")
+    
+    col_bot1, col_bot2 = st.columns(2)
+    
+    with col_bot1:
+        st.markdown("**1. Revisión de Estatus Crítico**")
+        if st.button("🚨 Ejecutar Escaneo de Base Maestra", use_container_width=True):
+            with st.spinner("Analizando vencimientos en segundo plano..."):
+                try:
+                    # capture_output=True atrapa todo lo que el bot imprime en la consola negra
+                    # Reemplaza 'tu_bot_estatus.py' con el nombre real de tu archivo
+                    resultado = subprocess.run(['python', 'tu_bot_estatus.py'], capture_output=True, text=True, check=True)
+                    st.success("✅ Análisis completado.")
+                    
+                    with st.expander("Ver Consola de Resultados", expanded=True):
+                        # st.code replicará el fondo negro y la fuente monospace de tu consola
+                        st.code(resultado.stdout, language="bash")
+                except FileNotFoundError:
+                    st.error("⚠️ No se encontró el archivo del bot. Asegúrate de que esté en la misma carpeta.")
+                except subprocess.CalledProcessError as e:
+                    st.error("⚠️ El bot arrojó un error durante su ejecución.")
+                    with st.expander("Ver detalle del error"):
+                        st.code(e.stderr, language="bash")
+                except Exception as e:
+                    st.error(f"Error inesperado: {e}")
+
+    with col_bot2:
+        st.markdown("**2. Generador de Mensajes (WhatsApp)**")
+        if st.button("📱 Generar Plantillas de Asignación", use_container_width=True):
+            with st.spinner("Extrayendo nuevas asignaciones..."):
+                try:
+                    # Reemplaza 'tu_bot_whatsapp.py' con el nombre real de tu archivo
+                    resultado = subprocess.run(['python', 'tu_bot_whatsapp.py'], capture_output=True, text=True, check=True)
+                    st.success("✅ Mensajes generados.")
+                    
+                    with st.expander("Mensajes Listos para Enviar", expanded=True):
+                        # text_area permite seleccionar y copiar el texto fácilmente
+                        st.text_area("Copia el texto y pégalo en WhatsApp Web:", value=resultado.stdout, height=200)
+                except FileNotFoundError:
+                    st.error("⚠️ No se encontró el archivo del bot.")
+                except subprocess.CalledProcessError as e:
+                    st.error("⚠️ El bot arrojó un error durante su ejecución.")
+                    with st.expander("Ver detalle del error"):
+                        st.code(e.stderr, language="bash")
+
     st.markdown("---")
     
     # --- REPORTE DE BUGS E IDEAS ---

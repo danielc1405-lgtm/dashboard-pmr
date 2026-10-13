@@ -64,7 +64,7 @@ def obtener_frame_derecho(page):
 def limpiar_precio(precio_raw):
     if not precio_raw: return ""
     p = str(precio_raw).replace(" ", "").replace("\xa0", "").strip()
-    if not p.startswith("\$") and p != "": p = "\$" + p
+    if not p.startswith("$") and p != "": p = "$" + p
     return p
 
 def obtener_mapa_columnas_lista(encabezados):
@@ -138,7 +138,7 @@ def extraer_datos_multi():
                 
                 for txt in enlaces:
                     t = txt.strip()
-                    if re.match(r"^[A-Z0-9\-]{6,20}\$", t.upper()) and not t.isalpha():
+                    if re.match(r"^[A-Z0-9\-]{6,20}$", t.upper()) and not t.isalpha():
                         if t not in lista_siniestros: lista_siniestros.append(t)
                             
                 if not lista_siniestros:
@@ -202,7 +202,7 @@ def extraer_datos_multi():
                                     if (t === "Marca:" && celdasTD[i + 1]) marca = getFullText(celdasTD[i + 1]).replace(/\./g, "").trim();
                                     if (t === "Modelo:" && celdasTD[i + 1] && !ano) {
                                         let c = getFullText(celdasTD[i + 1]);
-                                        if (/^\d{4}\$/.test(c)) ano = c;
+                                        if (/^\d{4}$/.test(c)) ano = c;
                                     }
                                 }
                                 
@@ -348,7 +348,7 @@ def vaciar_a_base_maestra(partidas_web):
             llave = f"{p['siniestro']}_{p['descripcion']}"
             
             precio_flotante = 0.0
-            try: precio_flotante = float(str(p['precio']).replace('\$', '').replace(',', '').strip())
+            try: precio_flotante = float(str(p['precio']).replace('$', '').replace(',', '').strip())
             except: pass
 
             if precio_flotante == 1.0:
@@ -390,4 +390,148 @@ def vaciar_a_base_maestra(partidas_web):
                 if c_origen is not None and p['origen'] and "..." not in p['origen']:
                     ori_actual = str(row_datos[c_origen]).strip() if len(row_datos) > c_origen else ""
                     if "..." in ori_actual or not ori_actual:
-                        agregar_celda(c
+                        agregar_celda(c_origen, p['origen'])
+                        if len(row_datos) > c_origen: row_datos[c_origen] = p['origen']
+
+                precio_excel_raw = row_datos[c_precio] if c_precio is not None and len(row_datos) > c_precio else 0
+                try: precio_actual_excel = float(str(precio_excel_raw).replace('$', '').replace(',', '').strip())
+                except: precio_actual_excel = 0.0
+                
+                if precio_flotante != precio_actual_excel and precio_flotante > 0:
+                    cambios_precio.append(f"⚠ {p['siniestro']:<10} | {p['descripcion'][:25]:<25} | De ${precio_actual_excel:,.2f} a ${precio_flotante:,.2f}")
+                    if c_precio is not None:
+                        agregar_celda(c_precio, precio_flotante)
+            else:
+                nueva_fila = [""] * len(encabezados_uni) 
+                
+                if 'Aseguradora' in mapa_uni: nueva_fila[mapa_uni['Aseguradora']] = 'MULTI'
+                if 'ID_Principal' in mapa_uni: nueva_fila[mapa_uni['ID_Principal']] = p['siniestro']
+                if 'Taller' in mapa_uni: nueva_fila[mapa_uni['Taller']] = p['taller']
+                if 'Marca' in mapa_uni: nueva_fila[mapa_uni['Marca']] = p['marca']
+                if 'Modelo' in mapa_uni: nueva_fila[mapa_uni['Modelo']] = p['modelo']
+                if 'Año' in mapa_uni: nueva_fila[mapa_uni['Año']] = p['ano']
+                if 'VIN' in mapa_uni: nueva_fila[mapa_uni['VIN']] = p['vin']
+                if 'Origen' in mapa_uni: nueva_fila[mapa_uni['Origen']] = p['origen']
+                if 'Cantidad' in mapa_uni: nueva_fila[mapa_uni['Cantidad']] = p.get('cantidad', '1')
+                if 'Descripcion' in mapa_uni: nueva_fila[mapa_uni['Descripcion']] = p['descripcion']
+                if 'Precio' in mapa_uni: nueva_fila[mapa_uni['Precio']] = precio_flotante
+                if 'Fecha_Asignacion' in mapa_uni: nueva_fila[mapa_uni['Fecha_Asignacion']] = formato_fecha_mex(p.get('fecha_asignacion') or hoy)
+                if 'Fecha_Vencimiento' in mapa_uni: nueva_fila[mapa_uni['Fecha_Vencimiento']] = formato_fecha_mex(p['fecha_promesa'])
+                if 'Estatus' in mapa_uni: nueva_fila[mapa_uni['Estatus']] = 'POR CONFIRMAR'
+                
+                filas_a_insertar.append(nueva_fila)
+
+                sin_key = p['siniestro']
+                if sin_key not in reporte_whatsapp:
+                    reporte_whatsapp[sin_key] = {'taller': str(p['taller']).upper() if p['taller'] else 'N/A', 'vehiculo': f"{p['marca']} {p['modelo']} {p['ano']}".upper().strip(), 'piezas': {}}
+                
+                desc_key = str(p['descripcion']).upper()
+                if desc_key in reporte_whatsapp[sin_key]['piezas']: reporte_whatsapp[sin_key]['piezas'][desc_key] += int(p.get('cantidad', '1'))
+                else: reporte_whatsapp[sin_key]['piezas'][desc_key] = int(p.get('cantidad', '1'))
+
+        if celdas_a_actualizar_uni:
+            ws_uni.update_cells(celdas_a_actualizar_uni, value_input_option='USER_ENTERED')
+            print(f"✅ Se aplicaron {len(celdas_a_actualizar_uni)} auto-correcciones en BD_UNIFICADA.")
+            
+        if celdas_a_actualizar_hist:
+            ws_hist.update_cells(celdas_a_actualizar_hist, value_input_option='USER_ENTERED')
+            print(f"✅ Se aplicaron {len(celdas_a_actualizar_hist)} auto-correcciones en BD_HISTORICO.")
+
+        if filas_a_insertar:
+            ws_uni.append_rows(filas_a_insertar, value_input_option='USER_ENTERED', table_range="A1:B")
+            print(f"✅ Se inyectaron {len(filas_a_insertar)} piezas NUEVAS a la nube.")
+        else:
+            print("✅ No hubo piezas nuevas para inyectar.")
+
+        if reporte_whatsapp:
+            print("\n" + "="*50)
+            print(" 📱 REPORTES LISTOS PARA COPIAR A WHATSAPP ")
+            print("="*50 + "\n")
+            for sin, datos_wa in reporte_whatsapp.items():
+                mensaje = "🚨 *NUEVA ASIGNACIÓN* 🚨\n"
+                mensaje += f"🏢 *Taller:* {datos_wa['taller'].strip()}\n"
+                mensaje += f"📄 *Siniestro:* {sin.strip()}\n"
+                mensaje += f"🚗 *Vehículo:* {datos_wa['vehiculo'].strip()}\n\n"
+                mensaje += "*📦 Piezas:*\n"
+                for desc, cant in datos_wa['piezas'].items():
+                    mensaje += f"🔹 {cant}x {desc.strip()}\n"
+                
+                print(mensaje)
+                print(" " + "_"*40 + "\n")
+            
+        if piezas_reactivadas:
+            print("\n🔄 PIEZAS REACTIVADAS (Estaban canceladas y regresaron al portal):")
+            for r in sorted(set(piezas_reactivadas)): print(r)
+
+        if cambios_precio:
+            print("\n🟠 CAMBIOS DE PRECIO DETECTADOS Y ACTUALIZADOS:")
+            for c in sorted(set(cambios_precio)): print(c)
+            
+        if alertas_precio_1:
+            print("\n🟡 ALERTAS DE PRECIO $1.00 (Revisar posible error de cotización):")
+            for a in sorted(set(alertas_precio_1)): print(a)
+            
+        print("\n" + "!"*80)
+        print(" 🚨 REVISIÓN DE ESTATUS CRÍTICO EN BASE MAESTRA (HOY Y VENCIDOS) 🚨")
+        print("!"*80)
+
+        partidas_vencidas_db = []
+        partidas_hoy_db = []
+
+        def revisar_criticos(hoja_ws, mapa):
+            c_venc = mapa.get('Fecha_Vencimiento')
+            c_sin = mapa.get('ID_Principal')
+            c_taller = mapa.get('Taller')
+            c_est = mapa.get('Estatus')
+            c_desc = mapa.get('Descripcion')
+            
+            if c_est is not None and c_venc is not None and c_sin is not None:
+                datos_act = hoja_ws.get_all_values()
+                for j, r in enumerate(datos_act):
+                    if j == 0: continue
+                    def g_val(row_array, index): return str(row_array[index]).strip() if index is not None and index < len(row_array) else ""
+                    
+                    estatus = g_val(r, c_est).upper()
+                    if estatus in ["POR CONFIRMAR", "EN PROCESAMIENTO", "EN TRANSITO"]:
+                        fecha_venc_raw = g_val(r, c_venc)
+                        fecha_venc_date = None
+                        if fecha_venc_raw:
+                            fecha_parsed = convertir_a_fecha_excel(fecha_venc_raw)
+                            if isinstance(fecha_parsed, datetime.datetime):
+                                fecha_venc_date = fecha_parsed.date()
+                        
+                        if fecha_venc_date:
+                            dias_restantes = (fecha_venc_date - hoy.date()).days
+                            if dias_restantes <= 0:
+                                sin_val = g_val(r, c_sin).replace('.0','')
+                                taller_val = g_val(r, c_taller)[:20] if g_val(r, c_taller) else 'N/A'
+                                desc_val = g_val(r, c_desc)
+                                
+                                if dias_restantes < 0:
+                                    partidas_vencidas_db.append(f"❌ VENCIDO hace {abs(dias_restantes):02d} día(s): {sin_val:<10} | {taller_val:<20} | 1x {desc_val} ({estatus})")
+                                elif dias_restantes == 0:
+                                    partidas_hoy_db.append(f"⚠️ VENCE HOY: {sin_val:<10} | {taller_val:<20} | 1x {desc_val} ({estatus})")
+
+        revisar_criticos(ws_uni, mapa_uni)
+        if ws_hist: revisar_criticos(ws_hist, mapa_hist)
+
+        if partidas_vencidas_db:
+            print("\n🔴 PARTIDAS VENCIDAS (Riesgo de reasignación o cancelación):")
+            for v in sorted(set(partidas_vencidas_db), key=lambda x: x.split(': ')[1] if ': ' in x else x): 
+                print(v)
+            print("-" * 80)
+        else:
+            print("\n🔴 PARTIDAS VENCIDAS:\n  ✅ No hay partidas vencidas de días anteriores.")
+            
+        if partidas_hoy_db:
+            print("\n⚠️ PARTIDAS POR VENCER (El día de hoy):")
+            for h in sorted(set(partidas_hoy_db), key=lambda x: x.split(': ')[1] if ': ' in x else x): 
+                print(h)
+            print("-" * 80)
+
+    except Exception as e:
+        print(f"\n❌ Error al conectar/procesar en Google Sheets: {e}")
+
+if __name__ == "__main__":
+    datos = extraer_datos_multi()
+    vaciar_a_base_maestra(datos)

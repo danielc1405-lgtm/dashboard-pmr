@@ -2362,6 +2362,7 @@ elif vista_actual == "🛠️ Cuartel General":
 
             if st.button("🧹 Limpiar Bandeja y Consola", use_container_width=True, key="btn_limpiar_wa"):
                 st.session_state.pop('temp_wa_alerts', None)
+                st.session_state.pop('temp_criticos_alerts', None)
                 st.session_state.pop('temp_bot_log', None)
                 st.session_state.pop('temp_bot_status', None)
                 st.session_state.pop('temp_bot_resumen', None)
@@ -2372,8 +2373,14 @@ elif vista_actual == "🛠️ Cuartel General":
                 st.markdown("**2. Mensajes Generados (WhatsApp)**")
                 st.caption("Copia el bloque de nuevas asignaciones y pégalo directo en WhatsApp Web:")
                 texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
-                # Sin 'key' fijo para que Streamlit refresque el contenido en cada ejecución
                 st.text_area("WhatsApp Output", value=texto_wa, height=175, label_visibility="collapsed")
+
+        # --- CUADRO INDEPENDIENTE PARA REVISIÓN DE ESTATUS CRÍTICO ---
+        with st.container(border=True):
+            st.markdown("**3. 🚨 Revisión de Estatus Crítico (Hoy y Vencidos en Base Maestra)**")
+            st.caption("Radar de partidas vencidas, por vencer hoy, reactivadas o con alertas de precio:")
+            texto_criticos = st.session_state.get('temp_criticos_alerts', "Realiza una extracción de GNP Inpart o Multiasistencia para ver el radar de vencimientos aquí.")
+            st.text_area("Criticos Output", value=texto_criticos, height=185, label_visibility="collapsed")
 
         # --- LÓGICA DE EJECUCIÓN DEL ROBOT ---
         if btn_extraer:
@@ -2426,10 +2433,38 @@ elif vista_actual == "🛠️ Cuartel General":
                     elif bot_seleccionado != "Paquetexpress (Rastreo)":
                         st.session_state['temp_wa_alerts'] = "No hubo asignaciones nuevas para enviar por WhatsApp en esta corrida."
 
-                    # 6. Filtrar líneas repetitivas de '[1/26] procesado...' para dejar una consola limpia
+                    # 6. Extraer Revisión de Estatus Crítico y Alertas a su propio cuadro
+                    marcadores_alerta = ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "REVISIÓN DE ESTATUS CRÍTICO"]
+                    idx_inicio_crit = -1
+                    for m_al in marcadores_alerta:
+                        pos = salida_completa.find(m_al)
+                        if pos != -1 and (idx_inicio_crit == -1 or pos < idx_inicio_crit):
+                            idx_inicio_crit = pos
+                            
+                    if idx_inicio_crit != -1:
+                        bloque_crit = salida_completa[idx_inicio_crit:]
+                        lineas_crit = []
+                        for l in bloque_crit.splitlines():
+                            # Quitamos las barras de signos de exclamación y el título repetido
+                            if set(l.strip()) == {'!'} or "REVISIÓN DE ESTATUS CRÍTICO" in l:
+                                continue
+                            lineas_crit.append(l)
+                        st.session_state['temp_criticos_alerts'] = "\n".join(lineas_crit).strip()
+                    elif bot_seleccionado != "Paquetexpress (Rastreo)":
+                        st.session_state['temp_criticos_alerts'] = "✅ Sin alertas críticas ni partidas vencidas en este momento."
+
+                    # 7. Dejar en la consola técnica únicamente la bitácora del robot (sin duplicar WhatsApp ni Críticos)
+                    salida_tecnica = salida_completa
+                    if idx_inicio_crit != -1:
+                        salida_tecnica = salida_tecnica[:idx_inicio_crit]
+                    if "REPORTES LISTOS PARA COPIAR" in salida_tecnica:
+                        salida_tecnica = re.split(r"=+\s*\n\s*📱?\s*REPORTES LISTOS PARA COPIAR", salida_tecnica)[0]
+                        
                     lineas_limpias = []
-                    for linea in salida_completa.splitlines():
+                    for linea in salida_tecnica.splitlines():
                         if re.match(r"^\[\d+/\d+\]\s*\|\s*Siniestro .* procesado\.$", linea.strip()):
+                            continue
+                        if set(linea.strip()) == {'!'}:
                             continue
                         lineas_limpias.append(linea)
                     st.session_state['temp_bot_log'] = "\n".join(lineas_limpias).strip()
@@ -2439,7 +2474,7 @@ elif vista_actual == "🛠️ Cuartel General":
                     else:
                         st.session_state['temp_bot_status'] = f"⚠️ {bot_seleccionado} terminó con advertencias (revisa el detalle abajo)."
                         
-                    # 7. Limpiar caché de datos para reflejar cambios en todas las pestañas de inmediato
+                    # 8. Limpiar caché de datos para reflejar cambios al instante
                     st.cache_data.clear()
                     st.rerun()
                         
@@ -2449,9 +2484,8 @@ elif vista_actual == "🛠️ Cuartel General":
                     if os.path.exists("credentials.json"):
                         os.remove("credentials.json")
 
-        # --- SECCIÓN INFERIOR (ANCHO COMPLETO): RESUMEN Y REPORTE GRIS ---
+        # --- SECCIÓN INFERIOR: ESTATUS, RESUMEN Y BITÁCORA TÉCNICA ---
         if st.session_state.get('temp_bot_status'):
-            st.markdown("---")
             c_stat1, c_stat2 = st.columns(2)
             with c_stat1:
                 if "✅" in st.session_state['temp_bot_status']:
@@ -2463,9 +2497,8 @@ elif vista_actual == "🛠️ Cuartel General":
                     st.info(st.session_state['temp_bot_resumen'])
                 
         if st.session_state.get('temp_bot_log'):
-            with st.expander("🖥️ Ver Reporte de Ejecución y Alertas Críticas", expanded=True):
-                # Sin 'key' fijo para garantizar que siempre muestre la corrida más reciente
-                st.text_area("Terminal Output", value=st.session_state['temp_bot_log'], height=320, disabled=True, label_visibility="collapsed")
+            with st.expander("🖥️ Ver Bitácora Técnica del Servidor", expanded=False):
+                st.text_area("Terminal Output", value=st.session_state['temp_bot_log'], height=220, disabled=True, label_visibility="collapsed")
 
     # =========================================================================
     # PESTAÑA 2: MANTENIMIENTO Y PENDIENTES

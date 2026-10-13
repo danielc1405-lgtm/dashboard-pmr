@@ -2380,7 +2380,7 @@ elif vista_actual == "🛠️ Cuartel General":
                 try:
                     # capture_output=True atrapa todo lo que el bot imprime en la consola negra
                     # Reemplaza 'tu_bot_estatus.py' con el nombre real de tu archivo
-                    resultado = subprocess.run(['python', 'tu_bot_estatus.py'], capture_output=True, text=True, check=True)
+                    resultado = subprocess.run(['python', 'gnp_inpart.py'], capture_output=True, text=True, check=True)
                     st.success("✅ Análisis completado.")
                     
                     with st.expander("Ver Consola de Resultados", expanded=True):
@@ -2401,7 +2401,7 @@ elif vista_actual == "🛠️ Cuartel General":
             with st.spinner("Extrayendo nuevas asignaciones..."):
                 try:
                     # Reemplaza 'tu_bot_whatsapp.py' con el nombre real de tu archivo
-                    resultado = subprocess.run(['python', 'tu_bot_whatsapp.py'], capture_output=True, text=True, check=True)
+                    resultado = subprocess.run(['python', 'sincronizador_multiasistencia.py'], capture_output=True, text=True, check=True)
                     st.success("✅ Mensajes generados.")
                     
                     with st.expander("Mensajes Listos para Enviar", expanded=True):

@@ -2411,15 +2411,20 @@ elif vista_actual == "🛠️ Cuartel General":
             
             if btn_extraer:
                 import sys
+                import os
                 archivo_ejecutar = "gnp_inpart.py" if bot_seleccionado == "GNP Inpart" else "sincronizador_multiasistencia.py"
                 arg_modo = "--oculto" if "Oculto" in modo_extraccion else "--visual"
                 
                 with st.spinner(f"Preparando entorno y ejecutando {bot_seleccionado}... (Esto puede tomar varios minutos)"):
                     try:
-                        # 1. Usamos sys.executable para forzar el Python de la nube correcto
+                        # --- 1. CREAR ARCHIVO DE CREDENCIALES TEMPORAL (SEGURO) ---
+                        with open("credentials.json", "w", encoding="utf-8") as f:
+                            f.write(st.secrets["google_credentials"])
+                            
+                        # --- 2. Instalar el navegador oculto de Playwright en el servidor ---
                         subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
                         
-                        # 2. Ejecutamos el bot con el mismo sys.executable
+                        # --- 3. Ejecutamos el bot y capturamos toda su salida ---
                         resultado = subprocess.run([sys.executable, archivo_ejecutar, arg_modo], capture_output=True, text=True, check=True)
                         st.success(f"✅ Extracción de {bot_seleccionado} finalizada con éxito.")
                         
@@ -2442,6 +2447,10 @@ elif vista_actual == "🛠️ Cuartel General":
                             st.code(e.stderr + "\n" + e.stdout, language="bash")
                     except Exception as e:
                         st.error(f"Error inesperado al lanzar el bot: {e}")
+                    finally:
+                        # --- 4. ELIMINAR CREDENCIALES POR SEGURIDAD ---
+                        if os.path.exists("credentials.json"):
+                            os.remove("credentials.json")
 
     with col_bot2:
         st.markdown("**2. Generador de Mensajes (WhatsApp)**")

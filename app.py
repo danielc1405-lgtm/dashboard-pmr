@@ -923,14 +923,16 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_por_recibir.empty:
             if permiso_edicion:
                 df_por_recibir['Marcar Recibido'] = False
-                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_recibir.columns] + ['Marcar Recibido'] + [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_por_recibir.columns]
+                # Agregamos col_estatus_envio a la vista
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_recibir.columns] + ['Marcar Recibido'] + [c for c in [col_paqueteria, col_guia, col_estatus_envio, col_comentarios] if c in df_por_recibir.columns]
                 config_cobro = base_config.copy()
                 config_cobro.update({"Marcar Recibido": st.column_config.CheckboxColumn("🏁 Marcar Recibido", default=False)})
                 df_editado_cobro = st.data_editor(df_por_recibir[cols_visibles], column_config=config_cobro, disabled=[c for c in cols_visibles if c not in ['Marcar Recibido', col_comentarios]], hide_index=True, use_container_width=True, key="ed_cobro")
                 for col in df_por_recibir.columns: 
                     if col not in df_editado_cobro.columns: df_editado_cobro[col] = df_por_recibir[col].values
             else:
-                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio, col_paqueteria, col_guia, col_comentarios] if c in df_por_recibir.columns]
+                # Agregamos col_estatus_envio a la vista (modo lectura)
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio, col_paqueteria, col_guia, col_estatus_envio, col_comentarios] if c in df_por_recibir.columns]
                 st.dataframe(df_por_recibir[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
 
     if col_estatus and col_estatus in df_filtrado.columns:

@@ -2322,13 +2322,10 @@ elif vista_actual == "🛠️ Cuartel General":
     import sys
     import os
 
-    st.markdown("### 🛠️ Cuartel General PMR (Sala de Máquinas)")
-    st.info("Desde aquí controlaremos respaldos, mantenimientos, bots automatizados y la lista de tareas pendientes.")
+    # --- REDISEÑO VISUAL: COLUMNA IZQUIERDA (70%) Y DERECHA (30%) ---
+    col_izq, col_der = st.columns([2.5, 1.2], gap="large")
 
-    # --- REDISEÑO VISUAL: COLUMNA PRINCIPAL (70%) Y COLUMNA LATERAL (30%) ---
-    col_operacion, col_tareas = st.columns([2.5, 1.2], gap="large")
-
-    with col_operacion:
+    with col_izq:
         # ==========================================
         # SECCIÓN 1: BOTS Y AUTOMATIZACIÓN
         # ==========================================
@@ -2336,62 +2333,68 @@ elif vista_actual == "🛠️ Cuartel General":
         c_bot1, c_bot2 = st.columns(2)
 
         with c_bot1:
-            with st.form("form_lanzador_bots"):
+            with st.form("form_lanzador_bots_master"):
                 st.caption("Extracción directa a Base Maestra")
                 bot_seleccionado = st.selectbox("Seleccionar Portal:", ["GNP Inpart", "Multiasistencia"], label_visibility="collapsed")
                 modo_extraccion = st.radio("Modo de Ejecución:", ["Oculto (Rápido)", "Visual (Ver Chrome)"], horizontal=True)
                 
                 btn_extraer = st.form_submit_button("🚀 Iniciar Extracción", type="primary", use_container_width=True)
-                
-                if btn_extraer:
-                    archivo_ejecutar = "gnp_inpart.py" if bot_seleccionado == "GNP Inpart" else "sincronizador_multiasistencia.py"
-                    arg_modo = "--oculto" if "Oculto" in modo_extraccion else "--visual"
-                    
-                    with st.spinner(f"Ejecutando {bot_seleccionado}... (Esto tomará unos minutos)"):
-                        try:
-                            # 1. Credenciales temporales
-                            with open("credentials.json", "w", encoding="utf-8") as f:
-                                f.write(st.secrets["google_credentials"])
-                                
-                            # 2. Instalar dependencias ocultas
-                            subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
-                            
-                            # 3. Ejecutar Bot
-                            resultado = subprocess.run([sys.executable, archivo_ejecutar, arg_modo], capture_output=True, text=True, check=True)
-                            st.success(f"✅ {bot_seleccionado} finalizado.")
-                            
-                            # 4. Procesar WhatsApp
-                            salida_completa = resultado.stdout
-                            if "REPORTES LISTOS PARA COPIAR" in salida_completa:
-                                reportes_wa = salida_completa.split("REPORTES LISTOS PARA COPIAR")[1]
-                                st.session_state['temp_wa_alerts'] = "REPORTES LISTOS PARA COPIAR" + reportes_wa
-                            else:
-                                st.session_state['temp_wa_alerts'] = "No se generaron nuevos reportes de WhatsApp en esta extracción."
-                                
-                            # 5. La terminal controlada para no romper la pantalla
-                            with st.expander("Ver Consola de Ejecución Completa", expanded=False):
-                                st.text_area("Terminal", value=salida_completa, height=350, disabled=True, label_visibility="collapsed")
-                                
-                        except FileNotFoundError:
-                            st.error(f"⚠️ No se encontró el archivo '{archivo_ejecutar}'.")
-                        except subprocess.CalledProcessError as e:
-                            st.error("⚠️ El bot arrojó un error o fue interrumpido.")
-                            with st.expander("Ver detalle del error", expanded=True):
-                                st.text_area("Error Terminal", value=e.stderr + "\n" + e.stdout, height=250, disabled=True, label_visibility="collapsed")
-                        except Exception as e:
-                            st.error(f"Error inesperado: {e}")
-                        finally:
-                            if os.path.exists("credentials.json"):
-                                os.remove("credentials.json")
-
+        
         with c_bot2:
             st.caption("Mensajes generados (WhatsApp)")
             texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
-            st.text_area("Copia el texto:", value=texto_wa, height=160, label_visibility="collapsed")
+            st.text_area("Copia el texto y pégalo en WhatsApp Web:", value=texto_wa, height=130, label_visibility="collapsed")
             
             if st.button("🧹 Limpiar Bandeja de WhatsApp", use_container_width=True):
                 st.session_state['temp_wa_alerts'] = ""
                 st.rerun()
+
+        # Contenedor para que la terminal aparezca aquí abajo sin romper la pantalla
+        espacio_terminal = st.empty()
+
+        if btn_extraer:
+            archivo_ejecutar = "gnp_inpart.py" if bot_seleccionado == "GNP Inpart" else "sincronizador_multiasistencia.py"
+            arg_modo = "--oculto" if "Oculto" in modo_extraccion else "--visual"
+            
+            with espacio_terminal.container():
+                with st.spinner(f"Ejecutando {bot_seleccionado}... (Esto tomará unos minutos)"):
+                    try:
+                        # 1. Credenciales temporales
+                        with open("credentials.json", "w", encoding="utf-8") as f:
+                            f.write(st.secrets["google_credentials"])
+                            
+                        # 2. Instalar dependencias ocultas
+                        subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+                        
+                        # 3. Ejecutar Bot
+                        resultado = subprocess.run([sys.executable, archivo_ejecutar, arg_modo], capture_output=True, text=True, check=True)
+                        st.success(f"✅ {bot_seleccionado} finalizado.")
+                        
+                        # 4. Procesar WhatsApp
+                        salida_completa = resultado.stdout
+                        if "REPORTES LISTOS PARA COPIAR" in salida_completa:
+                            reportes_wa = salida_completa.split("REPORTES LISTOS PARA COPIAR")[1]
+                            st.session_state['temp_wa_alerts'] = "REPORTES LISTOS PARA COPIAR" + reportes_wa
+                        else:
+                            st.session_state['temp_wa_alerts'] = "No se generaron nuevos reportes de WhatsApp en esta extracción."
+                            
+                        # 5. La terminal
+                        with st.expander("Ver Consola de Ejecución", expanded=True):
+                            st.text_area("Terminal", value=salida_completa, height=350, disabled=True, label_visibility="collapsed")
+                            
+                        st.rerun() # Forzamos recarga para que el texto de WhatsApp aparezca arriba
+                            
+                    except FileNotFoundError:
+                        st.error(f"⚠️ No se encontró el archivo '{archivo_ejecutar}'.")
+                    except subprocess.CalledProcessError as e:
+                        st.error("⚠️ El bot arrojó un error o fue interrumpido.")
+                        with st.expander("Ver detalle del error", expanded=True):
+                            st.text_area("Error Terminal", value=e.stderr + "\n" + e.stdout, height=250, disabled=True, label_visibility="collapsed")
+                    except Exception as e:
+                        st.error(f"Error inesperado: {e}")
+                    finally:
+                        if os.path.exists("credentials.json"):
+                            os.remove("credentials.json")
 
         st.markdown("---")
 
@@ -2447,7 +2450,7 @@ elif vista_actual == "🛠️ Cuartel General":
     # ==========================================
     # SECCIÓN 3: PANEL LATERAL (LISTA DE TAREAS)
     # ==========================================
-    with col_tareas:
+    with col_der:
         st.markdown("#### 📌 Tareas y Pendientes")
         try:
             doc = init_connection(); ws_notas = doc.worksheet("BD_NOTAS")
@@ -2471,7 +2474,6 @@ elif vista_actual == "🛠️ Cuartel General":
                     st.info("¡Todo al día! Buen trabajo.")
                 else:
                     for _, row in df_pendientes.iterrows():
-                        # Mostramos la tarea en negritas y la fecha debajo en cursiva
                         marcado = st.checkbox(f"**{row['Nota']}**\n\n*(Reportado: {row['Fecha']})*", key=f"nota_{row['GS_Row']}")
                         if marcado:
                             ws_notas.update_cell(row['GS_Row'], 3, "COMPLETADO")

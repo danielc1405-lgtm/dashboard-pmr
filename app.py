@@ -1525,9 +1525,10 @@ elif vista_actual == "📝 Remisiones":
                                     with st.form(f"form_rem_{aseguradora}_{taller}_{siniestro_v}"):
                                         st.markdown(f"**🚗 Siniestro: {siniestro_v} | {vehiculo_str}**")
                                         piezas_a_remisionar = []
-                                        for _, row_p in df_sin_rem.iterrows():
+                                        # Agregamos reset_index() y idx_pieza para hacer la llave única
+                                        for idx_pieza, row_p in df_sin_rem.reset_index().iterrows():
                                             desc_val = str(row_p.get(col_desc_r, ''))
-                                            if st.checkbox(desc_val, value=True, key=f"chk_{aseguradora}_{siniestro_v}_{desc_val}"):
+                                            if st.checkbox(desc_val, value=True, key=f"chk_{aseguradora}_{siniestro_v}_{idx_pieza}_{desc_val}"):
                                                 piezas_a_remisionar.append(desc_val)
                                                 
                                         if st.form_submit_button("📄 Generar Remisión PDF"):
@@ -2409,16 +2410,17 @@ elif vista_actual == "🛠️ Cuartel General":
             btn_extraer = st.form_submit_button("🚀 Iniciar Extracción", type="primary", use_container_width=True)
             
             if btn_extraer:
+                import sys
                 archivo_ejecutar = "gnp_inpart.py" if bot_seleccionado == "GNP Inpart" else "sincronizador_multiasistencia.py"
                 arg_modo = "--oculto" if "Oculto" in modo_extraccion else "--visual"
                 
                 with st.spinner(f"Preparando entorno y ejecutando {bot_seleccionado}... (Esto puede tomar varios minutos)"):
                     try:
-                        # 1. Instalar el navegador oculto de Playwright en el servidor (es rápido y solo lo hace si falta)
-                        subprocess.run(['python', '-m', 'playwright', 'install', 'chromium'], check=False)
+                        # 1. Usamos sys.executable para forzar el Python de la nube correcto
+                        subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
                         
-                        # 2. Ejecutamos el bot y capturamos toda su salida en tiempo real
-                        resultado = subprocess.run(['python', archivo_ejecutar, arg_modo], capture_output=True, text=True, check=True)
+                        # 2. Ejecutamos el bot con el mismo sys.executable
+                        resultado = subprocess.run([sys.executable, archivo_ejecutar, arg_modo], capture_output=True, text=True, check=True)
                         st.success(f"✅ Extracción de {bot_seleccionado} finalizada con éxito.")
                         
                         # Extraer solo la parte final para las alertas de WhatsApp

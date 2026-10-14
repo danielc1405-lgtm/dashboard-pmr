@@ -1026,8 +1026,190 @@ elif vista_actual == "🛒 Compras":
             if 'CRED' in v or 'CRÉD' in v: return 'Crédito'
             if 'PLAT' in v: return 'Plataforma'
             return str(val).strip()
-        if 'Condición Pago' in df_proveedores.columns: df_proveedores['Condición Pago'] = df_proveedores['Condición Pago'].apply(normalizar_pago)
+        if 'Condición Pago' in df_proveedores.columns:
+            df_proveedores['Condición Pago'] = df_proveedores['Condición Pago'].apply(normalizar_pago)
 
+    # --- DICCIONARIO DE PROVEEDORES Y OPCIONES PARA DESPLEGABLE ---
+    dict_provs = {}
+    lista_opciones_prov = [""]
+    if not df_proveedores.empty:
+        temp_provs = []
+        for _, rp in df_proveedores.iterrows():
+            p_n = str(rp.get('Proveedor', '')).strip().upper()
+            s_n = str(rp.get('Sucursal', '')).strip().upper()
+            if not p_n or p_n == 'NAN': continue
+            llave_full = f"{p_n} - {s_n}" if (s_n and s_n != 'NAN') else p_n
+            t_str = str(rp.get('Tiempo de Entrega', '')).upper()
+            nums = re.findall(r'\d+', t_str)
+            eta_v = nums[-1] if nums else "0"
+            cond_v = str(rp.get('Condición Pago', '')).strip().title()
+            dias_v = str(rp.get('Días Crédito', '0')).strip()
+            dict_provs[llave_full] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v}
+            dict_provs[p_n] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v}
+            temp_provs.append(llave_full)
+        lista_opciones_prov = [""] + sorted(list(set(temp_provs)))
+
+    # ==========================================================================
+    # 1. BANDEJA RÁPIDA: PEDIDOS PENDIENTES DE COMPRA (CAPTURA DIRECTA)
+    # ==========================================================================
+    if not df_proceso.empty and col_estatus:
+        # Partidas en 'EN PROCESAMIENTO' que aún no están registradas en BD_COMPRAS
+        df_en_proc = df_proceso[df_proceso[col_estatus].astype(str).str.upper().str.strip() == "EN PROCESAMIENTO"].copy()
+        
+        llaves_ya_compradas = set()
+        if not df_compras.empty and 'Siniestro' in df_compras.columns and 'Descripción Pieza' in df_compras.columns:
+            for _, rc in df_compras.iterrows():
+                s_c = str(rc.get('Siniestro', '')).strip().upper().replace('.0', '')
+                d_c = str(rc.get('Descripción Pieza', '')).strip().upper()
+                if s_c and d_c:
+                    llaves_ya_compradas.add(f"{s_c}_{d_c}")
+
+        if not df_en_proc.empty:
+            df_en_proc['_llave_compra'] = (
+                df_en_proc[col_id].astype(str).str.strip().str.upper().str.replace('.0', '', regex=False)
+                + "_"
+                + df_en_proc[col_desc].astype(str).str.strip().str.upper()
+            )
+            df_por_comprar = df_en_proc[~df_en_proc['_llave_compra'].isin(llaves_ya_compradas)].copy()
+        else:
+            df_por_comprar = pd.DataFrame()
+
+        with st.expander(f"🛒 Pedidos Pendientes de Compra ({len(df_por_comprar)}) — Captura Rápida", expanded=False):
+            if not df_por_comprar.empty:
+                st.caption("Selecciona el **Proveedor** y captura el **Costo Compra**. Al guardar, pasarán automáticamente a la tabla inferior de *Próximas Llegadas*.")
+                
+                # Separar Vehículo en Auto, Año y VIN/Serie (sin juntarlos en una sola celda)
+                def armar_auto_limpio(r):
+                    m = str(r.get(col_marca, '')).strip().upper() if col_marca else ''
+                    mod = str(r.get(col_modelo, '')).strip().upper() if col_modelo else ''
+                    if mod.startswith(m) and m != "": return mod
+                    return f"{m} {mod}".strip()
+
+                df_cap = pd.DataFrame()
+                df_cap['Siniestro'] = df_por_comprar[col_id].astype(str).str.strip().values
+                df_cap['Auto'] = df_por_comprar.apply(armar_auto_limpio, axis=1).values
+                df_cap['Año'] = (
+                    df_por_comprar[col_ano].astype(str).str.replace('.0', '', regex=False).str.strip().values
+                    if (col_ano and col_ano in df_por_comprar.columns) else [""] * len(df_por_comprar)
+                )
+                df_cap['VIN / Serie'] = (
+                    df_por_comprar[col_vin].astype(str).str.strip().str.upper().values
+                    if (col_vin and col_vin in df_por_comprar.columns) else [""] * len(df_por_comprar)
+                )
+                df_cap['Taller'] = df_por_comprar[col_taller].astype(str).str.strip().values if col_taller else ""
+                df_cap['Pieza'] = df_por_comprar[col_desc].astype(str).str.strip().values if col_desc else ""
+                
+                if col_precio and col_precio in df_por_comprar.columns:
+                    df_cap['Precio Aut.'] = pd.to_numeric(
+                        df_por_comprar[col_precio].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip(),
+                        errors='coerce'
+                    ).fillna(0.0).values
+                else:
+                    df_cap['Precio Aut.'] = 0.0
+
+                df_cap['Proveedor'] = ""
+                df_cap['Costo Compra'] = 0.0
+
+                if not modo_consulta and permiso_edicion:
+                    config_pend = {
+                        'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"),
+                        'Auto': st.column_config.TextColumn("Auto", disabled=True, width="medium"),
+                        'Año': st.column_config.TextColumn("Año", disabled=True, width="small"),
+                        'VIN / Serie': st.column_config.TextColumn("VIN / Serie", disabled=True, width="medium"),
+                        'Taller': st.column_config.TextColumn("Taller", disabled=True, width="medium"),
+                        'Pieza': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
+                        'Precio Aut.': st.column_config.NumberColumn("Precio Aut.", format="$ %.2f", disabled=True, width="small"),
+                        'Proveedor': st.column_config.SelectboxColumn("🏪 Proveedor", options=lista_opciones_prov, width="medium"),
+                        'Costo Compra': st.column_config.NumberColumn("💲 Costo Compra", format="$ %.2f", min_value=0.0, step=10.0, width="small"),
+                    }
+                    df_cap_edit = st.data_editor(
+                        df_cap,
+                        column_config=config_pend,
+                        hide_index=True,
+                        use_container_width=True,
+                        key="ed_pendientes_compra_rapida"
+                    )
+
+                    if st.button("💾 Registrar Compras Capturadas", type="primary", key="btn_guardar_compras_rapidas"):
+                        filas_listas = df_cap_edit[df_cap_edit['Proveedor'].astype(str).str.strip() != ""].copy()
+                        if filas_listas.empty:
+                            st.warning("⚠️ Selecciona al menos un Proveedor en la tabla para registrar la compra.")
+                        else:
+                            with st.spinner("Registrando compras y enviándolas a Próximas Llegadas..."):
+                                try:
+                                    doc = init_connection()
+                                    ws_comp = doc.worksheet("BD_COMPRAS")
+                                    headers_comp = [str(h).strip() for h in ws_comp.row_values(1)]
+                                    headers_up = [h.upper() for h in headers_comp]
+
+                                    def idx_col_c(posibles):
+                                        for p in posibles:
+                                            if p.upper() in headers_up:
+                                                return headers_up.index(p.upper())
+                                        return -1
+
+                                    tz_mx_c = datetime.timezone(datetime.timedelta(hours=-6))
+                                    meses_es = {1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep', 10:'oct', 11:'nov', 12:'dic'}
+                                    hoy_dt_c = datetime.datetime.now(tz_mx_c)
+                                    fecha_hoy_c = f"{hoy_dt_c.day:02d}/{meses_es[hoy_dt_c.month]}/{hoy_dt_c.strftime('%y')}"
+
+                                    nuevas_filas_c = []
+                                    for _, r_new in filas_listas.iterrows():
+                                        prov_sel = str(r_new['Proveedor']).strip().upper()
+                                        costo_sel = float(r_new['Costo Compra']) if pd.notna(r_new['Costo Compra']) else 0.0
+                                        datos_p_sel = dict_provs.get(prov_sel, {'eta': '0', 'cond': '', 'dias': '0'})
+
+                                        fila_c = [""] * len(headers_comp)
+                                        
+                                        i_sin = idx_col_c(["SINIESTRO", "PEDIDO / SINIESTRO"])
+                                        i_veh = idx_col_c(["VEHÍCULO", "VEHICULO", "AUTO"])
+                                        i_tal = idx_col_c(["TALLER", "CDR"])
+                                        i_pza = idx_col_c(["DESCRIPCIÓN PIEZA", "DESCRIPCION PIEZA", "PIEZA", "DESCRIPCIÓN"])
+                                        i_prv = idx_col_c(["PROVEEDOR"])
+                                        i_cos = idx_col_c(["COSTO COMPRA", "COSTO"])
+                                        i_fec = idx_col_c(["FECHA COMPRA", "FECHA"])
+                                        i_eta = idx_col_c(["TIEMPO ENTREGA (DÍAS)", "TIEMPO ENTREGA (DIAS)", "ETA"])
+                                        i_con = idx_col_c(["CONDICIÓN PAGO", "CONDICION PAGO"])
+                                        i_dia = idx_col_c(["DÍAS CRÉDITO", "DIAS CREDITO"])
+                                        i_pag = idx_col_c(["ESTATUS PAGO", "PAGO"])
+                                        i_rec = idx_col_c(["RECIBIDO"])
+                                        i_ase = idx_col_c(["ASEGURADORA"])
+
+                                        veh_limpio = f"{r_new['Auto']} {r_new['Año']}".strip()
+                                        if i_sin >= 0: fila_c[i_sin] = str(r_new['Siniestro'])
+                                        if i_veh >= 0: fila_c[i_veh] = veh_limpio
+                                        if i_tal >= 0: fila_c[i_tal] = str(r_new['Taller'])
+                                        if i_pza >= 0: fila_c[i_pza] = str(r_new['Pieza'])
+                                        if i_prv >= 0: fila_c[i_prv] = prov_sel
+                                        if i_cos >= 0: fila_c[i_cos] = costo_sel if costo_sel > 0 else ""
+                                        if i_fec >= 0: fila_c[i_fec] = fecha_hoy_c
+                                        if i_eta >= 0: fila_c[i_eta] = datos_p_sel['eta']
+                                        if i_con >= 0: fila_c[i_con] = datos_p_sel['cond']
+                                        if i_dia >= 0: fila_c[i_dia] = datos_p_sel['dias']
+                                        if i_pag >= 0: fila_c[i_pag] = "Pendiente"
+                                        if i_rec >= 0: fila_c[i_rec] = "FALSE"
+                                        if i_ase >= 0: fila_c[i_ase] = palabra_clave_aseg
+
+                                        nuevas_filas_c.append(fila_c)
+
+                                    if nuevas_filas_c:
+                                        ws_comp.append_rows(nuevas_filas_c, value_input_option='USER_ENTERED')
+                                        st.success(f"✅ Se registraron {len(nuevas_filas_c)} compra(s) y pasaron a Próximas Llegadas.")
+                                        st.cache_data.clear()
+                                        time.sleep(1)
+                                        st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error al registrar compras: {e}")
+                else:
+                    st.dataframe(df_cap.drop(columns=['Proveedor', 'Costo Compra']), hide_index=True, use_container_width=True)
+            else:
+                st.success("🎉 ¡Excelente! Todas las piezas en procesamiento ya tienen su compra registrada.")
+
+    st.markdown("---")
+
+    # ==========================================================================
+    # 2. PRÓXIMAS LLEGADAS (LÍNEA DE TIEMPO Y SEGUIMIENTO)
+    # ==========================================================================
     if not df_compras.empty:
         df_c = df_compras.copy()
         c1, c2, c3 = st.columns(3)
@@ -1047,18 +1229,6 @@ elif vista_actual == "🛒 Compras":
             else:
                 df_c['Cancelar Compra'] = False
                 if not df_proveedores.empty:
-                    dict_provs = {}
-                    for _, rp in df_proveedores.iterrows():
-                        p_n = str(rp.get('Proveedor', '')).strip().upper(); s_n = str(rp.get('Sucursal', '')).strip().upper()
-                        llave_full = f"{p_n} - {s_n}" if s_n else p_n
-                        t_str = str(rp.get('Tiempo de Entrega', '')).upper()
-                        nums = re.findall(r'\d+', t_str)
-                        eta_v = nums[-1] if nums else "0"
-                        cond_v = str(rp.get('Condición Pago', '')).strip().title()
-                        dias_v = str(rp.get('Días Crédito', '0')).strip()
-                        dict_provs[llave_full] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v}
-                        dict_provs[p_n] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v}
-
                     for idx, r_c in df_c.iterrows():
                         prov_actual = str(r_c.get('Proveedor', '')).strip().upper()
                         if prov_actual in dict_provs:

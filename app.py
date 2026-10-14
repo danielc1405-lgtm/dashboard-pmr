@@ -398,12 +398,7 @@ if not modo_consulta:
                     mensaje_final = f"🎯 <strong>¡Hola {primer_nombre}!</strong> Tienes " + " y ".join(texto_alertas) + "."
                     st.markdown(f'<div class="alerta-flash alerta-info">{mensaje_final}</div>', unsafe_allow_html=True)
                     
-                    if pendientes_surtido > 0:
-                        with st.expander(f"👀 Ver detalle de los {pendientes_surtido} pedidos pendientes de compra", expanded=False):
-                            cols_to_show = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_desc] if c in df_por_comprar.columns]
-                            df_muestra = df_por_comprar[cols_to_show].copy()
-                            df_muestra.rename(columns={col_id: 'Siniestro', 'Vehiculo_Info': 'Vehículo', col_taller: 'Taller', col_desc: 'Pieza'}, inplace=True)
-                            st.dataframe(df_muestra, hide_index=True, use_container_width=True)
+                    
 
 # ==============================================================================
 # === [BLOQUE 6: VISTAS - ANALÍTICO Y OPERATIVO] ===
@@ -1017,17 +1012,19 @@ elif vista_actual == "⚙️ Panel Operativo":
 # ==============================================================================
 elif vista_actual == "🛒 Compras":
     st.markdown("### 🛒 Panel de Compras (Gestión y Pagos)")
-    if not df_proveedores.empty:
-        def normalizar_pago(val):
-            v = str(val).strip().upper()
-            if 'PREV' in v: return 'Previo'
-            if 'ANTIC' in v: return 'Anticipo'
-            if 'CONTRA' in v: return 'Contra Entrega'
-            if 'CRED' in v or 'CRÉD' in v: return 'Crédito'
-            if 'PLAT' in v: return 'Plataforma'
-            return str(val).strip()
-        if 'Condición Pago' in df_proveedores.columns:
-            df_proveedores['Condición Pago'] = df_proveedores['Condición Pago'].apply(normalizar_pago)
+    
+    def normalizar_pago(val):
+        v = str(val).strip().upper()
+        if v in ['', 'NONE', 'NAN']: return ''
+        if 'PLAT' in v: return 'Pago en Plataforma'
+        if 'CONTRA' in v: return 'Contra Entrega'
+        if 'CRED' in v or 'CRÉD' in v: return 'Crédito'
+        if 'ANTICIPADO' in v or 'PREV' in v or 'CONTADO' in v: return 'Pago Anticipado'
+        if 'ANTIC' in v: return 'Anticipo'
+        return str(val).strip()
+
+    if not df_proveedores.empty and 'Condición Pago' in df_proveedores.columns:
+        df_proveedores['Condición Pago'] = df_proveedores['Condición Pago'].apply(normalizar_pago)
 
     # --- DICCIONARIO DE PROVEEDORES Y OPCIONES PARA DESPLEGABLE ---
     dict_provs = {}
@@ -1042,7 +1039,7 @@ elif vista_actual == "🛒 Compras":
             t_str = str(rp.get('Tiempo de Entrega', '')).upper()
             nums = re.findall(r'\d+', t_str)
             eta_v = nums[-1] if nums else "0"
-            cond_v = str(rp.get('Condición Pago', '')).strip().title()
+            cond_v = normalizar_pago(rp.get('Condición Pago', ''))
             dias_v = str(rp.get('Días Crédito', '0')).strip()
             dict_provs[llave_full] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v}
             dict_provs[p_n] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v}
@@ -1053,7 +1050,6 @@ elif vista_actual == "🛒 Compras":
     # 1. BANDEJA RÁPIDA: PEDIDOS PENDIENTES DE COMPRA (CAPTURA DIRECTA)
     # ==========================================================================
     if not df_proceso.empty and col_estatus:
-        # Partidas en 'EN PROCESAMIENTO' que aún no están registradas en BD_COMPRAS
         df_en_proc = df_proceso[df_proceso[col_estatus].astype(str).str.upper().str.strip() == "EN PROCESAMIENTO"].copy()
         
         llaves_ya_compradas = set()
@@ -1078,7 +1074,6 @@ elif vista_actual == "🛒 Compras":
             if not df_por_comprar.empty:
                 st.caption("Selecciona el **Proveedor** y captura el **Costo Compra**. Al guardar, pasarán automáticamente a la tabla inferior de *Próximas Llegadas*.")
                 
-                # Separar Vehículo en Auto, Año y VIN/Serie (sin juntarlos en una sola celda)
                 def armar_auto_limpio(r):
                     m = str(r.get(col_marca, '')).strip().upper() if col_marca else ''
                     mod = str(r.get(col_modelo, '')).strip().upper() if col_modelo else ''
@@ -1228,6 +1223,9 @@ elif vista_actual == "🛒 Compras":
             if df_c.empty: st.success("✅ Todo está al día. No hay pedidos pendientes de recepción con estos filtros.")
             else:
                 df_c['Cancelar Compra'] = False
+                if 'Condición Pago' in df_c.columns:
+                    df_c['Condición Pago'] = df_c['Condición Pago'].apply(normalizar_pago)
+
                 if not df_proveedores.empty:
                     for idx, r_c in df_c.iterrows():
                         prov_actual = str(r_c.get('Proveedor', '')).strip().upper()
@@ -1235,8 +1233,8 @@ elif vista_actual == "🛒 Compras":
                             datos_p = dict_provs[prov_actual]
                             eta_actual = pd.to_numeric(r_c.get('Tiempo Entrega (Días)', 0), errors='coerce')
                             if pd.isna(eta_actual) or eta_actual == 0: df_c.at[idx, 'Tiempo Entrega (Días)'] = datos_p['eta']
-                            cond_actual = str(r_c.get('Condición Pago', '')).strip().title()
-                            if cond_actual in ['', 'None', 'Nan']: df_c.at[idx, 'Condición Pago'] = datos_p['cond']
+                            cond_actual = normalizar_pago(r_c.get('Condición Pago', ''))
+                            if not cond_actual: df_c.at[idx, 'Condición Pago'] = datos_p['cond']
                             dias_actual = pd.to_numeric(r_c.get('Días Crédito', 0), errors='coerce')
                             if pd.isna(dias_actual) or dias_actual == 0: df_c.at[idx, 'Días Crédito'] = datos_p['dias']
 
@@ -1257,11 +1255,23 @@ elif vista_actual == "🛒 Compras":
                 hoy_dt_alert = pd.to_datetime(datetime.datetime.now(tz_mx).date())
                 
                 def calc_alerta(row):
-                    cond = str(row.get('Condición Pago', '')).strip().title()
+                    estatus_p = str(row.get('Estatus Pago', '')).strip().upper()
+                    if estatus_p == 'PAGADO':
+                        return '✅ Liquidado'
+                        
+                    cond = normalizar_pago(row.get('Condición Pago', ''))
                     dias_cr = pd.to_numeric(row.get('Días Crédito', 0), errors='coerce')
                     if pd.isna(dias_cr): dias_cr = 0
-                    if cond in ['Previo', 'Anticipo', 'Contra Entrega']: return '🔴 Pago Inmediato'
-                    elif cond in ['Crédito', 'Credito']:
+                    
+                    if cond == 'Pago Anticipado':
+                        return '🔴 Pagar p/ pedir'
+                    elif cond == 'Anticipo':
+                        return '🟠 Dar Anticipo / Liquidar'
+                    elif cond == 'Contra Entrega':
+                        return '💵 Pagar al Recibir'
+                    elif cond == 'Pago en Plataforma':
+                        return '🔵 Pagado en Plataforma'
+                    elif cond == 'Crédito':
                         if pd.notna(row['Fecha_Compra_Dt']):
                             vencimiento = row['Fecha_Compra_Dt'] + pd.to_timedelta(dias_cr, unit='d')
                             dias_restantes = (vencimiento - hoy_dt_alert).days
@@ -1269,9 +1279,9 @@ elif vista_actual == "🛒 Compras":
                             if dias_restantes < 0: return f"❌ VENCIDO ({f_venc})"
                             elif dias_restantes <= 3: return f"🟠 Vence pronto: {f_venc}"
                             else: return f"🟢 En tiempo: {f_venc}"
-                        else: return f"🟡 Crédito {dias_cr} días"
-                    elif cond == 'Plataforma': return '🔵 Pago en Plataforma'
-                    return '⚪ Configurar Pago'
+                        else:
+                            return f"🟡 Crédito ({int(dias_cr)} días)"
+                    return '⚪ Sin Condición Definida'
                     
                 df_c['Alerta Financiera'] = df_c.apply(calc_alerta, axis=1)
 
@@ -1291,7 +1301,7 @@ elif vista_actual == "🛒 Compras":
                 df_disp.rename(columns={'Vehículo_Corto': 'Auto', 'Taller': 'CDR', 'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'ETA (Días)': 'ETA', 'Recibido_Bool': 'Recibido', 'Estatus Pago': 'Pago', 'Condición Pago': 'Cond. Pago', 'Días Crédito': 'Días Cr.'}, inplace=True)
                 
                 if not modo_consulta and permiso_edicion:
-                    opciones_pago = ["", "Previo", "Anticipo", "Contra Entrega", "Crédito", "Plataforma"]
+                    opciones_pago = ["", "Pago Anticipado", "Anticipo", "Contra Entrega", "Crédito", "Pago en Plataforma"]
                     config_c = {
                         'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"), 
                         'Auto': st.column_config.TextColumn("Auto", disabled=True, width="medium"),
@@ -2016,8 +2026,21 @@ elif vista_actual == "🚚 Rutas":
                 
             if not df_proveedores.empty:
                 c_prov = next((c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper()), None)
+                c_suc_p = next((c for c in df_proveedores.columns if 'SUCURSAL' in str(c).upper()), None)
                 c_dir_p = next((c for c in df_proveedores.columns if 'DIRECC' in str(c).upper()), None)
-                if c_prov and c_dir_p: dict_direcciones.update(dict(zip(df_proveedores[c_prov].astype(str).str.strip().str.upper(), df_proveedores[c_dir_p])))
+                if c_prov and c_dir_p:
+                    for _, rp_d in df_proveedores.iterrows():
+                        p_nom = str(rp_d.get(c_prov, '')).strip().upper()
+                        s_nom = str(rp_d.get(c_suc_p, '')).strip().upper() if c_suc_p else ""
+                        d_val = str(rp_d.get(c_dir_p, '')).strip()
+                        if p_nom and d_val:
+                            dict_direcciones[p_nom] = d_val
+                            if s_nom and s_nom != 'NAN':
+                                dict_direcciones[f"{p_nom} - {s_nom}"] = d_val
+            if 'Direccion_Manual' in df_seleccion.columns:
+                for _, r_dm in df_seleccion.iterrows():
+                    if str(r_dm.get('Direccion_Manual', '')).strip():
+                        dict_direcciones[str(r_dm.get(col_agrupar, '')).strip().upper()] = str(r_dm.get('Direccion_Manual', '')).strip()
 
             for lugar, grupo in df_seleccion.groupby(col_agrupar):
                 lugar_str = str(lugar).strip()
@@ -2194,66 +2217,161 @@ elif vista_actual == "🚚 Rutas":
     # ---------------------------------------------------------
     with tab_cotizaciones:
         st.markdown("### 🔎 Asignar Cotización / Visita Especial")
-        st.caption("Usa esta pestaña para enviar al operador a revisar piezas sin una orden de compra formal.")
+        st.caption("Usa esta pestaña para enviar al operador a revisar o comprar piezas eventuales.")
         
-        lista_provs = sorted([str(p).strip().upper() for p in df_proveedores[next(c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper())].dropna().unique()]) if not df_proveedores.empty else []
-        
-        with st.form("form_cotizacion_ruta"):
-            c1, c2 = st.columns(2)
-            with c1: 
-                # Input dinámico: permite seleccionar o escribir
-                prov_eventual = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", ["-- ESCRIBIR NUEVO --"] + lista_provs)
-                nuevo_prov = ""
-                if prov_eventual == "-- ESCRIBIR NUEVO --":
-                    nuevo_prov = st.text_input("Ingresa el Nombre del Nuevo Proveedor *").strip().upper()
-            with c2:
-                dir_eventual = st.text_input("Dirección o Zona (Para que navegue el chofer)")
-                vin_eventual = st.text_input("VIN / Número de Serie")
-                
-            st.markdown("**Piezas a buscar**")
-            p1, p2 = st.columns(2)
-            pieza1 = p1.text_input("1. Descripción de la pieza *")
-            pieza2 = p2.text_input("2. Descripción de la pieza (Opcional)")
+        lista_provs_cot = []
+        dict_dir_cot = {}
+        if not df_proveedores.empty:
+            c_prv_c = next((c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper()), None)
+            c_suc_c = next((c for c in df_proveedores.columns if 'SUCURSAL' in str(c).upper()), None)
+            c_dir_c = next((c for c in df_proveedores.columns if 'DIRECC' in str(c).upper()), None)
+            if c_prv_c:
+                for _, rp_c in df_proveedores.iterrows():
+                    p_n = str(rp_c.get(c_prv_c, '')).strip().upper()
+                    s_n = str(rp_c.get(c_suc_c, '')).strip().upper() if c_suc_c else ""
+                    if not p_n or p_n == 'NAN': continue
+                    llave_p = f"{p_n} - {s_n}" if (s_n and s_n != 'NAN') else p_n
+                    lista_provs_cot.append(llave_p)
+                    if c_dir_c and str(rp_c.get(c_dir_c, '')).strip():
+                        dict_dir_cot[llave_p] = str(rp_c.get(c_dir_c, '')).strip()
+                lista_provs_cot = sorted(list(set(lista_provs_cot)))
+
+        # Selector fuera del form para que muestre/oculte los campos de nuevo proveedor al instante
+        col_sel_p, col_vin_p = st.columns(2)
+        with col_sel_p:
+            prov_eventual = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", ["-- ESCRIBIR NUEVO --"] + lista_provs_cot, key="sel_prov_cot_ruta")
+        with col_vin_p:
+            vin_eventual = st.text_input("VIN / Número de Serie (Opcional)", key="vin_cot_ruta")
+
+        with st.form("form_cotizacion_ruta", clear_on_submit=False):
+            nuevo_prov = ""
+            nueva_suc_cot = ""
+            nuevas_marcas_cot = ""
+            nuevo_tel_cot = ""
+            nuevo_tiempo_cot = "Inmediata"
+            nueva_cond_cot = "Contra Entrega"
+            nuevos_dias_cot = 0
+            guardar_en_directorio = True
+
+            if prov_eventual == "-- ESCRIBIR NUEVO --":
+                st.markdown("##### 🏢 Datos del Nuevo Proveedor (Se registrará en `BD_PROVEEDORES`)")
+                cp1, cp2, cp3 = st.columns([2, 1.5, 1.5])
+                nuevo_prov = cp1.text_input("Nombre del Proveedor * (Ej. GOVI)").strip().upper()
+                nueva_suc_cot = cp2.text_input("Sucursal / Zona (Ej. STO DOMINGO)").strip().upper()
+                nuevo_tel_cot = cp3.text_input("Teléfono / Contacto").strip()
+
+                cp4, cp5 = st.columns([2.5, 1.5])
+                dir_eventual = cp4.text_input("Dirección Completa (Para navegación del chofer) *").strip()
+                nuevas_marcas_cot = cp5.text_input("Marcas / Especialidad", placeholder="Ej. Suspensión, General").strip().upper()
+
+                cp6, cp7, cp8 = st.columns(3)
+                nuevo_tiempo_cot = cp6.selectbox("Tiempo Promedio de Entrega", ["Inmediata", "1 a 2 días", "3 a 5 días", "Más de 5 días", "Bajo Pedido"])
+                nueva_cond_cot = cp7.selectbox("Condición de Pago", ["Contra Entrega", "Pago Anticipado", "Anticipo", "Crédito", "Pago en Plataforma"])
+                nuevos_dias_cot = cp8.number_input("Días Crédito", min_value=0, value=0, step=1)
+                guardar_en_directorio = st.checkbox("☑️ Guardar este proveedor en el Directorio (BD_PROVEEDORES)", value=True)
+            else:
+                dir_precargada = dict_dir_cot.get(prov_eventual, "")
+                dir_eventual = st.text_input("Dirección o Zona (Para que navegue el chofer)", value=dir_precargada)
+
+            st.markdown("##### ⚙️ Piezas a buscar / comprar")
+            st.caption("Puedes capturar solo el **# Parte**, solo la **Descripción**, o ambos. Usa el signo **`+`** abajo de la tabla para agregar más renglones.")
             
-            notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Solo tomar fotos")
+            df_piezas_base = pd.DataFrame([
+                {"No. Parte": "", "Descripción de la Pieza": ""},
+                {"No. Parte": "", "Descripción de la Pieza": ""}
+            ])
+            ed_piezas_cot = st.data_editor(
+                df_piezas_base,
+                num_rows="dynamic",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "No. Parte": st.column_config.TextColumn("🔢 # Parte / SKU", width="medium"),
+                    "Descripción de la Pieza": st.column_config.TextColumn("🛠️ Descripción de la Pieza", width="large")
+                },
+                key="ed_tabla_piezas_cot"
+            )
+            
+            notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. NIP de tarjeta 4728 / Pedir factura")
             
             btn_cot = st.form_submit_button("➕ Enviar Cotización a la Ruta", type="primary")
             
             if btn_cot:
-                nombre_final = nuevo_prov if prov_eventual == "-- ESCRIBIR NUEVO --" else prov_eventual
-                if not nombre_final or not pieza1:
-                    st.error("⚠️ El Lugar y al menos 1 Pieza son obligatorios.")
+                if prov_eventual == "-- ESCRIBIR NUEVO --":
+                    nombre_final = f"{nuevo_prov} - {nueva_suc_cot}" if nueva_suc_cot else nuevo_prov
                 else:
-                    # Si es nuevo, lo guardamos en BD_PROVEEDORES silenciosamente
-                    if prov_eventual == "-- ESCRIBIR NUEVO --":
+                    nombre_final = prov_eventual
+
+                # Construir la lista de piezas combinando # Parte y Descripción
+                piezas_lista = []
+                for _, r_pz in ed_piezas_cot.iterrows():
+                    np_val = str(r_pz.get("No. Parte", "")).strip().upper()
+                    ds_val = str(r_pz.get("Descripción de la Pieza", "")).strip().upper()
+                    if np_val == "NAN": np_val = ""
+                    if ds_val == "NAN": ds_val = ""
+                    
+                    if np_val and ds_val:
+                        piezas_lista.append(f"[{np_val}] {ds_val}")
+                    elif np_val:
+                        piezas_lista.append(f"NP: {np_val}")
+                    elif ds_val:
+                        piezas_lista.append(ds_val)
+
+                if not nombre_final or len(piezas_lista) == 0:
+                    st.error("⚠️ El Lugar y al menos 1 Pieza (No. Parte o Descripción) son obligatorios.")
+                else:
+                    # 1. Si es nuevo proveedor y está marcada la casilla, guardarlo completo en BD_PROVEEDORES
+                    if prov_eventual == "-- ESCRIBIR NUEVO --" and guardar_en_directorio and nuevo_prov:
                         try:
                             ws_p = doc.worksheet("BD_PROVEEDORES")
-                            # Estructura básica: Nombre, Categoria, Dirección, etc. Rellenamos lo básico.
-                            headers_p = ws_p.row_values(1)
-                            fila_prov = [""] * len(headers_p)
-                            if headers_p: 
-                                fila_prov[0] = nombre_final
-                                if len(fila_prov) > 1: fila_prov[1] = "EVENTUAL (CREADO DESDE RUTA)"
-                                if len(fila_prov) > 3: fila_prov[3] = dir_eventual
-                            ws_p.append_row(fila_prov)
-                        except: pass
+                            headers_p = [str(h).strip() for h in ws_p.row_values(1)]
+                            fila_prov = [""] * max(len(headers_p), 10)
+                            
+                            def safe_idx_p(name):
+                                for idx_h, h_val in enumerate(headers_p):
+                                    if h_val.upper() == name.upper():
+                                        return idx_h
+                                return -1
+
+                            i_prv = safe_idx_p('Proveedor')
+                            i_suc = safe_idx_p('Sucursal')
+                            i_mar = safe_idx_p('Marcas Especialidad')
+                            i_tel = safe_idx_p('Teléfono')
+                            i_dir = safe_idx_p('Dirección')
+                            i_tie = safe_idx_p('Tiempo de Entrega')
+                            i_con = safe_idx_p('Condición Pago')
+                            i_dia = safe_idx_p('Días Crédito')
+
+                            if i_prv >= 0: fila_prov[i_prv] = nuevo_prov
+                            if i_suc >= 0: fila_prov[i_suc] = nueva_suc_cot
+                            if i_mar >= 0: fila_prov[i_mar] = nuevas_marcas_cot
+                            if i_tel >= 0: fila_prov[i_tel] = str(nuevo_tel_cot)
+                            if i_dir >= 0: fila_prov[i_dir] = dir_eventual.upper()
+                            if i_tie >= 0: fila_prov[i_tie] = nuevo_tiempo_cot
+                            if i_con >= 0: fila_prov[i_con] = nueva_cond_cot
+                            if i_dia >= 0: fila_prov[i_dia] = str(nuevos_dias_cot)
+
+                            ws_p.append_row(fila_prov[:len(headers_p)] if headers_p else fila_prov, value_input_option='USER_ENTERED')
+                            st.cache_data.clear()
+                        except Exception as e_prov:
+                            st.warning(f"Nota: No se pudo guardar en BD_PROVEEDORES ({e_prov}), pero se enviará a la ruta.")
                     
-                    # Armar dataframe temporal para reutilizar la función maestra
-                    piezas_lista = [pieza1]
-                    if pieza2: piezas_lista.append(pieza2)
-                    
+                    # 2. Despachar todas las partidas a BD_RUTAS
                     datos_cot = {
                         'Proveedor': [nombre_final] * len(piezas_lista),
-                        'Vehiculo_Info': ["Cotización Especial"] * len(piezas_lista),
-                        'Descrip.': piezas_lista
+                        'Vehiculo_Info': ["Cotización / Compra Directa"] * len(piezas_lista),
+                        'Descrip.': piezas_lista,
+                        'Direccion_Manual': [dir_eventual] * len(piezas_lista)
                     }
-                    if col_vin: datos_cot[col_vin] = [vin_eventual] * len(piezas_lista)
+                    if col_vin: datos_cot[col_vin] = [vin_eventual if vin_eventual else "S/D"] * len(piezas_lista)
                     if col_id: datos_cot[col_id] = ["N/A"] * len(piezas_lista)
                     
                     df_cot = pd.DataFrame(datos_cot)
+                    if col_desc and col_desc not in df_cot.columns:
+                        df_cot[col_desc] = piezas_lista
                     
                     if despachar_a_bd_rutas(df_cot, "cotizacion", notas_eventual):
-                        st.success(f"¡Cotización enviada a {nombre_final} exitosamente!")
+                        st.success(f"✅ ¡Enviado a ruta para {nombre_final} ({len(piezas_lista)} pieza(s))!")
                         time.sleep(1)
                         st.rerun()
 

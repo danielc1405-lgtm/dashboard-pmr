@@ -1181,7 +1181,9 @@ elif vista_actual == "🛒 Compras":
                                         i_rec = idx_col_c(["RECIBIDO"])
                                         i_ase = idx_col_c(["ASEGURADORA"])
 
-                                        veh_limpio = f"{r_new['Auto']} {r_new['Año']}".strip()
+                                        partes_v = [str(r_new['Auto']).strip(), str(r_new['Año']).strip(), str(r_new['VIN / Serie']).strip()]
+                                        veh_limpio = " | ".join([p for p in partes_v if p and p not in ['NAN', 'NONE']])
+                                        
                                         if i_sin >= 0: fila_c[i_sin] = str(r_new['Siniestro']).strip()
                                         if i_veh >= 0: fila_c[i_veh] = veh_limpio
                                         if i_tal >= 0: fila_c[i_tal] = str(r_new['Taller']).strip()
@@ -1189,17 +1191,17 @@ elif vista_actual == "🛒 Compras":
                                         if i_prv >= 0: fila_c[i_prv] = prov_sel
                                         if i_cos >= 0: fila_c[i_cos] = costo_sel if costo_sel > 0 else ""
                                         if i_fec >= 0: fila_c[i_fec] = fecha_hoy_c
-                                        if i_eta >= 0: fila_c[i_eta] = datos_p_sel['eta']
+                                        if i_eta >= 0: fila_c[i_eta] = int(datos_p_sel['eta']) if str(datos_p_sel['eta']).isdigit() else 0
                                         if i_con >= 0: fila_c[i_con] = datos_p_sel['cond']
-                                        if i_dia >= 0: fila_c[i_dia] = datos_p_sel['dias']
+                                        if i_dia >= 0: fila_c[i_dia] = int(datos_p_sel['dias']) if str(datos_p_sel['dias']).isdigit() else 0
                                         if i_pag >= 0: fila_c[i_pag] = "Pendiente"
-                                        if i_rec >= 0: fila_c[i_rec] = "FALSE"
+                                        if i_rec >= 0: fila_c[i_rec] = "NO"
                                         if i_ase >= 0: fila_c[i_ase] = palabra_clave_aseg
 
                                         nuevas_filas_c.append(fila_c)
 
                                     if nuevas_filas_c:
-                                        ws_comp.append_rows(nuevas_filas_c, value_input_option='USER_ENTERED')
+                                        ws_comp.append_rows(nuevas_filas_c, value_input_option='USER_ENTERED', table_range="A1")
                                         # Incrementamos la llave para limpiar el editor y borramos el caché
                                         st.session_state['reset_key_compras'] += 1
                                         st.cache_data.clear()

@@ -1454,18 +1454,93 @@ elif vista_actual == "🏢 Directorio":
     # ==========================
     # PESTAÑA 2: PROVEEDORES
     # ==========================
+    # ==========================
+    # PESTAÑA 2: PROVEEDORES (EDITABLE)
+    # ==========================
     with tab_proveedores:
         if not df_proveedores.empty:
+            def norm_pago_dir(val):
+                v = str(val).strip().upper()
+                if v in ['', 'NONE', 'NAN']: return ''
+                if 'PLAT' in v: return 'Pago en Plataforma'
+                if 'CONTRA' in v: return 'Contra Entrega'
+                if 'CRED' in v or 'CRÉD' in v: return 'Crédito'
+                if 'ANTICIPADO' in v or 'PREV' in v or 'CONTADO' in v: return 'Pago Anticipado'
+                if 'ANTIC' in v: return 'Anticipo'
+                return str(val).strip()
+
+            df_prov_work = df_proveedores.copy()
+            # Guardamos el número exacto de fila de Google Sheets (+2 por encabezado e índice base 0)
+            df_prov_work['_GS_Row'] = df_prov_work.index + 2
+            if 'Condición Pago' in df_prov_work.columns:
+                df_prov_work['Condición Pago'] = df_prov_work['Condición Pago'].apply(norm_pago_dir)
+
             busqueda_prov = st.text_input("🔍 Buscar Proveedor por nombre, marca o especialidad...")
-            df_prov_filtrado = df_proveedores.copy()
+            df_prov_filtrado = df_prov_work.copy()
             
             if busqueda_prov:
                 mask = df_prov_filtrado.apply(lambda row: row.astype(str).str.contains(busqueda_prov, case=False, na=False).any(), axis=1)
-                df_prov_filtrado = df_prov_filtrado[mask]
+                df_prov_filtrado = df_prov_filtrado[mask].copy()
 
-            cols_prov = ['Proveedor', 'Sucursal', 'Marcas Especialidad', 'Días Crédito', 'Condición Pago', 'Teléfono', 'Dirección']
+            cols_prov = ['Proveedor', 'Sucursal', 'Marcas Especialidad', 'Tiempo de Entrega', 'Días Crédito', 'Condición Pago', 'Teléfono', 'Dirección']
             cols_vista_prov = [c for c in cols_prov if c in df_prov_filtrado.columns]
-            st.dataframe(df_prov_filtrado[cols_vista_prov], hide_index=True, use_container_width=True)
+
+            if not modo_consulta and permiso_edicion:
+                st.caption("💡 Edita cualquier celda directamente (Condición de Pago, Días Crédito, Teléfono, etc.) y presiona **Guardar Cambios en Proveedores**.")
+                opciones_cond_dir = ["", "Pago Anticipado", "Anticipo", "Contra Entrega", "Crédito", "Pago en Plataforma"]
+                opciones_tiempo_dir = ["", "Inmediata", "1 a 2 días", "3 a 5 días", "Más de 5 días", "Bajo Pedido"]
+                
+                cfg_prov_ed = {
+                    'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
+                    'Sucursal': st.column_config.TextColumn("Sucursal", width="small"),
+                    'Marcas Especialidad': st.column_config.TextColumn("Especialidad", width="medium"),
+                    'Tiempo de Entrega': st.column_config.SelectboxColumn("Tiempo Entrega", options=opciones_tiempo_dir, width="small"),
+                    'Días Crédito': st.column_config.NumberColumn("Días Crédito", min_value=0, step=1, width="small"),
+                    'Condición Pago': st.column_config.SelectboxColumn("Condición Pago", options=opciones_cond_dir, width="medium"),
+                    'Teléfono': st.column_config.TextColumn("Teléfono", width="small"),
+                    'Dirección': st.column_config.TextColumn("Dirección", width="large")
+                }
+                
+                df_prov_editado = st.data_editor(
+                    df_prov_filtrado[cols_vista_prov],
+                    column_config=cfg_prov_ed,
+                    hide_index=True,
+                    use_container_width=True,
+                    key="editor_directorio_proveedores"
+                )
+
+                if st.button("💾 Guardar Cambios en Proveedores", type="primary", key="btn_save_dir_prov"):
+                    with st.spinner("Actualizando catálogo de proveedores en la nube..."):
+                        try:
+                            doc = init_connection()
+                            ws_prov = doc.worksheet("BD_PROVEEDORES")
+                            headers_p = [str(h).strip() for h in ws_prov.row_values(1)]
+                            celdas_prov_update = []
+
+                            for idx_fila in df_prov_editado.index:
+                                gs_row = int(df_prov_filtrado.loc[idx_fila, '_GS_Row'])
+                                for col_name in cols_vista_prov:
+                                    val_orig = str(df_prov_filtrado.loc[idx_fila, col_name]).strip()
+                                    val_nuevo = str(df_prov_editado.loc[idx_fila, col_name]).strip()
+                                    if val_nuevo in ['nan', 'None']: val_nuevo = ""
+                                    if val_orig in ['nan', 'None']: val_orig = ""
+                                    
+                                    if val_orig != val_nuevo and col_name in headers_p:
+                                        col_idx_gs = headers_p.index(col_name) + 1
+                                        celdas_prov_update.append(gspread.Cell(row=gs_row, col=col_idx_gs, value=val_nuevo))
+
+                            if celdas_prov_update:
+                                ws_prov.update_cells(celdas_prov_update, value_input_option='USER_ENTERED')
+                                st.success(f"✅ Se actualizaron {len(celdas_prov_update)} dato(s) en BD_PROVEEDORES.")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.info("No se detectaron cambios por guardar.")
+                        except Exception as e:
+                            st.error(f"Error actualizando proveedores: {e}")
+            else:
+                st.dataframe(df_prov_filtrado[cols_vista_prov], hide_index=True, use_container_width=True)
 
             if permiso_edicion:
                 with st.expander("➕ Agregar Nuevo Proveedor", expanded=False):
@@ -1482,7 +1557,7 @@ elif vista_actual == "🏢 Directorio":
                         
                         col5, col6, col7 = st.columns(3)
                         nuevo_tiempo = col5.selectbox("Tiempo Promedio de Entrega", ["Inmediata", "1 a 2 días", "3 a 5 días", "Más de 5 días", "Bajo Pedido"])
-                        nueva_cond_pago = col6.selectbox("Condición de Pago", ["CONTADO", "CREDITO", "CONTRA ENTREGA"])
+                        nueva_cond_pago = col6.selectbox("Condición de Pago", ["Contra Entrega", "Pago Anticipado", "Anticipo", "Crédito", "Pago en Plataforma"])
                         nuevos_dias_c = col7.number_input("Días Crédito", min_value=0, value=0, step=1)
                         
                         if st.form_submit_button("Guardar Proveedor", type="primary"):
@@ -1491,9 +1566,8 @@ elif vista_actual == "🏢 Directorio":
                                     try:
                                         doc = init_connection()
                                         ws_prov = doc.worksheet("BD_PROVEEDORES")
-                                        
-                                        fila_nueva = [""] * 10
                                         headers = [str(h).strip() for h in ws_prov.row_values(1)]
+                                        fila_nueva = [""] * max(len(headers), 10)
                                         
                                         def safe_idx(name): return headers.index(name) if name in headers else -1
                                         
@@ -1515,7 +1589,7 @@ elif vista_actual == "🏢 Directorio":
                                         if i_con >= 0: fila_nueva[i_con] = nueva_cond_pago
                                         if i_dia >= 0: fila_nueva[i_dia] = str(nuevos_dias_c)
                                         
-                                        ws_prov.append_row(fila_nueva, value_input_option='USER_ENTERED')
+                                        ws_prov.append_row(fila_nueva[:len(headers)] if headers else fila_nueva, value_input_option='USER_ENTERED')
                                         st.success("✅ ¡Proveedor guardado exitosamente!")
                                         st.cache_data.clear()
                                         time.sleep(1.5)

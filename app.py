@@ -1052,27 +1052,34 @@ elif vista_actual == "🛒 Compras":
     if not df_proceso.empty and col_estatus:
         df_en_proc = df_proceso[df_proceso[col_estatus].astype(str).str.upper().str.strip() == "EN PROCESAMIENTO"].copy()
         
+        def normalizar_llave_compra(sin_val, desc_val):
+            s_clean = str(sin_val).strip().upper()
+            if s_clean.endswith('.0'): s_clean = s_clean[:-2]
+            d_clean = " ".join(str(desc_val).strip().upper().split())
+            return f"{s_clean}_{d_clean}"
+
         llaves_ya_compradas = set()
-        if not df_compras.empty and 'Siniestro' in df_compras.columns and 'Descripción Pieza' in df_compras.columns:
-            for _, rc in df_compras.iterrows():
-                s_c = str(rc.get('Siniestro', '')).strip().upper().replace('.0', '')
-                d_c = str(rc.get('Descripción Pieza', '')).strip().upper()
-                if s_c and d_c:
-                    llaves_ya_compradas.add(f"{s_c}_{d_c}")
+        if not df_compras.empty:
+            c_sin_comp = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)
+            c_pza_comp = next((c for c in df_compras.columns if "DESCRIP" in str(c).upper() or "PIEZA" in str(c).upper()), None)
+            if c_sin_comp and c_pza_comp:
+                for _, rc in df_compras.iterrows():
+                    s_c = str(rc.get(c_sin_comp, '')).strip()
+                    d_c = str(rc.get(c_pza_comp, '')).strip()
+                    if s_c and d_c:
+                        llaves_ya_compradas.add(normalizar_llave_compra(s_c, d_c))
 
         if not df_en_proc.empty:
-            df_en_proc['_llave_compra'] = (
-                df_en_proc[col_id].astype(str).str.strip().str.upper().str.replace('.0', '', regex=False)
-                + "_"
-                + df_en_proc[col_desc].astype(str).str.strip().str.upper()
+            df_en_proc['_llave_compra'] = df_en_proc.apply(
+                lambda r: normalizar_llave_compra(r.get(col_id, ''), r.get(col_desc, '')), axis=1
             )
             df_por_comprar = df_en_proc[~df_en_proc['_llave_compra'].isin(llaves_ya_compradas)].copy()
         else:
             df_por_comprar = pd.DataFrame()
 
-        with st.expander(f"🛒 Pedidos Pendientes de Compra ({len(df_por_comprar)}) — Captura Rápida", expanded=False):
+        with st.expander(f"🛒 Pedidos Pendientes de Compra ({len(df_por_comprar)}) — Captura Rápida", expanded=True):
             if not df_por_comprar.empty:
-                st.caption("Selecciona el **Proveedor** y captura el **Costo Compra**. Al guardar, pasarán automáticamente a la tabla inferior de *Próximas Llegadas*.")
+                st.caption("Selecciona el **Proveedor** y captura el **Costo Compra** (con decimales si aplica). Recuerda presionar **Enter** al terminar de escribir en una celda antes de guardar.")
                 
                 def armar_auto_limpio(r):
                     m = str(r.get(col_marca, '')).strip().upper() if col_marca else ''
@@ -1106,6 +1113,9 @@ elif vista_actual == "🛒 Compras":
                 df_cap['Costo Compra'] = 0.0
 
                 if not modo_consulta and permiso_edicion:
+                    if 'reset_key_compras' not in st.session_state:
+                        st.session_state['reset_key_compras'] = 0
+
                     config_pend = {
                         'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"),
                         'Auto': st.column_config.TextColumn("Auto", disabled=True, width="medium"),
@@ -1115,14 +1125,15 @@ elif vista_actual == "🛒 Compras":
                         'Pieza': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
                         'Precio Aut.': st.column_config.NumberColumn("Precio Aut.", format="$ %.2f", disabled=True, width="small"),
                         'Proveedor': st.column_config.SelectboxColumn("🏪 Proveedor", options=lista_opciones_prov, width="medium"),
-                        'Costo Compra': st.column_config.NumberColumn("💲 Costo Compra", format="$ %.2f", min_value=0.0, step=10.0, width="small"),
+                        # step=0.01 permite capturar cualquier decimal libremente
+                        'Costo Compra': st.column_config.NumberColumn("💲 Costo Compra", format="$ %.2f", min_value=0.0, step=0.01, width="small"),
                     }
                     df_cap_edit = st.data_editor(
                         df_cap,
                         column_config=config_pend,
                         hide_index=True,
                         use_container_width=True,
-                        key="ed_pendientes_compra_rapida"
+                        key=f"ed_pendientes_compra_rapida_{st.session_state['reset_key_compras']}"
                     )
 
                     if st.button("💾 Registrar Compras Capturadas", type="primary", key="btn_guardar_compras_rapidas"):
@@ -1151,7 +1162,7 @@ elif vista_actual == "🛒 Compras":
                                     nuevas_filas_c = []
                                     for _, r_new in filas_listas.iterrows():
                                         prov_sel = str(r_new['Proveedor']).strip().upper()
-                                        costo_sel = float(r_new['Costo Compra']) if pd.notna(r_new['Costo Compra']) else 0.0
+                                        costo_sel = round(float(r_new['Costo Compra']), 2) if pd.notna(r_new['Costo Compra']) else 0.0
                                         datos_p_sel = dict_provs.get(prov_sel, {'eta': '0', 'cond': '', 'dias': '0'})
 
                                         fila_c = [""] * len(headers_comp)
@@ -1171,10 +1182,10 @@ elif vista_actual == "🛒 Compras":
                                         i_ase = idx_col_c(["ASEGURADORA"])
 
                                         veh_limpio = f"{r_new['Auto']} {r_new['Año']}".strip()
-                                        if i_sin >= 0: fila_c[i_sin] = str(r_new['Siniestro'])
+                                        if i_sin >= 0: fila_c[i_sin] = str(r_new['Siniestro']).strip()
                                         if i_veh >= 0: fila_c[i_veh] = veh_limpio
-                                        if i_tal >= 0: fila_c[i_tal] = str(r_new['Taller'])
-                                        if i_pza >= 0: fila_c[i_pza] = str(r_new['Pieza'])
+                                        if i_tal >= 0: fila_c[i_tal] = str(r_new['Taller']).strip()
+                                        if i_pza >= 0: fila_c[i_pza] = str(r_new['Pieza']).strip()
                                         if i_prv >= 0: fila_c[i_prv] = prov_sel
                                         if i_cos >= 0: fila_c[i_cos] = costo_sel if costo_sel > 0 else ""
                                         if i_fec >= 0: fila_c[i_fec] = fecha_hoy_c
@@ -1189,9 +1200,11 @@ elif vista_actual == "🛒 Compras":
 
                                     if nuevas_filas_c:
                                         ws_comp.append_rows(nuevas_filas_c, value_input_option='USER_ENTERED')
-                                        st.success(f"✅ Se registraron {len(nuevas_filas_c)} compra(s) y pasaron a Próximas Llegadas.")
+                                        # Incrementamos la llave para limpiar el editor y borramos el caché
+                                        st.session_state['reset_key_compras'] += 1
                                         st.cache_data.clear()
-                                        time.sleep(1)
+                                        st.success(f"✅ Se registraron {len(nuevas_filas_c)} compra(s) y pasaron a Próximas Llegadas.")
+                                        time.sleep(0.8)
                                         st.rerun()
                                 except Exception as e:
                                     st.error(f"Error al registrar compras: {e}")

@@ -146,7 +146,7 @@ with col_menu:
 with col_aseg:
     # Quitamos "📝 Remisiones" de esta lista para que el selector desaparezca en esa pestaña
     # y nos permita ver todas las aseguradoras a la vez.
-    vistas_con_aseguradora = ["📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🧾 Facturación", "🔍 Consultas"]
+    vistas_con_aseguradora = ["📊 Analítico", "⚙️ Panel Operativo", "🧾 Facturación", "🔍 Consultas"]
     if vista_actual in vistas_con_aseguradora:
         aseguradora_sel = st.selectbox("Aseguradora", ["Multiasistencias", "GNP"], label_visibility="collapsed")
     else:
@@ -364,7 +364,8 @@ if not modo_consulta:
 
     if vista_actual in ["⚙️ Panel Operativo", "🛒 Compras"]:
         if col_estatus and not df_trabajo_completo.empty:
-            df_en_proceso_notif = df_trabajo_completo[df_trabajo_completo[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"].copy()
+            df_base_notif = df_completo if vista_actual == "🛒 Compras" else df_trabajo_completo
+            df_en_proceso_notif = df_base_notif[df_base_notif[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"].copy()
             if not df_en_proceso_notif.empty:
                 keys_compras = set()
                 if not df_compras.empty:
@@ -3189,8 +3190,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
             cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
-    if btn_guardar:
-        if not df_editado_conf.empty:
+    if not df_editado_conf.empty:
             for _, row in df_editado_conf.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
@@ -3206,6 +3206,23 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
                     if nuevo_estatus == "EN PROCESAMIENTO": cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+
+                # --- AQUÍ ENTRA LA MAGIA PARA CREAR LA COMPRA DIRECTO AL CONFIRMAR ---
+                prov_conf = str(row.get('Proveedor', '')).strip()
+                if prov_conf not in ['', 'None', 'nan'] and nuevo_estatus != "CANCELADO":
+                    cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
+                    cambios_a_guardar[k]['compra_prov'] = prov_conf
+                    cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
+                    cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
+                    
+                    # Armar vehículo homologado
+                    v_info = str(row.get('Vehiculo_Info', '')).strip()
+                    partes = v_info.split(' | ')
+                    v_auto = partes[0].strip() if len(partes) > 0 else v_info
+                    v_ano = partes[1].strip() if len(partes) > 1 else ""
+                    v_vin = str(row.get(col_vin, '')).strip() if col_vin in row else ""
+                    vehiculo_homologado = " | ".join([p for p in [v_auto, v_ano, v_vin] if p and p not in ['NAN', 'NONE']])
+                    cambios_a_guardar[k]['compra_vehiculo'] = vehiculo_homologado
 
         for df_venc in [df_editado_venc, df_editado_atrasadas]:
             if not df_venc.empty:
@@ -3525,7 +3542,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                     n_row[i_fcomp] = fecha_hoy_comp
                                     n_row[i_rec] = 'NO'
                                     n_row[i_costo] = v.get('compra_costo', '0')
-                                    n_row[i_pag] = 'Pendiente'
+                                    n_row[i_est_pago] = 'Pendiente'
                                     
                                     nombre_prov_completo = str(v.get('compra_prov', '')).strip()
                                     eta_calc = "0"; cond_pago_calc = ""; dias_cred_calc = "0"

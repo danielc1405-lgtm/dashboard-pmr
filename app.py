@@ -1348,6 +1348,9 @@ elif vista_actual == "🏢 Directorio":
     # ==========================
     # PESTAÑA 1: TALLERES (CDR) - FUSIONADO
     # ==========================
+    # ==========================
+    # PESTAÑA 1: TALLERES (CDR) - FUSIONADO Y EDITABLE
+    # ==========================
     with tab_talleres:
         col_taller_cat = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
         col_dir_cat = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
@@ -1355,15 +1358,70 @@ elif vista_actual == "🏢 Directorio":
         col_ciudad_cat = next((c for c in df_catalogo.columns if "CIUDAD" in str(c).upper()), None)
         col_estado_cat = next((c for c in df_catalogo.columns if "ESTADO" in str(c).upper()), None)
         
+        df_cat_work = df_catalogo.copy()
+        # Guardamos la fila real de Sheets para poder actualizar
+        df_cat_work['_GS_Row'] = df_cat_work.index + 2
+        
         busqueda_taller = st.text_input("🔍 Buscar Taller por nombre, ciudad o estado...")
-        df_cat_filtrado = df_catalogo.copy()
+        df_cat_filtrado = df_cat_work.copy()
         
         if busqueda_taller:
             mask = df_cat_filtrado.apply(lambda row: row.astype(str).str.contains(busqueda_taller, case=False, na=False).any(), axis=1)
-            df_cat_filtrado = df_cat_filtrado[mask]
+            df_cat_filtrado = df_cat_filtrado[mask].copy()
 
-        cols_vista_cat = [c for c in df_cat_filtrado.columns if "Unnamed" not in str(c)]
-        if cols_vista_cat: st.dataframe(df_cat_filtrado[cols_vista_cat], hide_index=True, use_container_width=True)
+        cols_vista_cat = [c for c in df_cat_filtrado.columns if "Unnamed" not in str(c) and c != '_GS_Row']
+        
+        if cols_vista_cat:
+            if not modo_consulta and permiso_edicion:
+                st.caption("💡 Edita directamente en la tabla (Contacto, Teléfono, WhatsApp, etc.) y presiona **Guardar Cambios en Talleres**.")
+                
+                cfg_cat_ed = {}
+                if col_taller_cat: cfg_cat_ed[col_taller_cat] = st.column_config.TextColumn("Taller", disabled=True) # El nombre del taller suele ser la llave, mejor no editarlo aquí
+                
+                df_cat_editado = st.data_editor(
+                    df_cat_filtrado[cols_vista_cat],
+                    column_config=cfg_cat_ed,
+                    hide_index=True,
+                    use_container_width=True,
+                    key="editor_directorio_talleres"
+                )
+                
+                if st.button("💾 Guardar Cambios en Talleres", type="primary", key="btn_save_dir_talleres"):
+                    with st.spinner("Actualizando catálogo de talleres en la nube..."):
+                        try:
+                            doc = init_connection()
+                            try: 
+                                ws_cat = doc.worksheet("BD_TALLERES")
+                            except:
+                                ws_cat = doc.worksheet("Catálogo")
+                                
+                            headers_t = [str(h).strip() for h in ws_cat.row_values(1)]
+                            celdas_tall_update = []
+
+                            for idx_fila in df_cat_editado.index:
+                                gs_row = int(df_cat_filtrado.loc[idx_fila, '_GS_Row'])
+                                for col_name in cols_vista_cat:
+                                    val_orig = str(df_cat_filtrado.loc[idx_fila, col_name]).strip()
+                                    val_nuevo = str(df_cat_editado.loc[idx_fila, col_name]).strip()
+                                    if val_nuevo in ['nan', 'None']: val_nuevo = ""
+                                    if val_orig in ['nan', 'None']: val_orig = ""
+                                    
+                                    if val_orig != val_nuevo and col_name in headers_t:
+                                        col_idx_gs = headers_t.index(col_name) + 1
+                                        celdas_tall_update.append(gspread.Cell(row=gs_row, col=col_idx_gs, value=val_nuevo))
+
+                            if celdas_tall_update:
+                                ws_cat.update_cells(celdas_tall_update, value_input_option='USER_ENTERED')
+                                st.success(f"✅ Se actualizaron {len(celdas_tall_update)} dato(s) en la base de Talleres.")
+                                st.cache_data.clear()
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.info("No se detectaron cambios por guardar.")
+                        except Exception as e:
+                            st.error(f"Error actualizando talleres: {e}")
+            else:
+                st.dataframe(df_cat_filtrado[cols_vista_cat], hide_index=True, use_container_width=True)
 
         if permiso_edicion:
             with st.expander("➕ Agregar / Registrar Nuevo Taller (CDR)", expanded=False):
@@ -1466,10 +1524,7 @@ elif vista_actual == "🏢 Directorio":
                         else:
                             st.error("❌ Por favor completa los campos obligatorios: Taller, Ciudad y Estado.")
 
-    # ==========================
-    # PESTAÑA 2: PROVEEDORES
-    # ==========================
-    # ==========================
+        # ==========================
     # PESTAÑA 2: PROVEEDORES (EDITABLE)
     # ==========================
     with tab_proveedores:
@@ -2782,6 +2837,9 @@ elif vista_actual == "🛠️ Cuartel General":
     # =========================================================================
     # PESTAÑA 1: CENTRO DE BOTS Y ALERTAS (PANTALLA COMPLETA)
     # =========================================================================
+    # =========================================================================
+    # PESTAÑA 1: CENTRO DE BOTS Y ALERTAS (PANTALLA COMPLETA)
+    # =========================================================================
     with tab_bots:
         col_ctrl, col_wa = st.columns([1.1, 1.9], gap="large")
 
@@ -2810,6 +2868,9 @@ elif vista_actual == "🛠️ Cuartel General":
                 st.session_state.pop('temp_bot_resumen', None)
                 st.rerun()
 
+            # ✨ AQUÍ CREAMOS EL ESPACIO RESERVADO PARA EL SPINNER
+            espacio_spinner = st.empty()
+
         with col_wa:
             with st.container(border=True):
                 st.markdown("**2. Mensajes Generados (WhatsApp)**")
@@ -2835,99 +2896,101 @@ elif vista_actual == "🛠️ Cuartel General":
                 
             arg_modo = "--oculto" if "Oculto" in modo_extraccion else "--visual"
             
-            with st.spinner(f"Ejecutando {bot_seleccionado}... (Esto puede tomar unos minutos)"):
-                try:
-                    # 1. Credenciales temporales
-                    with open("credentials.json", "w", encoding="utf-8") as f:
-                        f.write(st.secrets["google_credentials"])
-                        
-                    # 2. Asegurar navegador en servidor
-                    subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
-                    
-                    # 3. Ejecutar script
-                    cmd = [sys.executable, archivo_ejecutar]
-                    if bot_seleccionado != "Paquetexpress (Rastreo)":
-                        cmd.append(arg_modo)
-                        
-                    resultado = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                    salida_completa = ((resultado.stdout or "") + "\n" + (resultado.stderr or "")).strip()
-                    
-                    # 4. Calcular resumen de pedidos revisados
-                    if bot_seleccionado == "Paquetexpress (Rastreo)":
-                        guias_rev = len(re.findall(r"Buscando gu[íi]a:", salida_completa))
-                        st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_seleccionado}):** Se consultaron **{guias_rev}** guías únicas en Paquetexpress."
-                    else:
-                        revisados = "0"
-                        m_multi = re.search(r"Quedan\s+(\d+)\s+siniestros", salida_completa)
-                        m_gnp = re.search(r"Total le[íi]dos[^:]*:\s*(\d+)", salida_completa)
-                        if m_multi: revisados = m_multi.group(1)
-                        elif m_gnp: revisados = m_gnp.group(1)
-                        st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_seleccionado}):** Se revisaron **{revisados}** pedidos activos en el portal."
-                    
-                    # 5. Extraer limpiamente el bloque de WhatsApp
-                    if "REPORTES LISTOS PARA COPIAR" in salida_completa:
-                        parte_wa = re.split(r"REPORTES LISTOS PARA COPIAR(?: A WHATSAPP)?", salida_completa)[1]
-                        for corte in ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "!!!!!"]:
-                            if corte in parte_wa:
-                                parte_wa = parte_wa.split(corte)[0]
-                        parte_wa = re.sub(r'^[=\s]+', '', parte_wa).strip()
-                        st.session_state['temp_wa_alerts'] = parte_wa
-                    elif bot_seleccionado != "Paquetexpress (Rastreo)":
-                        st.session_state['temp_wa_alerts'] = "No hubo asignaciones nuevas para enviar por WhatsApp en esta corrida."
-
-                    # 6. Extraer Revisión de Estatus Crítico y Alertas a su propio cuadro
-                    marcadores_alerta = ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "REVISIÓN DE ESTATUS CRÍTICO"]
-                    idx_inicio_crit = -1
-                    for m_al in marcadores_alerta:
-                        pos = salida_completa.find(m_al)
-                        if pos != -1 and (idx_inicio_crit == -1 or pos < idx_inicio_crit):
-                            idx_inicio_crit = pos
+            # ✨ INYECTAMOS EL RELOJITO EXACTAMENTE EN EL ESPACIO QUE RESERVAMOS ARRIBA
+            with espacio_spinner:
+                with st.spinner(f"Ejecutando {bot_seleccionado}... (Esto puede tomar unos minutos)"):
+                    try:
+                        # 1. Credenciales temporales
+                        with open("credentials.json", "w", encoding="utf-8") as f:
+                            f.write(st.secrets["google_credentials"])
                             
-                    if idx_inicio_crit != -1:
-                        bloque_crit = salida_completa[idx_inicio_crit:]
-                        lineas_crit = []
-                        for l in bloque_crit.splitlines():
-                            # Quitamos las barras de signos de exclamación y el título repetido
-                            if set(l.strip()) == {'!'} or "REVISIÓN DE ESTATUS CRÍTICO" in l:
-                                continue
-                            lineas_crit.append(l)
-                        st.session_state['temp_criticos_alerts'] = "\n".join(lineas_crit).strip()
-                    elif bot_seleccionado != "Paquetexpress (Rastreo)":
-                        st.session_state['temp_criticos_alerts'] = "✅ Sin alertas críticas ni partidas vencidas en este momento."
+                        # 2. Asegurar navegador en servidor
+                        subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+                        
+                        # 3. Ejecutar script
+                        cmd = [sys.executable, archivo_ejecutar]
+                        if bot_seleccionado != "Paquetexpress (Rastreo)":
+                            cmd.append(arg_modo)
+                            
+                        resultado = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                        salida_completa = ((resultado.stdout or "") + "\n" + (resultado.stderr or "")).strip()
+                        
+                        # 4. Calcular resumen de pedidos revisados
+                        if bot_seleccionado == "Paquetexpress (Rastreo)":
+                            guias_rev = len(re.findall(r"Buscando gu[íi]a:", salida_completa))
+                            st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_seleccionado}):** Se consultaron **{guias_rev}** guías únicas en Paquetexpress."
+                        else:
+                            revisados = "0"
+                            m_multi = re.search(r"Quedan\s+(\d+)\s+siniestros", salida_completa)
+                            m_gnp = re.search(r"Total le[íi]dos[^:]*:\s*(\d+)", salida_completa)
+                            if m_multi: revisados = m_multi.group(1)
+                            elif m_gnp: revisados = m_gnp.group(1)
+                            st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_seleccionado}):** Se revisaron **{revisados}** pedidos activos en el portal."
+                        
+                        # 5. Extraer limpiamente el bloque de WhatsApp
+                        if "REPORTES LISTOS PARA COPIAR" in salida_completa:
+                            parte_wa = re.split(r"REPORTES LISTOS PARA COPIAR(?: A WHATSAPP)?", salida_completa)[1]
+                            for corte in ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "!!!!!"]:
+                                if corte in parte_wa:
+                                    parte_wa = parte_wa.split(corte)[0]
+                            parte_wa = re.sub(r'^[=\s]+', '', parte_wa).strip()
+                            st.session_state['temp_wa_alerts'] = parte_wa
+                        elif bot_seleccionado != "Paquetexpress (Rastreo)":
+                            st.session_state['temp_wa_alerts'] = "No hubo asignaciones nuevas para enviar por WhatsApp en esta corrida."
 
-                    # 7. Dejar en la consola técnica únicamente la bitácora del robot (sin duplicar WhatsApp ni Críticos)
-                    salida_tecnica = salida_completa
-                    if idx_inicio_crit != -1:
-                        salida_tecnica = salida_tecnica[:idx_inicio_crit]
-                    if "REPORTES LISTOS PARA COPIAR" in salida_tecnica:
-                        salida_tecnica = re.split(r"=+\s*\n\s*📱?\s*REPORTES LISTOS PARA COPIAR", salida_tecnica)[0]
+                        # 6. Extraer Revisión de Estatus Crítico y Alertas a su propio cuadro
+                        marcadores_alerta = ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "REVISIÓN DE ESTATUS CRÍTICO"]
+                        idx_inicio_crit = -1
+                        for m_al in marcadores_alerta:
+                            pos = salida_completa.find(m_al)
+                            if pos != -1 and (idx_inicio_crit == -1 or pos < idx_inicio_crit):
+                                idx_inicio_crit = pos
+                                
+                        if idx_inicio_crit != -1:
+                            bloque_crit = salida_completa[idx_inicio_crit:]
+                            lineas_crit = []
+                            for l in bloque_crit.splitlines():
+                                if set(l.strip()) == {'!'} or "REVISIÓN DE ESTATUS CRÍTICO" in l:
+                                    continue
+                                lineas_crit.append(l)
+                            st.session_state['temp_criticos_alerts'] = "\n".join(lineas_crit).strip()
+                        elif bot_seleccionado != "Paquetexpress (Rastreo)":
+                            st.session_state['temp_criticos_alerts'] = "✅ Sin alertas críticas ni partidas vencidas en este momento."
+
+                        # 7. Dejar en la consola técnica únicamente la bitácora del robot
+                        salida_tecnica = salida_completa
+                        if idx_inicio_crit != -1:
+                            salida_tecnica = salida_tecnica[:idx_inicio_crit]
+                        if "REPORTES LISTOS PARA COPIAR" in salida_tecnica:
+                            salida_tecnica = re.split(r"=+\s*\n\s*📱?\s*REPORTES LISTOS PARA COPIAR", salida_tecnica)[0]
+                            
+                        lineas_limpias = []
+                        for linea in salida_tecnica.splitlines():
+                            if re.match(r"^\[\d+/\d+\]\s*\|\s*Siniestro .* procesado\.$", linea.strip()):
+                                continue
+                            if set(linea.strip()) == {'!'}:
+                                continue
+                            lineas_limpias.append(linea)
+                        st.session_state['temp_bot_log'] = "\n".join(lineas_limpias).strip()
                         
-                    lineas_limpias = []
-                    for linea in salida_tecnica.splitlines():
-                        if re.match(r"^\[\d+/\d+\]\s*\|\s*Siniestro .* procesado\.$", linea.strip()):
-                            continue
-                        if set(linea.strip()) == {'!'}:
-                            continue
-                        lineas_limpias.append(linea)
-                    st.session_state['temp_bot_log'] = "\n".join(lineas_limpias).strip()
-                    
-                    if resultado.returncode == 0:
-                        st.session_state['temp_bot_status'] = f"✅ Ejecución de {bot_seleccionado} finalizada con éxito."
-                    else:
-                        st.session_state['temp_bot_status'] = f"⚠️ {bot_seleccionado} terminó con advertencias (revisa el detalle abajo)."
-                        
-                    # 8. Limpiar caché de datos para reflejar cambios al instante
-                    st.cache_data.clear()
-                    st.rerun()
-                        
-                except Exception as e:
-                    st.error(f"Error inesperado al lanzar el bot: {e}")
-                finally:
-                    if os.path.exists("credentials.json"):
-                        os.remove("credentials.json")
+                        if resultado.returncode == 0:
+                            st.session_state['temp_bot_status'] = f"✅ Ejecución de {bot_seleccionado} finalizada con éxito."
+                        else:
+                            st.session_state['temp_bot_status'] = f"⚠️ {bot_seleccionado} terminó con advertencias (revisa el detalle abajo)."
+                            
+                        # 8. Limpiar caché de datos para reflejar cambios al instante
+                        st.cache_data.clear()
+                        st.rerun()
+                            
+                    except Exception as e:
+                        st.error(f"Error inesperado al lanzar el bot: {e}")
+                    finally:
+                        if os.path.exists("credentials.json"):
+                            os.remove("credentials.json")
 
         # --- SECCIÓN INFERIOR: ESTATUS, RESUMEN Y BITÁCORA TÉCNICA ---
         if st.session_state.get('temp_bot_status'):
+            st.markdown("---")
             c_stat1, c_stat2 = st.columns(2)
             with c_stat1:
                 if "✅" in st.session_state['temp_bot_status']:

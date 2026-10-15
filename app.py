@@ -3190,7 +3190,8 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
             cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
-    if not df_editado_conf.empty:
+    if btn_guardar:
+        if not df_editado_conf.empty:
             for _, row in df_editado_conf.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
@@ -3223,6 +3224,29 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     v_vin = str(row.get(col_vin, '')).strip() if col_vin in row else ""
                     vehiculo_homologado = " | ".join([p for p in [v_auto, v_ano, v_vin] if p and p not in ['NAN', 'NONE']])
                     cambios_a_guardar[k]['compra_vehiculo'] = vehiculo_homologado
+
+        for df_venc in [df_editado_venc, df_editado_atrasadas]:
+            if not df_venc.empty:
+                for _, row in df_venc.iterrows():
+                    k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+                    orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
+                    
+                    nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
+                    comentario_actual = str(row.get(col_comentarios, '')).strip()
+                    paq_actual = str(row.get(col_paqueteria, '')).strip()
+                    guia_actual = str(row.get(col_guia, '')).strip()
+                    nueva_fecha = row.get('Nueva Fecha')
+                    
+                    if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
+                        try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
+                        except: fecha_str = str(nueva_fecha)
+                        cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
+                        if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
+                    
+                    if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+                    if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+                    if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
+                    if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
 
         for df_venc in [df_editado_venc, df_editado_atrasadas]:
             if not df_venc.empty:

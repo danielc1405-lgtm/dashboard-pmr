@@ -3387,23 +3387,23 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             ws_comp = doc.worksheet("BD_COMPRAS")
                             datos_comp_crudos = ws_comp.get_all_values()
                             if not datos_comp_crudos:
-                                headers_comp = ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Recibido', 'Condición Pago', 'Días Crédito', 'Estatus Pago']
+                                headers_comp = ['Siniestro', 'Taller', 'Vehículo', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Recibido', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Aseguradora']
                                 datos_comp = [headers_comp]
                             else:
                                 headers_comp = [str(h).strip() for h in datos_comp_crudos[0]]
                                 datos_comp = [headers_comp]
                                 for fila in datos_comp_crudos[1:]:
                                     if any(str(celda).strip() for celda in fila): datos_comp.append(fila)
-                                
+                            
                             def get_col_idx(name):
                                 if name in headers_comp: return headers_comp.index(name)
                                 headers_comp.append(name); datos_comp[0] = headers_comp
                                 for r in datos_comp[1:]: r.append("")
                                 return len(headers_comp) - 1
-                                
+                            
                             idx_c_sin = get_col_idx('Siniestro'); idx_c_desc = get_col_idx('Descripción Pieza'); i_tall = get_col_idx('Taller'); i_veh = get_col_idx('Vehículo')
                             i_prov = get_col_idx('Proveedor'); i_costo = get_col_idx('Costo Compra'); i_fcomp = get_col_idx('Fecha Compra'); i_tiempo = get_col_idx('Tiempo Entrega (Días)')
-                            i_rec = get_col_idx('Recibido'); i_cond_pago = get_col_idx('Condición Pago'); i_dias_cred = get_col_idx('Días Crédito'); i_est_pago = get_col_idx('Estatus Pago')
+                            i_rec = get_col_idx('Recibido'); i_cond_pago = get_col_idx('Condición Pago'); i_dias_cred = get_col_idx('Días Crédito'); i_est_pago = get_col_idx('Estatus Pago'); i_aseg = get_col_idx('Aseguradora')
                             
                             llaves_en_compras = set()
                             nuevos_datos_comp = [headers_comp]
@@ -3455,8 +3455,39 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             for k, v in cambios_a_guardar.items():
                                 if v.get('crear_compra') and k not in llaves_en_compras:
                                     n_row = [""] * len(headers_comp)
-                                    n_row[idx_c_sin] = k[0]; n_row[idx_c_desc] = k[1]; n_row[i_tall] = v.get('compra_taller', ''); n_row[i_veh] = v.get('compra_vehiculo', '')
-                                    n_row[i_fcomp] = fecha_hoy_comp; n_row[i_rec] = 'NO'; n_row[i_costo] = v.get('compra_costo', '0')
+                                    # Extraer los datos guardados desde el Panel Operativo
+                                    veh_info = str(v.get('compra_vehiculo', '')).strip()
+                                    
+                                    # Tratar de buscar el año y el VIN original desde df_completo para armar el formato homologado
+                                    veh_homologado = veh_info
+                                    if not df_completo.empty:
+                                        match_row = df_completo[(df_completo[col_id_univ].astype(str).str.strip().upper() == str(k[0]).upper()) & (df_completo[col_desc_univ].astype(str).str.strip().upper() == str(k[1]).upper())]
+                                        if not match_row.empty:
+                                            r_orig = match_row.iloc[0]
+                                            c_m = str(r_orig.get(col_marca_univ, '')).strip().upper()
+                                            c_mod = str(r_orig.get(col_modelo_univ, '')).strip().upper()
+                                            auto_b = c_mod if c_mod.startswith(c_m) else f"{c_m} {c_mod}".strip()
+                                            
+                                            col_ano_buscar = next((c for c in df_completo.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
+                                            col_vin_buscar = next((c for c in df_completo.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), None)
+                                            col_aseg_buscar = next((c for c in df_completo.columns if "ASEGURADORA" in str(c).upper()), None)
+                                            
+                                            ano_b = str(r_orig.get(col_ano_buscar, '')).replace('.0', '').strip() if col_ano_buscar else ""
+                                            vin_b = str(r_orig.get(col_vin_buscar, '')).strip().upper() if col_vin_buscar else ""
+                                            aseg_b = str(r_orig.get(col_aseg_buscar, '')).strip().upper() if col_aseg_buscar else ""
+                                            
+                                            partes_v = [auto_b, ano_b, vin_b]
+                                            veh_homologado = " | ".join([p for p in partes_v if p and p not in ['NAN', 'NONE']])
+                                            n_row[i_aseg] = aseg_b
+
+                                    n_row[idx_c_sin] = k[0]
+                                    n_row[idx_c_desc] = k[1]
+                                    n_row[i_tall] = v.get('compra_taller', '')
+                                    n_row[i_veh] = veh_homologado
+                                    n_row[i_fcomp] = fecha_hoy_comp
+                                    n_row[i_rec] = 'NO'
+                                    n_row[i_costo] = v.get('compra_costo', '0')
+                                    n_row[i_pag] = 'Pendiente'
                                     
                                     nombre_prov_completo = str(v.get('compra_prov', '')).strip()
                                     eta_calc = "0"; cond_pago_calc = ""; dias_cred_calc = "0"
@@ -3468,7 +3499,14 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                                 tiempo_str = str(row_p.get('Tiempo de Entrega', '')).upper()
                                                 numeros = re.findall(r'\d+', tiempo_str)
                                                 if numeros: eta_calc = numeros[-1]
-                                                cond_pago_calc = str(row_p.get('Condición Pago', '')).strip().title()
+                                                # Normalizar condición de pago a los 5 estatus homologados
+                                                cond_raw = str(row_p.get('Condición Pago', '')).strip().upper()
+                                                if 'PLAT' in cond_raw: cond_pago_calc = 'Pago en Plataforma'
+                                                elif 'CONTRA' in cond_raw: cond_pago_calc = 'Contra Entrega'
+                                                elif 'CRED' in cond_raw or 'CRÉD' in cond_raw: cond_pago_calc = 'Crédito'
+                                                elif 'ANTICIPADO' in cond_raw or 'PREV' in cond_raw or 'CONTADO' in cond_raw: cond_pago_calc = 'Pago Anticipado'
+                                                elif 'ANTIC' in cond_raw: cond_pago_calc = 'Anticipo'
+                                                
                                                 dias_cred_calc = str(row_p.get('Días Crédito', '0')).strip()
                                                 break
                                     n_row[i_prov] = nombre_prov_completo; n_row[i_tiempo] = eta_calc if eta_calc else '0'
@@ -3477,6 +3515,8 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             
                             filas_a_escribir = nuevos_datos_comp + nuevas_filas
                             while len(filas_a_escribir) < len(datos_comp_crudos): filas_a_escribir.append([""] * len(headers_comp))
+                            # --- EL AJUSTE FINAL: table_range="A1" y clear() ---
+                            ws_comp.clear()
                             ws_comp.update(range_name='A1', values=filas_a_escribir, value_input_option='USER_ENTERED')
                         except Exception as e_comp: st.warning(f"Nota: Hubo un problema sincronizando BD_COMPRAS: {e_comp}")
 

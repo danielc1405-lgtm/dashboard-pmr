@@ -3195,13 +3195,15 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             for _, row in df_editado_conf.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
                 orig = originales.get(k, {'comentario': '', 'estatus_db': ''})
-                
+                        
+                prov_conf = str(row.get('Proveedor', '')).strip()
                 nuevo_estatus = None
                 if row.get('Pérdida Total'): nuevo_estatus = "PÉRDIDA TOTAL"
                 elif row.get('PDD'): nuevo_estatus = "PAGO DE DAÑOS"
                 elif row.get('Cancelar'): nuevo_estatus = "CANCELADO"
-                elif row.get('Confirmar Surtido'): nuevo_estatus = "EN PROCESAMIENTO"
-                
+                elif row.get('Confirmar Surtido') or prov_conf not in ['', 'None', 'nan']: 
+                    nuevo_estatus = "EN PROCESAMIENTO"
+                        
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus

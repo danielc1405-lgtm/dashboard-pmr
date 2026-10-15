@@ -1019,16 +1019,24 @@ elif vista_actual == "⚙️ Panel Operativo":
 # ==============================================================================
 # === [BLOQUE 7: VISTAS - COMPRAS, TALLERES E INVENTARIO] ===
 # ==============================================================================
-# ==============================================================================
-# === [BLOQUE 7: VISTAS - COMPRAS, TALLERES E INVENTARIO] ===
-# ==============================================================================
 elif vista_actual == "🛒 Compras":
     st.markdown("### 🛒 Panel de Compras (Gestión y Pagos)")
     
+    # --- FUNCIÓN DE BÚSQUEDA LOCAL PARA COMPRAS ---
+    def buscar_columna_compras(df_o_lista, exactos, parciales, excluidos=["ENV", "PAGO"]):
+        cols = df_o_lista.columns if hasattr(df_o_lista, 'columns') else df_o_lista
+        cols_up = [str(c).strip().upper() for c in cols]
+        for ex in exactos:
+            if ex in cols_up: return cols[cols_up.index(ex)]
+        for i, c_up in enumerate(cols_up):
+            for p in parciales:
+                if p in c_up and not any(exc in c_up for exc in excluidos): return cols[i]
+        return None
+
     # 1. Ignoramos el filtro de aseguradora para compras y tomamos df_completo
     df_proceso_compras = pd.DataFrame()
     if not df_completo.empty:
-        col_est_comp = buscar_columna(df_completo, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])
+        col_est_comp = buscar_columna_compras(df_completo, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])
         if col_est_comp:
             df_proceso_compras = df_completo[~df_completo[col_est_comp].astype(str).str.upper().isin(["PÉRDIDA TOTAL", "PAGO DE DAÑOS", "CANCELADO"])].copy()
 
@@ -1089,8 +1097,10 @@ elif vista_actual == "🛒 Compras":
                         llaves_ya_compradas.add(normalizar_llave_compra(s_c, d_c))
 
         if not df_en_proc.empty:
+            c_id_c = buscar_columna_compras(df_en_proc, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+            c_desc_c = buscar_columna_compras(df_en_proc, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
             df_en_proc['_llave_compra'] = df_en_proc.apply(
-                lambda r: normalizar_llave_compra(r.get(col_id_univ if 'col_id_univ' in locals() else col_id, ''), r.get(col_desc_univ if 'col_desc_univ' in locals() else col_desc, '')), axis=1
+                lambda r: normalizar_llave_compra(r.get(c_id_c, ''), r.get(c_desc_c, '')), axis=1
             )
             df_por_comprar = df_en_proc[~df_en_proc['_llave_compra'].isin(llaves_ya_compradas)].copy()
         else:
@@ -1100,16 +1110,15 @@ elif vista_actual == "🛒 Compras":
             if not df_por_comprar.empty:
                 st.caption("Selecciona el **Proveedor** y captura el **Costo Compra**. Al guardar, pasarán a *Próximas Llegadas*.")
                 
-                # Identificar columnas universales
-                c_id_c = buscar_columna(df_por_comprar, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
-                c_marca_c = buscar_columna(df_por_comprar, ["MARCA"], ["MARCA"])
-                c_modelo_c = buscar_columna(df_por_comprar, ["MODELO"], ["MODELO"])
-                c_ano_c = buscar_columna(df_por_comprar, ["AÑO", "ANO"], ["AÑO", "ANO"])
-                c_vin_c = buscar_columna(df_por_comprar, ["VIN", "SERIE"], ["VIN", "SERIE"])
-                c_taller_c = buscar_columna(df_por_comprar, ["TALLER", "CDR"], ["TALLER"])
-                c_desc_c = buscar_columna(df_por_comprar, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
-                c_precio_c = buscar_columna(df_por_comprar, ["PRECIO", "COSTO VENTA"], ["PRECIO", "COSTO"])
-                c_aseg_c = buscar_columna(df_por_comprar, ["ASEGURADORA"], ["ASEGURADORA"])
+                c_id_c = buscar_columna_compras(df_por_comprar, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+                c_marca_c = buscar_columna_compras(df_por_comprar, ["MARCA"], ["MARCA"])
+                c_modelo_c = buscar_columna_compras(df_por_comprar, ["MODELO"], ["MODELO"])
+                c_ano_c = buscar_columna_compras(df_por_comprar, ["AÑO", "ANO"], ["AÑO", "ANO"])
+                c_vin_c = buscar_columna_compras(df_por_comprar, ["VIN", "SERIE"], ["VIN", "SERIE"])
+                c_taller_c = buscar_columna_compras(df_por_comprar, ["TALLER", "CDR"], ["TALLER"])
+                c_desc_c = buscar_columna_compras(df_por_comprar, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
+                c_precio_c = buscar_columna_compras(df_por_comprar, ["PRECIO", "COSTO VENTA"], ["PRECIO", "COSTO"])
+                c_aseg_c = buscar_columna_compras(df_por_comprar, ["ASEGURADORA"], ["ASEGURADORA"])
                 
                 def armar_auto_limpio(r):
                     m = str(r.get(c_marca_c, '')).strip().upper() if c_marca_c else ''
@@ -1290,21 +1299,16 @@ elif vista_actual == "🛒 Compras":
                 
                 def calc_alerta(row):
                     estatus_p = str(row.get('Estatus Pago', '')).strip().upper()
-                    if estatus_p == 'PAGADO':
-                        return '✅ Liquidado'
+                    if estatus_p == 'PAGADO': return '✅ Liquidado'
                         
                     cond = normalizar_pago(row.get('Condición Pago', ''))
                     dias_cr = pd.to_numeric(row.get('Días Crédito', 0), errors='coerce')
                     if pd.isna(dias_cr): dias_cr = 0
                     
-                    if cond == 'Pago Anticipado':
-                        return '🔴 Pagar p/ pedir'
-                    elif cond == 'Anticipo':
-                        return '🟠 Dar Anticipo / Liquidar'
-                    elif cond == 'Contra Entrega':
-                        return '💵 Pagar al Recibir'
-                    elif cond == 'Pago en Plataforma':
-                        return '🔵 Pagado en Plataforma'
+                    if cond == 'Pago Anticipado': return '🔴 Pagar p/ pedir'
+                    elif cond == 'Anticipo': return '🟠 Dar Anticipo / Liquidar'
+                    elif cond == 'Contra Entrega': return '💵 Pagar al Recibir'
+                    elif cond == 'Pago en Plataforma': return '🔵 Pagado en Plataforma'
                     elif cond == 'Crédito':
                         if pd.notna(row['Fecha_Compra_Dt']):
                             vencimiento = row['Fecha_Compra_Dt'] + pd.to_timedelta(dias_cr, unit='d')
@@ -1313,8 +1317,7 @@ elif vista_actual == "🛒 Compras":
                             if dias_restantes < 0: return f"❌ VENCIDO ({f_venc})"
                             elif dias_restantes <= 3: return f"🟠 Vence pronto: {f_venc}"
                             else: return f"🟢 En tiempo: {f_venc}"
-                        else:
-                            return f"🟡 Crédito ({int(dias_cr)} días)"
+                        else: return f"🟡 Crédito ({int(dias_cr)} días)"
                     return '⚪ Sin Condición Definida'
                     
                 df_c['Alerta Financiera'] = df_c.apply(calc_alerta, axis=1)
@@ -1364,9 +1367,6 @@ elif vista_actual == "🏢 Directorio":
     st.markdown("### 🏢 Directorio Principal")
     tab_talleres, tab_proveedores = st.tabs(["🔧 Talleres / CDR", "📦 Proveedores"])
 
-    # ==========================
-    # PESTAÑA 1: TALLERES (CDR) - FUSIONADO
-    # ==========================
     # ==========================
     # PESTAÑA 1: TALLERES (CDR) - FUSIONADO Y EDITABLE
     # ==========================

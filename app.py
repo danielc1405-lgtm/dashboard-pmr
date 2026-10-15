@@ -1524,7 +1524,8 @@ elif vista_actual == "🏢 Directorio":
                         else:
                             st.error("❌ Por favor completa los campos obligatorios: Taller, Ciudad y Estado.")
 
-        # ==========================
+    
+    # ==========================
     # PESTAÑA 2: PROVEEDORES (EDITABLE)
     # ==========================
     with tab_proveedores:

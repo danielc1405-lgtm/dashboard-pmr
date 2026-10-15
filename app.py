@@ -834,7 +834,7 @@ elif vista_actual == "⚙️ Panel Operativo":
         df_filtrado['LLAVE_TEMP'] = df_filtrado.apply(lambda r: generar_llave_temp(r.get(col_id,''), r.get(col_desc,'')), axis=1)
         df_filtrado['Proveedor'] = df_filtrado['LLAVE_TEMP'].map(dict_prov).fillna("")
         def safe_float(v):
-            try: return float(str(v).replace('\$', '').replace(',', '').strip())
+            try: return float(str(v).replace('$', '').replace(',', '').strip())
             except: return 0.0
         df_filtrado['Costo Compra'] = df_filtrado['LLAVE_TEMP'].map(dict_costo).apply(safe_float)
     else:

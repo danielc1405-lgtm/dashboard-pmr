@@ -866,12 +866,12 @@ elif vista_actual == "⚙️ Panel Operativo":
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion: 
-                            df_grupo['Confirmar Surtido'] = False; df_grupo['Cancelar'] = False; df_grupo['Pérdida Total'] = False; df_grupo['PDD'] = False
-                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar', 'Pérdida Total', 'PDD'] + [c for c in [col_comentarios] if c in df_grupo.columns]
+                            df_grupo['Confirmar Surtido'] = False; df_grupo['Pago_Danos'] = False; df_grupo['Cancelar'] = False; df_grupo['Pérdida Total'] = False; df_grupo['PDD'] = False
+                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Pago_Danos', 'Cancelar', 'Pérdida Total', 'PDD'] + [c for c in [col_comentarios] if c in df_grupo.columns]
                             config_conf = base_config.copy()
-                            # AQUI REPARAMOS LA DIAGONAL
-                            config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Pérdida Total": st.column_config.CheckboxColumn("💥 PT", default=False), "PDD": st.column_config.CheckboxColumn("💸 PDD", default=False), "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo (\$)", format="%.2f")})
-                            columnas_editables = ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Cancelar', 'Pérdida Total', 'PDD', col_comentarios]
+                            # AQUI REPARAMOS LA DIAGONAL Y AGREGAMOS PAGO *
+                            config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Pago_Danos": st.column_config.CheckboxColumn("💵 Pago *", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Pérdida Total": st.column_config.CheckboxColumn("💥 PT", default=False), "PDD": st.column_config.CheckboxColumn("💸 PDD", default=False), "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo ($)", format="%.2f")})
+                            columnas_editables = ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Pago_Danos', 'Cancelar', 'Pérdida Total', 'PDD', col_comentarios]
                             df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_conf, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_conf_{taller}_{siniestro_auto}")
                             for col in df_grupo.columns:
                                 if col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
@@ -881,7 +881,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
         if dfs_editados_conf: df_editado_conf = pd.concat(dfs_editados_conf, ignore_index=True)
 
-    regex_excluir = "CONFIRMAR|ENTREGADO|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO|PÉRDIDA TOTAL|PAGO DE DAÑOS"
+    regex_excluir = "CONFIRMAR|ENTREGADO|PAGO A TALLER|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO|PÉRDIDA TOTAL|PAGO DE DAÑOS"
     df_vencimientos = df_filtrado[(df_filtrado[col_vencimiento] == hoy_str) & (~df_filtrado[col_estatus].astype(str).str.upper().str.contains(regex_excluir)) & (df_filtrado[col_estatus].fillna('').astype(str).str.strip() != "")].copy() if col_vencimiento else pd.DataFrame()
     with st.expander(f"🚨 Vencimientos de Hoy | {len(df_vencimientos)} Partida(s)", expanded=False):
         if not df_vencimientos.empty:
@@ -915,8 +915,8 @@ elif vista_actual == "⚙️ Panel Operativo":
                 cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_precio, col_vencimiento, col_paqueteria, col_guia, col_comentarios] if c in df_atrasadas.columns]
                 st.dataframe(df_atrasadas[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
 
-    df_por_recibir = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper() == "ENTREGADO"].copy() if col_estatus else pd.DataFrame()
-    with st.expander(f"📥 Por Recibir (Entregados en CDR) | {len(df_por_recibir)} Partida(s)", expanded=False):
+    df_por_recibir = df_filtrado[df_filtrado[col_estatus].astype(str).str.upper().isin(["ENTREGADO", "PAGO A TALLER"])].copy() if col_estatus else pd.DataFrame()
+    with st.expander(f"📥 Por Recibir (Entregados en CDR / Pago a Taller) | {len(df_por_recibir)} Partida(s)", expanded=False):
         if not df_por_recibir.empty:
             # Detecta "Fecha Recibido" (Columna Y de tu Sheet) o "Fecha Entrega"
             c_f_entrega = next((c for c in df_por_recibir.columns if any(x in str(c).upper() for x in ["FECHA REC", "FECHA ENT", "LLEGADA"])), None)
@@ -928,7 +928,7 @@ elif vista_actual == "⚙️ Panel Operativo":
 
             if permiso_edicion:
                 df_por_recibir['Marcar Recibido'] = False
-                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio] if c in df_por_recibir.columns] + ['Marcar Recibido'] + [c for c in [col_paqueteria, col_guia] + col_fecha_lista + [col_comentarios] if c in df_por_recibir.columns]
+                cols_visibles = [c for c in [col_id, 'Vehiculo_Info', col_taller, col_cant, col_desc, col_origen, col_precio, col_estatus] if c in df_por_recibir.columns] + ['Marcar Recibido'] + [c for c in [col_paqueteria, col_guia] + col_fecha_lista + [col_comentarios] if c in df_por_recibir.columns]
                 config_cobro = base_config.copy()
                 config_cobro.update({"Marcar Recibido": st.column_config.CheckboxColumn("🏁 Marcar Recibido", default=False)})
                 df_editado_cobro = st.data_editor(df_por_recibir[cols_visibles], column_config=config_cobro, disabled=[c for c in cols_visibles if c not in ['Marcar Recibido', col_comentarios]], hide_index=True, use_container_width=True, key="ed_cobro")
@@ -3201,13 +3201,15 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 if row.get('Pérdida Total'): nuevo_estatus = "PÉRDIDA TOTAL"
                 elif row.get('PDD'): nuevo_estatus = "PAGO DE DAÑOS"
                 elif row.get('Cancelar'): nuevo_estatus = "CANCELADO"
+                elif row.get('Pago_Danos'): nuevo_estatus = "PAGO A TALLER"
                 elif row.get('Confirmar Surtido') or prov_conf not in ['', 'None', 'nan']: 
                     nuevo_estatus = "EN PROCESAMIENTO"
-                        
+                
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 if nuevo_estatus and nuevo_estatus != orig['estatus_db']: 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                    if nuevo_estatus == "EN PROCESAMIENTO": cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
+                    if nuevo_estatus in ["EN PROCESAMIENTO", "PAGO A TALLER"]: 
+                        cambios_a_guardar[k]['fecha_confi'] = fecha_hoy_sistema
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
                 # --- AQUÍ ENTRA LA MAGIA PARA CREAR LA COMPRA DIRECTO AL CONFIRMAR ---
@@ -3326,7 +3328,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     if row.get('Cancelar') and 'estatus' not in cambios_a_guardar.get(k, {}): 
                         cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
                     elif row.get('Pago_Danos') and 'estatus' not in cambios_a_guardar.get(k, {}): 
-                        cambios_a_guardar.setdefault(k, {})['estatus'] = "PAGO DE DAÑOS"
+                        cambios_a_guardar.setdefault(k, {})['estatus'] = "PAGO A TALLER"
                     elif row.get('Recibido') and 'estatus' not in cambios_a_guardar.get(k, {}): 
                         cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
                         cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema

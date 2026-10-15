@@ -1019,9 +1019,19 @@ elif vista_actual == "⚙️ Panel Operativo":
 # ==============================================================================
 # === [BLOQUE 7: VISTAS - COMPRAS, TALLERES E INVENTARIO] ===
 # ==============================================================================
+# ==============================================================================
+# === [BLOQUE 7: VISTAS - COMPRAS, TALLERES E INVENTARIO] ===
+# ==============================================================================
 elif vista_actual == "🛒 Compras":
     st.markdown("### 🛒 Panel de Compras (Gestión y Pagos)")
     
+    # 1. Ignoramos el filtro de aseguradora para compras y tomamos df_completo
+    df_proceso_compras = pd.DataFrame()
+    if not df_completo.empty:
+        col_est_comp = buscar_columna(df_completo, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])
+        if col_est_comp:
+            df_proceso_compras = df_completo[~df_completo[col_est_comp].astype(str).str.upper().isin(["PÉRDIDA TOTAL", "PAGO DE DAÑOS", "CANCELADO"])].copy()
+
     def normalizar_pago(val):
         v = str(val).strip().upper()
         if v in ['', 'NONE', 'NAN']: return ''
@@ -1058,8 +1068,8 @@ elif vista_actual == "🛒 Compras":
     # ==========================================================================
     # 1. BANDEJA RÁPIDA: PEDIDOS PENDIENTES DE COMPRA (CAPTURA DIRECTA)
     # ==========================================================================
-    if not df_proceso.empty and col_estatus:
-        df_en_proc = df_proceso[df_proceso[col_estatus].astype(str).str.upper().str.strip() == "EN PROCESAMIENTO"].copy()
+    if not df_proceso_compras.empty and col_est_comp:
+        df_en_proc = df_proceso_compras[df_proceso_compras[col_est_comp].astype(str).str.upper().str.strip() == "EN PROCESAMIENTO"].copy()
         
         def normalizar_llave_compra(sin_val, desc_val):
             s_clean = str(sin_val).strip().upper()
@@ -1080,7 +1090,7 @@ elif vista_actual == "🛒 Compras":
 
         if not df_en_proc.empty:
             df_en_proc['_llave_compra'] = df_en_proc.apply(
-                lambda r: normalizar_llave_compra(r.get(col_id, ''), r.get(col_desc, '')), axis=1
+                lambda r: normalizar_llave_compra(r.get(col_id_univ if 'col_id_univ' in locals() else col_id, ''), r.get(col_desc_univ if 'col_desc_univ' in locals() else col_desc, '')), axis=1
             )
             df_por_comprar = df_en_proc[~df_en_proc['_llave_compra'].isin(llaves_ya_compradas)].copy()
         else:
@@ -1088,42 +1098,43 @@ elif vista_actual == "🛒 Compras":
 
         with st.expander(f"🛒 Pedidos Pendientes de Compra ({len(df_por_comprar)}) — Captura Rápida", expanded=True):
             if not df_por_comprar.empty:
-                st.caption("Selecciona el **Proveedor** y captura el **Costo Compra** (con decimales si aplica). Recuerda presionar **Enter** al terminar de escribir en una celda antes de guardar.")
+                st.caption("Selecciona el **Proveedor** y captura el **Costo Compra**. Al guardar, pasarán a *Próximas Llegadas*.")
+                
+                # Identificar columnas universales
+                c_id_c = buscar_columna(df_por_comprar, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+                c_marca_c = buscar_columna(df_por_comprar, ["MARCA"], ["MARCA"])
+                c_modelo_c = buscar_columna(df_por_comprar, ["MODELO"], ["MODELO"])
+                c_ano_c = buscar_columna(df_por_comprar, ["AÑO", "ANO"], ["AÑO", "ANO"])
+                c_vin_c = buscar_columna(df_por_comprar, ["VIN", "SERIE"], ["VIN", "SERIE"])
+                c_taller_c = buscar_columna(df_por_comprar, ["TALLER", "CDR"], ["TALLER"])
+                c_desc_c = buscar_columna(df_por_comprar, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
+                c_precio_c = buscar_columna(df_por_comprar, ["PRECIO", "COSTO VENTA"], ["PRECIO", "COSTO"])
+                c_aseg_c = buscar_columna(df_por_comprar, ["ASEGURADORA"], ["ASEGURADORA"])
                 
                 def armar_auto_limpio(r):
-                    m = str(r.get(col_marca, '')).strip().upper() if col_marca else ''
-                    mod = str(r.get(col_modelo, '')).strip().upper() if col_modelo else ''
+                    m = str(r.get(c_marca_c, '')).strip().upper() if c_marca_c else ''
+                    mod = str(r.get(c_modelo_c, '')).strip().upper() if c_modelo_c else ''
                     if mod.startswith(m) and m != "": return mod
                     return f"{m} {mod}".strip()
 
                 df_cap = pd.DataFrame()
-                df_cap['Siniestro'] = df_por_comprar[col_id].astype(str).str.strip().values
+                df_cap['Siniestro'] = df_por_comprar[c_id_c].astype(str).str.strip().values if c_id_c else ""
                 df_cap['Auto'] = df_por_comprar.apply(armar_auto_limpio, axis=1).values
-                df_cap['Año'] = (
-                    df_por_comprar[col_ano].astype(str).str.replace('.0', '', regex=False).str.strip().values
-                    if (col_ano and col_ano in df_por_comprar.columns) else [""] * len(df_por_comprar)
-                )
-                df_cap['VIN / Serie'] = (
-                    df_por_comprar[col_vin].astype(str).str.strip().str.upper().values
-                    if (col_vin and col_vin in df_por_comprar.columns) else [""] * len(df_por_comprar)
-                )
-                df_cap['Taller'] = df_por_comprar[col_taller].astype(str).str.strip().values if col_taller else ""
-                df_cap['Pieza'] = df_por_comprar[col_desc].astype(str).str.strip().values if col_desc else ""
+                df_cap['Año'] = df_por_comprar[c_ano_c].astype(str).str.replace('.0', '', regex=False).str.strip().values if c_ano_c else ""
+                df_cap['VIN / Serie'] = df_por_comprar[c_vin_c].astype(str).str.strip().str.upper().values if c_vin_c else ""
+                df_cap['Taller'] = df_por_comprar[c_taller_c].astype(str).str.strip().values if c_taller_c else ""
+                df_cap['Pieza'] = df_por_comprar[c_desc_c].astype(str).str.strip().values if c_desc_c else ""
+                df_cap['_Aseguradora'] = df_por_comprar[c_aseg_c].astype(str).str.strip().str.upper().values if c_aseg_c else "MULTI"
                 
-                if col_precio and col_precio in df_por_comprar.columns:
-                    df_cap['Precio Aut.'] = pd.to_numeric(
-                        df_por_comprar[col_precio].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip(),
-                        errors='coerce'
-                    ).fillna(0.0).values
-                else:
-                    df_cap['Precio Aut.'] = 0.0
+                if c_precio_c:
+                    df_cap['Precio Aut.'] = pd.to_numeric(df_por_comprar[c_precio_c].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip(), errors='coerce').fillna(0.0).values
+                else: df_cap['Precio Aut.'] = 0.0
 
                 df_cap['Proveedor'] = ""
                 df_cap['Costo Compra'] = 0.0
 
                 if not modo_consulta and permiso_edicion:
-                    if 'reset_key_compras' not in st.session_state:
-                        st.session_state['reset_key_compras'] = 0
+                    if 'reset_key_compras' not in st.session_state: st.session_state['reset_key_compras'] = 0
 
                     config_pend = {
                         'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"),
@@ -1134,16 +1145,17 @@ elif vista_actual == "🛒 Compras":
                         'Pieza': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
                         'Precio Aut.': st.column_config.NumberColumn("Precio Aut.", format="$ %.2f", disabled=True, width="small"),
                         'Proveedor': st.column_config.SelectboxColumn("🏪 Proveedor", options=lista_opciones_prov, width="medium"),
-                        # step=0.01 permite capturar cualquier decimal libremente
                         'Costo Compra': st.column_config.NumberColumn("💲 Costo Compra", format="$ %.2f", min_value=0.0, step=0.01, width="small"),
                     }
                     df_cap_edit = st.data_editor(
-                        df_cap,
+                        df_cap.drop(columns=['_Aseguradora']),
                         column_config=config_pend,
                         hide_index=True,
                         use_container_width=True,
                         key=f"ed_pendientes_compra_rapida_{st.session_state['reset_key_compras']}"
                     )
+                    
+                    df_cap_edit['_Aseguradora'] = df_cap['_Aseguradora'].values
 
                     if st.button("💾 Registrar Compras Capturadas", type="primary", key="btn_guardar_compras_rapidas"):
                         filas_listas = df_cap_edit[df_cap_edit['Proveedor'].astype(str).str.strip() != ""].copy()
@@ -1159,8 +1171,7 @@ elif vista_actual == "🛒 Compras":
 
                                     def idx_col_c(posibles):
                                         for p in posibles:
-                                            if p.upper() in headers_up:
-                                                return headers_up.index(p.upper())
+                                            if p.upper() in headers_up: return headers_up.index(p.upper())
                                         return -1
 
                                     tz_mx_c = datetime.timezone(datetime.timedelta(hours=-6))
@@ -1205,13 +1216,12 @@ elif vista_actual == "🛒 Compras":
                                         if i_dia >= 0: fila_c[i_dia] = int(datos_p_sel['dias']) if str(datos_p_sel['dias']).isdigit() else 0
                                         if i_pag >= 0: fila_c[i_pag] = "Pendiente"
                                         if i_rec >= 0: fila_c[i_rec] = "NO"
-                                        if i_ase >= 0: fila_c[i_ase] = palabra_clave_aseg
+                                        if i_ase >= 0: fila_c[i_ase] = str(r_new['_Aseguradora']).strip()
 
                                         nuevas_filas_c.append(fila_c)
 
                                     if nuevas_filas_c:
                                         ws_comp.append_rows(nuevas_filas_c, value_input_option='USER_ENTERED', table_range="A1")
-                                        # Incrementamos la llave para limpiar el editor y borramos el caché
                                         st.session_state['reset_key_compras'] += 1
                                         st.cache_data.clear()
                                         st.success(f"✅ Se registraron {len(nuevas_filas_c)} compra(s) y pasaron a Próximas Llegadas.")
@@ -1220,7 +1230,7 @@ elif vista_actual == "🛒 Compras":
                                 except Exception as e:
                                     st.error(f"Error al registrar compras: {e}")
                 else:
-                    st.dataframe(df_cap.drop(columns=['Proveedor', 'Costo Compra']), hide_index=True, use_container_width=True)
+                    st.dataframe(df_cap.drop(columns=['Proveedor', 'Costo Compra', '_Aseguradora']), hide_index=True, use_container_width=True)
             else:
                 st.success("🎉 ¡Excelente! Todas las piezas en procesamiento ya tienen su compra registrada.")
 
@@ -3260,39 +3270,55 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
         if not df_editado.empty:
-            for _, row in df_editado.iterrows():
-                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
-                
-                if row.get('Cancelar') and 'estatus' not in cambios_a_guardar.get(k, {}): 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
-                elif row.get('Pago_Danos') and 'estatus' not in cambios_a_guardar.get(k, {}): 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = "PAGO DE DAÑOS"
-                elif row.get('Recibido') and 'estatus' not in cambios_a_guardar.get(k, {}): 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
-                    cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
-                elif row.get('Entregado') and 'estatus' not in cambios_a_guardar.get(k, {}): 
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = "ENTREGADO"
-                
-                comentario_actual = str(row.get(col_comentarios, '')).strip()
-                paq_actual = str(row.get(col_paqueteria, '')).strip()
-                guia_actual = str(row.get(col_guia, '')).strip()
-                venc_actual = str(row.get(col_vencimiento, '')).strip()
-                asig_actual = str(row.get(col_asignacion, '')).strip()
-                
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-                if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-                if venc_actual and venc_actual != orig['vencimiento_db'] and 'vencimiento' not in cambios_a_guardar.get(k, {}): cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
-                if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
-                
-                prov_asignado = str(row.get('Proveedor', '')).strip()
-                if prov_asignado != '' and cambios_a_guardar.get(k, {}).get('estatus', orig['estatus_db']) != "CANCELADO":
-                    cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
-                    cambios_a_guardar[k]['compra_prov'] = prov_asignado
-                    cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
-                    cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
-                    cambios_a_guardar[k]['compra_vehiculo'] = str(row.get('Vehiculo_Info', '')).strip()
+            # Buscamos la columna ID real dentro de df_editado
+            c_id_real = buscar_columna(df_editado, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+            c_desc_real = buscar_columna(df_editado, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
+            
+            if c_id_real and c_desc_real:
+                for _, row in df_editado.iterrows():
+                    # Usamos c_id_real explícitamente, que es el ID puro (ej. 1153085), NO el agrupador
+                    k = generar_llave(row.get(c_id_real, ''), row.get(c_desc_real, ''))
+                    orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
+                    
+                    if row.get('Cancelar') and 'estatus' not in cambios_a_guardar.get(k, {}): 
+                        cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
+                    elif row.get('Pago_Danos') and 'estatus' not in cambios_a_guardar.get(k, {}): 
+                        cambios_a_guardar.setdefault(k, {})['estatus'] = "PAGO DE DAÑOS"
+                    elif row.get('Recibido') and 'estatus' not in cambios_a_guardar.get(k, {}): 
+                        cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
+                        cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
+                    elif row.get('Entregado') and 'estatus' not in cambios_a_guardar.get(k, {}): 
+                        cambios_a_guardar.setdefault(k, {})['estatus'] = "ENTREGADO"
+                    
+                    comentario_actual = str(row.get(col_comentarios, '')).strip()
+                    paq_actual = str(row.get(col_paqueteria, '')).strip()
+                    guia_actual = str(row.get(col_guia, '')).strip()
+                    venc_actual = str(row.get(col_vencimiento, '')).strip()
+                    asig_actual = str(row.get(col_asignacion, '')).strip()
+                    
+                    if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+                    if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
+                    if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                    if venc_actual and venc_actual != orig['vencimiento_db'] and 'vencimiento' not in cambios_a_guardar.get(k, {}): cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
+                    if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
+                    
+                    prov_asignado = str(row.get('Proveedor', '')).strip()
+                    if prov_asignado != '' and cambios_a_guardar.get(k, {}).get('estatus', orig['estatus_db']) != "CANCELADO":
+                        cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
+                        cambios_a_guardar[k]['compra_prov'] = prov_asignado
+                        cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
+                        cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
+                        
+                        # Armar vehículo homologado
+                        v_info = str(row.get('Vehiculo_Info', '')).strip()
+                        partes = v_info.split(' | ')
+                        v_auto = partes[0].strip() if len(partes) > 0 else v_info
+                        v_ano = partes[1].strip() if len(partes) > 1 else ""
+                        v_vin = str(row.get(col_vin, '')).strip() if col_vin in row else ""
+                        partes_limpias = [v_auto, v_ano, v_vin]
+                        vehiculo_homologado = " | ".join([p for p in partes_limpias if p and p not in ['NAN', 'NONE']])
+                        
+                        cambios_a_guardar[k]['compra_vehiculo'] = vehiculo_homologado
 
         if vista_actual == "🛒 Compras":
             df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())

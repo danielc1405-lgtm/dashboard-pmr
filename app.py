@@ -3687,6 +3687,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
 
                         st.session_state['pdfs_list'] = pdfs_list
                         if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
-                    
+
+                    st.write("DEBUG - Cambios a guardar detectados:", cambios_a_guardar)
                     st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅"); st.cache_data.clear(); st.rerun()
                 except Exception as e: st.error(f"❌ Error guardando: {e}")

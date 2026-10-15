@@ -950,17 +950,26 @@ elif vista_actual == "⚙️ Panel Operativo":
                 df_asignados['Entregado'] = estatus_upper.str.contains("ENTREGADO")
                 df_asignados['Recibido'] = estatus_upper.str.contains("RECIBIDO")
                 df_asignados['Cancelar'] = estatus_upper.str.contains("CANCELADO")
+                df_asignados['Pago_Danos'] = estatus_upper.str.contains("PAGO DE DAÑOS")
             
             for taller, df_taller in df_asignados.groupby(col_taller):
                 with st.expander(f"🏢 {taller}", expanded=False):
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 {siniestro_auto} | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion:
-                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra'] + [c for c in [col_paqueteria, col_guia, col_estatus_envio, col_remision] if c in df_grupo.columns] + ['Entregado', 'Recibido', 'Cancelar'] + [c for c in [col_comentarios] if c in df_grupo.columns]
+                            cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra'] + [c for c in [col_paqueteria, col_guia, col_estatus_envio, col_remision] if c in df_grupo.columns] + ['Entregado', 'Recibido', 'Pago_Danos', 'Cancelar'] + [c for c in [col_comentarios] if c in df_grupo.columns]
                             config_pedidos = base_config.copy()
-                            # AQUI REPARAMOS LA DIAGONAL
-                            config_pedidos.update({ "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo (\$)", format="%.2f"), col_estatus_envio: st.column_config.TextColumn("📍 Rastreo", disabled=True), "Entregado": st.column_config.CheckboxColumn("🚚 Ent", default=False), "Recibido": st.column_config.CheckboxColumn("🏁 Rec", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False) })
-                            columnas_editables = ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_remision, 'Entregado', 'Recibido', 'Cancelar', col_comentarios, col_vencimiento]
+                            # AQUI REPARAMOS LA DIAGONAL Y AGREGAMOS EL PAGO DE DAÑOS
+                            config_pedidos.update({ 
+                                "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), 
+                                "Costo Compra": st.column_config.NumberColumn("💲 Costo (\$)", format="%.2f"), 
+                                col_estatus_envio: st.column_config.TextColumn("📍 Rastreo", disabled=True), 
+                                "Entregado": st.column_config.CheckboxColumn("🚚 Ent", default=False), 
+                                "Recibido": st.column_config.CheckboxColumn("🏁 Rec", default=False), 
+                                "Pago_Danos": st.column_config.CheckboxColumn("💵 Pago *", default=False),
+                                "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False) 
+                            })
+                            columnas_editables = ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_remision, 'Entregado', 'Recibido', 'Pago_Danos', 'Cancelar', col_comentarios, col_vencimiento]
                             df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_pedidos, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
                             for col in df_grupo.columns:
                                 if col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
@@ -1777,7 +1786,8 @@ elif vista_actual == "📝 Remisiones":
     col_aseguradora = buscar_col_local(df_completo, ["ASEGURADORA"], ["ASEGURADORA"])
 
     if col_estatus_univ and col_remision_univ and not df_completo.empty:
-        estatus_permitidos = ["EN PROCESAMIENTO", "RECIBIDO"]
+        # SOLO permitimos "EN PROCESAMIENTO". Si ya está RECIBIDO, PAGO DE DAÑOS o ENTREGADO, no requiere remisión.
+        estatus_permitidos = ["EN PROCESAMIENTO"]
         cond_proceso = df_completo[col_estatus_univ].astype(str).str.upper().isin(estatus_permitidos)
         cond_sin_folio = df_completo[col_remision_univ].astype(str).str.strip() == ""
         df_listos = df_completo[cond_proceso & cond_sin_folio].copy()
@@ -3256,6 +3266,8 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 
                 if row.get('Cancelar') and 'estatus' not in cambios_a_guardar.get(k, {}): 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "CANCELADO"
+                elif row.get('Pago_Danos') and 'estatus' not in cambios_a_guardar.get(k, {}): 
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = "PAGO DE DAÑOS"
                 elif row.get('Recibido') and 'estatus' not in cambios_a_guardar.get(k, {}): 
                     cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
                     cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema

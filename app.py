@@ -225,8 +225,8 @@ if not df_historico.empty:
             if not df_hist_activos.empty:
                 df_completo = pd.concat([df_completo, df_hist_activos], ignore_index=True)
 
-# Solo carga compras si la pestaña lo requiere (Incluye Operación del Día)
-df_compras = cargar_compras() if vista_actual in ["🛒 Compras", "📊 Analítico", "🚚 Operación del Día", "⚙️ Panel Operativo", "🚚 Rutas"] else pd.DataFrame()
+# Solo carga compras si la pestaña lo requiere (Incluye Operación del Día y Consultas)
+df_compras = cargar_compras() if vista_actual in ["🛒 Compras", "📊 Analítico", "🚚 Operación del Día", "⚙️ Panel Operativo", "🚚 Rutas", "🔍 Consultas"] else pd.DataFrame()
 
 # Solo carga catálogos si la pestaña los usa
 df_catalogo = pd.DataFrame(); df_proveedores = pd.DataFrame()

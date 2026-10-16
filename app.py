@@ -523,10 +523,76 @@ if vista_actual == "📊 Analítico":
 
     st.markdown("---")
 
-    # --- 2. EMBUDO Y TOP MARCAS ---
+    # --- 2. RESUMEN FINANCIERO MENSUAL (ARRIBA DEL EMBUDO) ---
+    st.markdown("#### 💰 2. Resumen Financiero Mensual")
+    st.caption("Evolución de montos basada en la Fecha de Asignación (La suma de las 5 columnas equivale al total Asignado).")
+    
+    if col_asignacion and col_precio and col_estatus and not df_trabajo.empty:
+        df_fin = df_trabajo.copy()
+        df_fin['F_Asig_D'] = safe_apply_date(df_fin, col_asignacion)
+        
+        def clean_money(val):
+            try: return float(str(val).replace('\$', '').replace(',', '').strip())
+            except: return 0.0
+        df_fin['Monto'] = df_fin[col_precio].apply(clean_money)
+        
+        def cat_financiera(e):
+            e_upper = str(e).upper().strip()
+            if "FACTURADO" in e_upper or "RECIBIDO" in e_upper or "ENTREGADO" in e_upper: return "✅ Concretado"
+            if "PÉRDIDA TOTAL" in e_upper or "PERDIDA TOTAL" in e_upper: return "💥 PT"
+            if "PAGO DE DAÑOS" in e_upper or "PAGO DE DANOS" in e_upper: return "💸 PDD"
+            if "CANCELADO" in e_upper: return "🚫 Cancelado"
+            return "⚙️ En Proceso"
+            
+        df_fin['Cat_Fin'] = df_fin[col_estatus].apply(cat_financiera)
+        df_fin = df_fin[df_fin['F_Asig_D'].notna()].copy()
+        
+        if not df_fin.empty:
+            df_fin['Año'] = df_fin['F_Asig_D'].dt.year
+            df_fin['Mes_Sort'] = df_fin['F_Asig_D'].dt.strftime('%Y-%m')
+            meses_es_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
+            df_fin['Mes_Str'] = df_fin['F_Asig_D'].apply(lambda d: f"{meses_es_nombres[d.month]} {d.year}")
+            
+            pivot_fin = pd.pivot_table(df_fin, values='Monto', index=['Año', 'Mes_Sort', 'Mes_Str'], columns='Cat_Fin', aggfunc='sum', fill_value=0.0).reset_index()
+            
+            cols_5 = ['⚙️ En Proceso', '✅ Concretado', '💸 PDD', '💥 PT', '🚫 Cancelado']
+            for col_req in cols_5:
+                if col_req not in pivot_fin.columns: pivot_fin[col_req] = 0.0
+                
+            pivot_fin['📥 Asignado'] = pivot_fin['⚙️ En Proceso'] + pivot_fin['✅ Concretado'] + pivot_fin['💸 PDD'] + pivot_fin['💥 PT'] + pivot_fin['🚫 Cancelado']
+            
+            pivot_fin = pivot_fin.sort_values('Mes_Sort', ascending=True)
+            pivot_fin['📈 Acumulado Concretado'] = pivot_fin['✅ Concretado'].cumsum()
+            
+            cols_dinero = ['📥 Asignado', '⚙️ En Proceso', '✅ Concretado', '💸 PDD', '💥 PT', '🚫 Cancelado', '📈 Acumulado Concretado']
+            for c in cols_dinero:
+                pivot_fin[c] = pivot_fin[c].apply(lambda x: f"\${x:,.2f}")
+                
+            pivot_fin = pivot_fin.sort_values('Mes_Sort', ascending=False)
+            cols_mostrar = ['Mes_Str'] + cols_dinero
+            
+            anios_disp = sorted(pivot_fin['Año'].unique(), reverse=True)
+            if anios_disp:
+                anio_actual = anios_disp[0]
+                df_actual = pivot_fin[pivot_fin['Año'] == anio_actual]
+                st.markdown(f"##### 📅 Año {anio_actual}")
+                st.dataframe(df_actual[cols_mostrar].rename(columns={'Mes_Str': 'Mes de Asignación'}), use_container_width=True, hide_index=True)
+                
+                for anio_ant in anios_disp[1:]:
+                    df_ant = pivot_fin[pivot_fin['Año'] == anio_ant]
+                    with st.expander(f"📁 Historial Financiero {anio_ant} (Da clic para expandir)"):
+                        st.dataframe(df_ant[cols_mostrar].rename(columns={'Mes_Str': 'Mes de Asignación'}), use_container_width=True, hide_index=True)
+        else:
+            st.info("No hay fechas de asignación válidas para procesar el financiero.")
+    else:
+        st.info("No hay datos para calcular.")
+
+    st.markdown("---")
+
+    # --- 3. EMBUDO Y 4. TOP MARCAS (CERRADOS POR DEFECTO) ---
     c_graf1, c_graf2 = st.columns([1, 1.2])
     with c_graf1:
-        st.markdown("#### 🌪️ 2. Embudo de Operación (Activos)")
+        st.markdown("#### 🌪️ 3. Embudo de Operación (Activos)")
         if not df_uni.empty and col_estatus:
             df_emb = df_uni.copy()
             if col_aseg and palabra_clave_aseg != "TODAS":
@@ -547,7 +613,7 @@ if vista_actual == "📊 Analítico":
             st.plotly_chart(fig_funnel, use_container_width=True)
             
     with c_graf2:
-        st.markdown("#### 🏆 3. Análisis Histórico por Marca (Top 4)")
+        st.markdown("#### 🏆 4. Análisis Histórico por Marca (Top 4)")
         if col_marca and col_modelo and not df_trabajo.empty:
             df_m = df_trabajo.copy()
             df_m['M_Lim'] = df_m[col_marca].astype(str).str.strip().str.upper()
@@ -591,7 +657,7 @@ if vista_actual == "📊 Analítico":
                 top_models = df_mod['Mod_Lim'].value_counts().head(4)
                 top_piezas = df_mod[df_mod['Familia_Pieza'] != 'OTRAS']['Familia_Pieza'].value_counts().head(5)
                 
-                with st.expander(f"🚗 **{b_name}** | {b_tot} Partidas Históricas", expanded=True):
+                with st.expander(f"🚗 **{b_name}** | {b_tot} Partidas Históricas", expanded=False):
                     cm1, cm2 = st.columns(2)
                     with cm1:
                         st.markdown("**🚘 Modelos más movidos:**")
@@ -601,72 +667,6 @@ if vista_actual == "📊 Analítico":
                         st.markdown("**🛠️ Top 5 Piezas:**")
                         for pza, cnt_p in top_piezas.items():
                             st.markdown(f"- {pza} (`{cnt_p}`)")
-
-    st.markdown("---")
-
-    # --- 4. RESUMEN FINANCIERO MENSUAL ---
-    st.markdown("#### 💰 4. Resumen Financiero Mensual")
-    st.caption("Evolución de montos basada en la Fecha de Asignación (La suma de las 5 columnas equivale al total Asignado).")
-    
-    if col_asignacion and col_precio and col_estatus and not df_trabajo.empty:
-        df_fin = df_trabajo.copy()
-        df_fin['F_Asig_D'] = safe_apply_date(df_fin, col_asignacion)
-        
-        def clean_money(val):
-            try: return float(str(val).replace('$', '').replace(',', '').strip())
-            except: return 0.0
-        df_fin['Monto'] = df_fin[col_precio].apply(clean_money)
-        
-        def cat_financiera(e):
-            e_upper = str(e).upper().strip()
-            if "FACTURADO" in e_upper or "RECIBIDO" in e_upper or "ENTREGADO" in e_upper: return "✅ Concretado"
-            if "PÉRDIDA TOTAL" in e_upper or "PERDIDA TOTAL" in e_upper: return "💥 PT"
-            if "PAGO DE DAÑOS" in e_upper or "PAGO DE DANOS" in e_upper: return "💸 PDD"
-            if "CANCELADO" in e_upper: return "🚫 Cancelado"
-            return "⚙️ En Proceso"
-            
-        df_fin['Cat_Fin'] = df_fin[col_estatus].apply(cat_financiera)
-        df_fin = df_fin[df_fin['F_Asig_D'].notna()].copy()
-        
-        if not df_fin.empty:
-            df_fin['Año'] = df_fin['F_Asig_D'].dt.year
-            df_fin['Mes_Sort'] = df_fin['F_Asig_D'].dt.strftime('%Y-%m')
-            meses_es_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
-            df_fin['Mes_Str'] = df_fin['F_Asig_D'].apply(lambda d: f"{meses_es_nombres[d.month]} {d.year}")
-            
-            pivot_fin = pd.pivot_table(df_fin, values='Monto', index=['Año', 'Mes_Sort', 'Mes_Str'], columns='Cat_Fin', aggfunc='sum', fill_value=0.0).reset_index()
-            
-            cols_5 = ['⚙️ En Proceso', '✅ Concretado', '💸 PDD', '💥 PT', '🚫 Cancelado']
-            for col_req in cols_5:
-                if col_req not in pivot_fin.columns: pivot_fin[col_req] = 0.0
-                
-            pivot_fin['📥 Asignado'] = pivot_fin['⚙️ En Proceso'] + pivot_fin['✅ Concretado'] + pivot_fin['💸 PDD'] + pivot_fin['💥 PT'] + pivot_fin['🚫 Cancelado']
-            
-            pivot_fin = pivot_fin.sort_values('Mes_Sort', ascending=True)
-            pivot_fin['📈 Acumulado Concretado'] = pivot_fin['✅ Concretado'].cumsum()
-            
-            cols_dinero = ['📥 Asignado', '⚙️ En Proceso', '✅ Concretado', '💸 PDD', '💥 PT', '🚫 Cancelado', '📈 Acumulado Concretado']
-            for c in cols_dinero:
-                pivot_fin[c] = pivot_fin[c].apply(lambda x: f"${x:,.2f}")
-                
-            pivot_fin = pivot_fin.sort_values('Mes_Sort', ascending=False)
-            cols_mostrar = ['Mes_Str'] + cols_dinero
-            
-            anios_disp = sorted(pivot_fin['Año'].unique(), reverse=True)
-            if anios_disp:
-                anio_actual = anios_disp[0]
-                df_actual = pivot_fin[pivot_fin['Año'] == anio_actual]
-                st.markdown(f"##### 📅 Año {anio_actual}")
-                st.dataframe(df_actual[cols_mostrar].rename(columns={'Mes_Str': 'Mes de Asignación'}), use_container_width=True, hide_index=True)
-                
-                for anio_ant in anios_disp[1:]:
-                    df_ant = pivot_fin[pivot_fin['Año'] == anio_ant]
-                    with st.expander(f"📁 Historial Financiero {anio_ant} (Da clic para expandir)"):
-                        st.dataframe(df_ant[cols_mostrar].rename(columns={'Mes_Str': 'Mes de Asignación'}), use_container_width=True, hide_index=True)
-        else:
-            st.info("No hay fechas de asignación válidas para procesar el financiero.")
-    else:
-        st.info("No hay datos para calcular.")
 
 # ------------------------------------------------------------------------------
 # --- VISTA 1.5: OPERACIÓN DEL DÍA ---
@@ -749,6 +749,14 @@ elif vista_actual == "🚚 Operación del Día":
         if sv.endswith('.0'): sv = sv[:-2]
         return f"{sv}_{' '.join(str(d).strip().upper().split())}"
 
+    # Diccionario de estados por taller para distinguir Ruta Local vs Foráneo
+    dict_est_taller_op = {}
+    if not df_catalogo.empty:
+        c_t_cat = next((c for c in df_catalogo.columns if 'TALLER' in str(c).upper()), None)
+        c_e_cat = next((c for c in df_catalogo.columns if 'ESTADO' in str(c).upper()), None)
+        if c_t_cat and c_e_cat:
+            dict_est_taller_op = dict(zip(df_catalogo[c_t_cat].astype(str).str.strip().str.upper(), df_catalogo[c_e_cat].astype(str).str.strip().str.upper()))
+
     df_op_dia = df_completo.copy() if not df_completo.empty else pd.DataFrame()
     
     if not df_op_dia.empty and col_estatus:
@@ -810,8 +818,8 @@ elif vista_actual == "🚚 Operación del Día":
             df_reembolsos_op = df_mon[df_mon[col_estatus].astype(str).str.upper() == "EN PROCESO DE REEMBOLSO"].copy()
             df_mon_normal = df_mon[df_mon[col_estatus].astype(str).str.upper() != "EN PROCESO DE REEMBOLSO"].copy()
 
-            # ORDEN DE EXPANDERS: 1. ENTREGADO, 2. EN TRANSITO, 3. EN PROCESAMIENTO
-            for est in ["ENTREGADO", "EN TRANSITO", "EN PROCESAMIENTO"]:
+            # 1. ENTREGADO Y 2. EN TRÁNSITO
+            for est in ["ENTREGADO", "EN TRANSITO"]:
                 df_est = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == est].copy()
                 if not df_est.empty:
                     if est == "ENTREGADO":
@@ -823,10 +831,6 @@ elif vista_actual == "🚚 Operación del Día":
                         titulo = f"🚚 En Tránsito / Paquetería | {len(df_est)} Partida(s)"
                         cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, col_estatus_envio, c_env_disp, col_comentarios]
                         rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', col_estatus_envio: 'Rastreo API', c_env_disp: 'F. Envío', col_comentarios: 'Observaciones'}
-                    elif est == "EN PROCESAMIENTO":
-                        titulo = f"🛒 Compras por Llegar | {len(df_est)} Partida(s)"
-                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, 'Proveedor', 'Llegada Est.', col_comentarios]
-                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', 'Llegada Est.': 'Llegada Prevista', col_comentarios: 'Observaciones'}
                             
                     with st.expander(titulo, expanded=True):
                         cols_finales = [c for c in cols_ver if c and c in df_est.columns]
@@ -836,7 +840,12 @@ elif vista_actual == "🚚 Operación del Día":
                             def format_rastreo(r):
                                 g = str(r.get('Guía', '')).strip()
                                 api = str(r.get('Rastreo API', '')).strip().lower()
-                                if g in ['', 'nan', 'none']: return "Ruta Local / Sin Guía"
+                                t_nom = str(r.get('Taller', '')).strip().upper()
+                                est_cdr = dict_est_taller_op.get(t_nom, "NUEVO LEON").replace("Ó", "O")
+                                es_local_cdr = ("NUEVO LEON" in est_cdr or "NL" in est_cdr or "N.L" in est_cdr)
+                                
+                                if g in ['', 'nan', 'none', 'NAN', 'None']:
+                                    return "🚚 Ruta Local / Sin Guía" if es_local_cdr else "⏳ Pendiente de Guía (Foráneo)"
                                 if api in ["falta información", "falta informacion", "", "nan", "none"]:
                                     fecha_envio_dt = parse_dt_safe_op(str(r.get('F. Envío', '')))
                                     if pd.notna(fecha_envio_dt) and (hoy_dt - fecha_envio_dt).days > 3: return "⚠️ API no responde"
@@ -844,6 +853,27 @@ elif vista_actual == "🚚 Operación del Día":
                                 return r.get('Rastreo API', '')
                             df_vista['Rastreo API'] = df_vista.apply(format_rastreo, axis=1)
                         st.dataframe(df_vista, use_container_width=True, hide_index=True)
+
+            # 3. EN PROCESAMIENTO SEPARADO EN: COMPRAS POR LLEGAR (CON PROVEEDOR) Y PIEZAS POR COMPRAR (SIN PROVEEDOR)
+            df_en_proc_op = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"].copy()
+            if not df_en_proc_op.empty:
+                mask_sin_prov = df_en_proc_op['Proveedor'].astype(str).str.strip().isin(['-', '', 'nan', 'None', 'NAN'])
+                df_con_prov_op = df_en_proc_op[~mask_sin_prov].copy()
+                df_sin_prov_op = df_en_proc_op[mask_sin_prov].copy()
+                
+                cols_ver_p = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, 'Proveedor', 'Llegada Est.', col_comentarios]
+                rename_dict_p = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', 'Llegada Est.': 'Llegada Prevista', col_comentarios: 'Observaciones'}
+                
+                if not df_con_prov_op.empty:
+                    with st.expander(f"🛒 Compras por Llegar (Con Proveedor) | {len(df_con_prov_op)} Partida(s)", expanded=True):
+                        cols_f = [c for c in cols_ver_p if c and c in df_con_prov_op.columns]
+                        st.dataframe(df_con_prov_op[cols_f].rename(columns=rename_dict_p), use_container_width=True, hide_index=True)
+                        
+                if not df_sin_prov_op.empty:
+                    cols_ver_sp = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_comentarios]
+                    with st.expander(f"⏳ Piezas Pendientes de Compra (Sin Proveedor) | {len(df_sin_prov_op)} Partida(s)", expanded=False):
+                        cols_f_sp = [c for c in cols_ver_sp if c and c in df_sin_prov_op.columns]
+                        st.dataframe(df_sin_prov_op[cols_f_sp].rename(columns=rename_dict_p), use_container_width=True, hide_index=True)
 
             if not df_reembolsos_op.empty:
                 st.markdown("---")

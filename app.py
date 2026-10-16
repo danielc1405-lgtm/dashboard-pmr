@@ -172,7 +172,8 @@ def obtener_dataframe(nombre_hoja, silent=False):
         datos = ws.get_all_values()
         if not datos: return pd.DataFrame()
         headers = [str(h).strip() for h in datos[0]]
-        return pd.DataFrame(datos[1:], columns=headers)
+        filas_limpias = [fila for fila in datos[1:] if any(str(celda).strip() for celda in fila)]
+        return pd.DataFrame(filas_limpias, columns=headers)
     except Exception as e:
         if not silent: st.error(f"Error cargando hoja {nombre_hoja}: {e}")
         return pd.DataFrame()
@@ -2844,8 +2845,11 @@ elif vista_actual == "🔍 Consultas":
                                         if estatus_sel_dios == "EN PROCESO DE CAMBIO":
                                             if fila_en_uni and col_estatus in encabezados_uni: celdas_a_actualizar_uni.append(gspread.Cell(row=fila_en_uni, col=encabezados_uni.index(col_estatus) + 1, value="EN PROCESO DE RECOLECCIÓN"))
                                             if fila_en_hist and col_estatus in encabezados_hist: celdas_a_actualizar_hist.append(gspread.Cell(row=fila_en_hist, col=encabezados_hist.index(col_estatus) + 1, value="EN PROCESO DE RECOLECCIÓN"))
-                                            if fila_en_uni: filas_nuevas_uni.append(crear_fila_clon(encabezados_uni, fila_en_uni, datos_uni))
-                                            if fila_en_hist: filas_nuevas_hist.append(crear_fila_clon(encabezados_hist, fila_en_hist, datos_hist))
+                                            # El clon (CAMBIO) es un pedido nuevo activo: SOLO debe insertarse en BD_UNIFICADA
+                                            if fila_en_uni:
+                                                filas_nuevas_uni.append(crear_fila_clon(encabezados_uni, fila_en_uni, datos_uni))
+                                            elif fila_en_hist:
+                                                filas_nuevas_uni.append(crear_fila_clon(encabezados_hist, fila_en_hist, datos_hist))
                                         else:
                                             for c in cols_dios:
                                                 if str(row_orig[c]) != str(row_mod[c]):
@@ -2944,7 +2948,11 @@ elif vista_actual == "🔍 Consultas":
                     if col_sin_comp:
                         df_comp_exp = df_compras[df_compras[col_sin_comp].astype(str).isin([str(s) for s in siniestros_filtrados])].copy()
                         if not df_comp_exp.empty:
-                            cols_comp = ['Siniestro', 'Taller', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Estatus Pago', 'Recibido']
+                            df_comp_exp['_F_Comp_Dt'] = df_comp_exp['Fecha Compra'].apply(parse_dt_safe_op) if 'Fecha Compra' in df_comp_exp.columns else pd.NaT
+                            df_comp_exp['_ETA_Num'] = pd.to_numeric(df_comp_exp.get('Tiempo Entrega (Días)', 0), errors='coerce').fillna(0)
+                            df_comp_exp['Llegada Est.'] = (df_comp_exp['_F_Comp_Dt'] + pd.to_timedelta(df_comp_exp['_ETA_Num'], unit='d')).dt.strftime('%d/%b/%y').fillna('-')
+                            
+                            cols_comp = ['Siniestro', 'Taller', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'Fecha Compra', 'Tiempo Entrega (Días)', 'Llegada Est.', 'Estatus Pago', 'Recibido']
                             df_comp_disp = df_comp_exp[[c for c in cols_comp if c in df_comp_exp.columns]].copy()
                             df_comp_disp.rename(columns={'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'Tiempo Entrega (Días)': 'ETA (Días)'}, inplace=True)
                             st.dataframe(df_comp_disp, hide_index=True, use_container_width=True)
@@ -3357,9 +3365,17 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
                     
                     if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
+                    rem_actual = str(row.get(col_remision, '')).strip() if col_remision else ''
                     if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                     if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                    if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                    if guia_actual != orig['guia']:
+                        cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                        if guia_actual not in ['', 'nan', 'None']: cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
+                    if rem_actual not in ['', 'nan', 'None'] and not orig['remision_bool']:
+                        cambios_a_guardar.setdefault(k, {})['remision_num'] = rem_actual
+                        cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
+                    if cambios_a_guardar.get(k, {}).get('estatus') in ['EN TRANSITO', 'ENTREGADO', 'RECIBIDO']:
+                        cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
         for df_venc in [df_editado_venc, df_editado_atrasadas]:
             if not df_venc.empty:

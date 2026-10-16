@@ -2324,7 +2324,7 @@ elif vista_actual == "🚚 Rutas":
     with tab_recolecciones:
         # Buscamos en df_recoleccion_total (que proviene de Unificada) 
         df_rec = df_recoleccion_total[df_recoleccion_total[col_estatus].astype(str).str.upper() == "EN PROCESO DE RECOLECCIÓN"].copy() if not df_recoleccion_total.empty and col_estatus else pd.DataFrame()
-        
+            
         # Le pegamos las de Histórico si es que andan por ahí
         if 'df_historico' in globals() and not df_historico.empty and col_estatus in df_historico.columns:
             df_rec_hist = df_historico[df_historico[col_estatus].astype(str).str.upper() == "EN PROCESO DE RECOLECCIÓN"].copy()
@@ -2344,9 +2344,9 @@ elif vista_actual == "🚚 Rutas":
                         col_desc: st.column_config.TextColumn("Descripción", disabled=True)
                     }
                     ed_rec = st.data_editor(df_taller[cols_ver], column_config=cfg_rec, hide_index=True, use_container_width=True, key=f"rec_{taller}")
-                    
+                        
                     notas_rec = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Pedir acuse de recibo físico", key=f"notas_rec_{taller}")
-                    
+                        
                     if st.button(f"➕ Enviar Selección a Ruta", key=f"btn_rec_{taller}"):
                         seleccionados = ed_rec[ed_rec['Enviar Hoy'] == True]
                         if not seleccionados.empty:
@@ -2356,7 +2356,7 @@ elif vista_actual == "🚚 Rutas":
                                 st.rerun()
                         else: st.warning("Selecciona al menos una pieza.")
 
-                        if st.button(f"🔙 El Taller se quedó la pieza (Regresar a Entregado)", key=f"btn_cancel_rec_{taller}"):
+                    if st.button(f"🔙 El Taller se quedó la pieza (Regresar a Entregado)", key=f"btn_cancel_rec_{taller}"):
                         seleccionados = ed_rec[ed_rec['Enviar Hoy'] == True]
                         if not seleccionados.empty:
                             try:

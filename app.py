@@ -2580,7 +2580,7 @@ elif vista_actual == "🚚 Rutas":
                     key="ed_tabla_piezas_cot"
                 )
                 
-                notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. NIP de tarjeta 4728 / Pedir factura")
+                notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Preguntar por  X / Pedir factura")
                 
                 btn_cot = st.form_submit_button("➕ Enviar Cotización a la Ruta", type="primary")
                 

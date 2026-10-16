@@ -127,9 +127,9 @@ permiso_edicion = st.session_state.get('permiso_edicion', True)
 modo_consulta = False
 
 opciones_menu = [
-    "📊 Analítico", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Directorio", 
+    "📊 Analítico", "🚚 Operación del Día", "⚙️ Panel Operativo", "🛒 Compras", "🏢 Directorio", 
     "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🚚 Rutas", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
-]
+]   
 
 # El parámetro vertical_alignment="center" alinea todo a la misma altura
 col_logo, col_menu, col_aseg, col_btn_ref, col_btn = st.columns([1.2, 5.5, 1.5, 0.4, 1.2], vertical_alignment="center")
@@ -213,7 +213,7 @@ if vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio", "�
     df_historico = cargar_historico()
 
 df_completo = df_uni.copy()
-if not df_historico.empty and vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio"]:
+if not df_historico.empty and vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio", "🚚 Operación del Día"]:
     df_completo = pd.concat([df_completo, df_historico], ignore_index=True)
 
 # Solo carga compras si la pestaña lo requiere
@@ -677,56 +677,168 @@ if vista_actual == "📊 Analítico":
     st.markdown("---")
 
     # --- 5. MONITOR LOGÍSTICO ---
-    st.markdown(f"#### 📋 5. Monitor Logístico en Curso ({aseguradora_sel.upper()})")
-    st.caption("Visión depurada de refacciones activas, agrupadas por su estatus logístico actual.")
-    if not df_proceso.empty:
-        estatus_validos = ["ENTREGADO", "EN TRANSITO", "EN PROCESAMIENTO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN"]
-        df_mon = df_proceso[df_proceso[col_estatus].astype(str).str.upper().isin(estatus_validos)].copy()
+    # ------------------------------------------------------------------------------
+# --- VISTA 1.5: OPERACIÓN DEL DÍA ---
+# ------------------------------------------------------------------------------
+elif vista_actual == "🚚 Operación del Día":
+    st.markdown("## 🚚 Monitor Logístico Global (Operación del Día)")
+    
+    # --- 1. MONITOR DE RUTA EN VIVO ---
+    doc = init_connection()
+    try:
+        ws_rutas = doc.worksheet("BD_RUTAS")
+        datos_rutas = ws_rutas.get_all_values()
+        df_rutas = pd.DataFrame(datos_rutas[1:], columns=[str(h).strip().upper() for h in datos_rutas[0]]) if len(datos_rutas) > 1 else pd.DataFrame()
+    except Exception as e:
+        df_rutas = pd.DataFrame()
+        
+    if not df_rutas.empty and 'ESTATUS' in df_rutas.columns:
+        fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
+        cond_pendientes = df_rutas['ESTATUS'].astype(str).str.upper() == 'PENDIENTE'
+        cond_hoy = df_rutas['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
+        
+        df_rutas_dia = df_rutas[cond_pendientes | cond_hoy].copy()
+        df_rutas_pendientes = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'PENDIENTE']
+        df_rutas_completados = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'COMPLETADO']
+        
+        paradas_pendientes = df_rutas_pendientes['ID_RUTA'].nunique() if 'ID_RUTA' in df_rutas_dia.columns else len(df_rutas_pendientes)
+        paradas_completadas = df_rutas_completados['ID_RUTA'].nunique() if 'ID_RUTA' in df_rutas_dia.columns else len(df_rutas_completados)
+        total_paradas = paradas_pendientes + paradas_completadas
+        
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("🚩 Viajes Asignados", total_paradas)
+        col_m2.metric("✅ Completados por Operador", paradas_completadas)
+        col_m3.metric("⏳ Pendientes en Calle", paradas_pendientes)
+        
+        if total_paradas > 0:
+            progreso = paradas_completadas / total_paradas
+            st.progress(progreso, text=f"Avance de Ruta: {int(progreso*100)}%")
+            
+            st.markdown("#### 📍 Destinos del Día")
+            df_resumen = df_rutas_dia.groupby('ID_RUTA').agg({
+                'TIPO_OPERACION': 'first', 'LUGAR': 'first', 'SINIESTRO': lambda x: ", ".join(x.unique()),
+                'VEHICULO': 'first', 'NOTA': 'first', 'PIEZA': 'count', 'ESTATUS': 'first'
+            }).reset_index()
+            
+            df_resumen['No.'] = range(1, len(df_resumen) + 1)
+            df_resumen['Estado'] = df_resumen['ESTATUS'].apply(lambda x: "✅ Completado" if str(x).strip().upper() == 'COMPLETADO' else "⏳ Pendiente")
+            df_resumen['Operación'] = df_resumen['TIPO_OPERACION'].str.upper() + " (" + df_resumen['PIEZA'].astype(str) + " pzas)"
+            
+            def extraer_destino(nota):
+                n = str(nota)
+                if "Llevar a: " in n: return n.split("Llevar a: ")[1].split(" | ")[0]
+                elif "Foráneo: " in n: return f"{n.split('Foráneo: ')[1].split(')')[0]} (Foráneo -> Base)"
+                return "Mismo Lugar"
+                
+            def extraer_instruccion(nota):
+                n = str(nota)
+                if " | " in n: return n.split(" | ", 1)[1]
+                elif "Llevar a: " not in n and "Foráneo: " not in n: return n
+                return ""
+                
+            def acortar_vehiculo(v_str):
+                partes = str(v_str).split('|')
+                if len(partes) >= 2: return f"{' '.join(partes[0].strip().split()[:2])} | {partes[1].strip()}"
+                return str(v_str)
+
+            df_resumen['Destino Final'] = df_resumen['NOTA'].apply(extraer_destino)
+            df_resumen['Instrucción'] = df_resumen['NOTA'].apply(extraer_instruccion)
+            df_resumen['Vehículo Corto'] = df_resumen['VEHICULO'].apply(acortar_vehiculo)
+            
+            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'Destino Final', 'Vehículo Corto', 'Instrucción', 'Estado']].rename(columns={'LUGAR': 'Lugar a Visitar', 'SINIESTRO': 'Siniestro(s)', 'Vehículo Corto': 'Vehículo'})
+            st.dataframe(df_destinos, hide_index=True, use_container_width=True)
+        else:
+            st.caption("No hay viajes activos despachados en este momento.")
+
+    st.markdown("---")
+    st.markdown("### 📦 Estatus de Piezas en Operación")
+    
+    df_op_dia = df_completo.copy() if not df_completo.empty else pd.DataFrame()
+    
+    if not df_op_dia.empty and col_estatus:
+        if col_estatus_envio:
+            def verificar_entrega_global(row):
+                rastreo = str(row.get(col_estatus_envio, '')).strip().lower()
+                est = str(row.get(col_estatus, '')).strip().upper()
+                if "delivery" in rastreo or "entregado" in rastreo:
+                    if est not in ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN", "PÉRDIDA TOTAL", "PAGO DE DAÑOS"]: return "ENTREGADO"
+                return row[col_estatus]
+            df_op_dia[col_estatus] = df_op_dia.apply(verificar_entrega_global, axis=1)
+
+        estatus_validos = ["ENTREGADO", "EN TRANSITO", "EN PROCESAMIENTO", "EN PROCESO DE REEMBOLSO"]
+        df_mon = df_op_dia[df_op_dia[col_estatus].astype(str).str.upper().isin(estatus_validos)].copy()
             
         if not df_mon.empty:
+            dict_prov_dia = {}; dict_llegada_dia = {}
+            if not df_compras.empty:
+                c_sin_a = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)
+                c_desc_a = next((c for c in df_compras.columns if "DESCRIPCI" in str(c).upper()), None)
+                if c_sin_a and c_desc_a:
+                    def gen_llave_ana(s, d):
+                        sv = str(s).strip().upper()
+                        if sv.endswith('.0'): sv = sv[:-2]
+                        return f"{sv}_{' '.join(str(d).strip().upper().split())}"
+                    df_c_ana = df_compras.copy()
+                    df_c_ana['LLAVE'] = df_c_ana.apply(lambda r: gen_llave_ana(r.get(c_sin_a,''), r.get(c_desc_a,'')), axis=1)
+                    dict_prov_dia = dict(zip(df_c_ana['LLAVE'], df_c_ana['Proveedor']))
+                    
+                    def parse_spanish_date_comp_a(d_str):
+                        if not isinstance(d_str, str): return pd.NaT
+                        d_str = d_str.lower().replace('-', '/') 
+                        meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+                        for text, num in meses.items():
+                            if text in d_str: d_str = d_str.replace(text, num); break
+                        try: return pd.to_datetime(d_str, format='%d/%m/%y', errors='coerce')
+                        except: return pd.NaT
+                    df_c_ana['Fecha_Compra_Dt'] = df_c_ana['Fecha Compra'].apply(parse_spanish_date_comp_a)
+                    df_c_ana['ETA_Num'] = pd.to_numeric(df_c_ana['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
+                    df_c_ana['Llegada_Calc'] = df_c_ana['Fecha_Compra_Dt'] + pd.to_timedelta(df_c_ana['ETA_Num'], unit='d')
+                    df_c_ana['Fecha Llegada'] = df_c_ana['Llegada_Calc'].dt.strftime('%d/%b/%y').fillna('-')
+                    dict_llegada_dia = dict(zip(df_c_ana['LLAVE'], df_c_ana['Fecha Llegada']))
+
+            def armar_vehiculo_dia(row):
+                m = str(row.get(col_marca, '')).strip().upper()
+                mod = str(row.get(col_modelo, '')).strip().upper()
+                vehiculo = mod if mod.startswith(m) and m != "" else f"{m} {mod}".strip()
+                if col_ano:
+                    ano = str(row.get(col_ano, '')).strip()
+                    if ano.endswith('.0'): ano = ano[:-2]
+                    if ano not in ['', 'NAN', 'NONE']: vehiculo += f" | {ano}"
+                return vehiculo
+
+            df_mon['Vehiculo_Info'] = df_mon.apply(armar_vehiculo_dia, axis=1)
             df_mon['LLAVE'] = df_mon.apply(lambda r: gen_llave_ana(r.get(col_id,''), r.get(col_desc,'')), axis=1)
-            df_mon['Proveedor'] = df_mon['LLAVE'].map(dict_prov_ana).fillna("-")
-            df_mon['Llegada Est.'] = df_mon['LLAVE'].map(dict_llegada_ana).fillna("-")
-                
-            c_env_disp = buscar_col_ana(["FECHA", "ENVIO"])
-            c_rec_disp = buscar_col_ana(["FECHA", "RECIB"])
-            if not c_rec_disp: c_rec_disp = buscar_col_ana(["FECHA", "ENTREG"])
-                
-            for est in estatus_validos:
-                df_est = df_mon[df_mon[col_estatus].astype(str).str.upper() == est].copy()
+            df_mon['Proveedor'] = df_mon['LLAVE'].map(dict_prov_dia).fillna("-")
+            df_mon['Llegada Est.'] = df_mon['LLAVE'].map(dict_llegada_dia).fillna("-")
+            df_mon['Aseguradora'] = df_mon.get(col_aseg, pd.Series(["MULTI"]*len(df_mon))).apply(lambda x: "MULTI" if "MULTI" in str(x).upper() else ("GNP" if "GNP" in str(x).upper() else "OTRA"))
+            
+            c_env_disp = next((c for c in df_mon.columns if "FECHA ENV" in str(c).upper()), None)
+            c_rec_disp = next((c for c in df_mon.columns if "FECHA REC" in str(c).upper() or "FECHA ENT" in str(c).upper()), None)
+            
+            df_reembolsos_op = df_mon[df_mon[col_estatus].astype(str).str.upper() == "EN PROCESO DE REEMBOLSO"].copy()
+            df_mon_normal = df_mon[df_mon[col_estatus].astype(str).str.upper() != "EN PROCESO DE REEMBOLSO"].copy()
+
+            # ORDEN DE EXPANDERS: 1. ENTREGADO, 2. EN TRANSITO, 3. EN PROCESAMIENTO
+            for est in ["ENTREGADO", "EN TRANSITO", "EN PROCESAMIENTO"]:
+                df_est = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == est].copy()
                 if not df_est.empty:
-                    if est == "EN PROCESAMIENTO":
-                        titulo = f"⚙️ En Procesamiento | {len(df_est)} Partida(s)"
-                        cols_ver = [col_taller, col_id, 'Vehiculo_Info', col_desc, 'Proveedor', 'Llegada Est.']
-                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', 'Llegada Est.': 'Llegada Prevista'}
+                    if est == "ENTREGADO":
+                        titulo = f"📥 Entregados a Taller (Pedir Recepción en Portal) | {len(df_est)} Partida(s)"
+                        if c_rec_disp: df_est[c_rec_disp] = df_est[c_rec_disp].apply(estandarizar_fechas_mx)
+                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, c_rec_disp, col_comentarios]
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', c_rec_disp: '📅 F. Entrega', col_comentarios: 'Observaciones'}
                     elif est == "EN TRANSITO":
-                        titulo = f"🚚 En Tránsito | {len(df_est)} Partida(s)"
-                        cols_ver = [col_taller, col_id, 'Vehiculo_Info']
-                        if col_paqueteria and col_paqueteria in df_est.columns: cols_ver.append(col_paqueteria)
-                        if col_guia and col_guia in df_est.columns: cols_ver.append(col_guia)
-                        if col_estatus_envio and col_estatus_envio in df_est.columns: cols_ver.append(col_estatus_envio)
-                        if c_env_disp and c_env_disp in df_est.columns: cols_ver.append(c_env_disp)
-                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_paqueteria: 'Paquetería', col_guia: 'Guía'}
-                        if col_estatus_envio: rename_dict[col_estatus_envio] = 'Rastreo API'
-                        if c_env_disp: rename_dict[c_env_disp] = 'F. Envío'
-                    elif est == "ENTREGADO":
-                        titulo = f"📥 Entregados a Taller (Pedir Recepción en Sistema) | {len(df_est)} Partida(s)"
-                        cols_ver = [col_taller, col_id, 'Vehiculo_Info']
-                        if col_paqueteria and col_paqueteria in df_est.columns: cols_ver.append(col_paqueteria)
-                        if col_guia and col_guia in df_est.columns: cols_ver.append(col_guia)
-                        # Quitamos Rastreo API y dejamos únicamente la Fecha de Entrega (Fecha Recibido)
-                        if c_rec_disp and c_rec_disp in df_est.columns:
-                            df_est[c_rec_disp] = df_est[c_rec_disp].apply(estandarizar_fechas_mx)
-                            cols_ver.append(c_rec_disp)
-                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_paqueteria: 'Paquetería', col_guia: 'Guía'}
-                        if c_rec_disp: rename_dict[c_rec_disp] = '📅 F. Entrega'
-                    else:
-                        titulo = f"⚙️ {est.title()} | {len(df_est)} Partida(s)"
-                        cols_ver = [col_taller, col_id, 'Vehiculo_Info', col_desc]
-                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza'}
+                        titulo = f"🚚 En Tránsito / Paquetería | {len(df_est)} Partida(s)"
+                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, col_estatus_envio, c_env_disp, col_comentarios]
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', col_estatus_envio: 'Rastreo API', c_env_disp: 'F. Envío', col_comentarios: 'Observaciones'}
+                    elif est == "EN PROCESAMIENTO":
+                        titulo = f"🛒 Compras por Llegar | {len(df_est)} Partida(s)"
+                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, 'Proveedor', 'Llegada Est.', col_comentarios]
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', 'Llegada Est.': 'Llegada Prevista', col_comentarios: 'Observaciones'}
                             
-                    with st.expander(titulo, expanded=(est in ["ENTREGADO", "EN TRANSITO"])):
-                        df_vista = df_est[cols_ver].copy()
+                    with st.expander(titulo, expanded=True):
+                        cols_finales = [c for c in cols_ver if c and c in df_est.columns]
+                        df_vista = df_est[cols_finales].copy()
                         df_vista.rename(columns=rename_dict, inplace=True)
                         if 'Rastreo API' in df_vista.columns:
                             def format_rastreo(r):
@@ -734,16 +846,23 @@ if vista_actual == "📊 Analítico":
                                 api = str(r.get('Rastreo API', '')).strip().lower()
                                 if g in ['', 'nan', 'none']: return "Ruta Local / Sin Guía"
                                 if api in ["falta información", "falta informacion", "", "nan", "none"]:
-                                    fecha_envio_str = str(r.get('F. Envío', ''))
-                                    fecha_envio_dt = parse_dt_safe_op(fecha_envio_str)
-                                    if pd.notna(fecha_envio_dt):
-                                        if (hoy_dt - fecha_envio_dt).days > 3: return "⚠️ API no responde (Revisar manual)"
+                                    fecha_envio_dt = parse_dt_safe_op(str(r.get('F. Envío', '')))
+                                    if pd.notna(fecha_envio_dt) and (hoy_dt - fecha_envio_dt).days > 3: return "⚠️ API no responde"
                                     return "Recién documentado (En sitio)"
                                 return r.get('Rastreo API', '')
                             df_vista['Rastreo API'] = df_vista.apply(format_rastreo, axis=1)
                         st.dataframe(df_vista, use_container_width=True, hide_index=True)
-        else: st.info("No hay pedidos activos en las etapas de flujo (Todos por confirmar, en PT o PDD).")
-    else: st.info(f"No hay pedidos activos para {aseguradora_sel}.")
+
+            if not df_reembolsos_op.empty:
+                st.markdown("---")
+                st.markdown("#### 💸 Reembolsos en Proceso (Aseguradora)")
+                cols_reemb = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_precio, col_comentarios]
+                cols_reemb_f = [c for c in cols_reemb if c and c in df_reembolsos_op.columns]
+                df_vista_reemb = df_reembolsos_op[cols_reemb_f].rename(columns={col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_precio: 'Costo de Pieza', col_comentarios: 'Observaciones'})
+                with st.expander(f"⚠️ En Proceso de Reembolso | {len(df_reembolsos_op)} Partida(s)", expanded=True):
+                    st.dataframe(df_vista_reemb, use_container_width=True, hide_index=True)
+        else: st.success("No hay operación logística pendiente en este momento.")
+    else: st.warning("No hay datos en la base principal.")
 
 # ------------------------------------------------------------------------------
 # --- VISTA 2: PANEL OPERATIVO ---
@@ -2073,99 +2192,7 @@ elif vista_actual == "🚚 Rutas":
     st.markdown("## 🚚 Despachador de Rutas (Logística Local - Nuevo León)")
     st.info("Selecciona los destinos que visitará el operador hoy. Desmarca las piezas que NO deseas enviar en este viaje.")
     
-    doc = init_connection()
-    
-    # --- 1. MONITOR EN VIVO ---
-    st.markdown("### 📡 Monitor de Ruta en Vivo")
-    try:
-        ws_rutas = doc.worksheet("BD_RUTAS")
-        datos_rutas = ws_rutas.get_all_values()
-        df_rutas = pd.DataFrame(datos_rutas[1:], columns=[str(h).strip().upper() for h in datos_rutas[0]]) if len(datos_rutas) > 1 else pd.DataFrame()
-    except Exception as e:
-        st.error(f"⚠️ No se encontró la hoja 'BD_RUTAS' en Google Sheets. Error: {e}")
-        df_rutas = pd.DataFrame()
-        
-    if not df_rutas.empty and 'ESTATUS' in df_rutas.columns:
-        # FILTRO INTELIGENTE: Dejar los pendientes (cualquier fecha) y los completados (solo HOY)
-        fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
-        cond_pendientes = df_rutas['ESTATUS'].astype(str).str.upper() == 'PENDIENTE'
-        cond_hoy = df_rutas['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
-        
-        df_rutas_dia = df_rutas[cond_pendientes | cond_hoy].copy()
-        
-        df_rutas_pendientes = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'PENDIENTE']
-        df_rutas_completados = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'COMPLETADO']
-        
-        if 'ID_RUTA' in df_rutas_dia.columns:
-            paradas_pendientes = df_rutas_pendientes['ID_RUTA'].nunique()
-            paradas_completadas = df_rutas_completados['ID_RUTA'].nunique()
-        else:
-            paradas_pendientes = len(df_rutas_pendientes)
-            paradas_completadas = len(df_rutas_completados)
-            
-        total_paradas = paradas_pendientes + paradas_completadas
-        
-        col_m1, col_m2, col_m3 = st.columns(3)
-        col_m1.metric("🚩 Viajes Asignados", total_paradas)
-        col_m2.metric("✅ Completados por Operador", paradas_completadas)
-        col_m3.metric("⏳ Pendientes en Calle", paradas_pendientes)
-        
-        if total_paradas > 0:
-            progreso = paradas_completadas / total_paradas
-            st.progress(progreso, text=f"Avance de Ruta: {int(progreso*100)}%")
-            
-            # --- NUEVA TABLA ENRIQUECIDA DE DESTINOS ---
-            st.markdown("#### 📍 Destinos del Día")
-            
-            # Agrupar usando el df filtrado (df_rutas_dia)
-            df_resumen = df_rutas_dia.groupby('ID_RUTA').agg({
-                'TIPO_OPERACION': 'first',
-                'LUGAR': 'first',
-                'SINIESTRO': lambda x: ", ".join(x.unique()),
-                'VEHICULO': 'first',
-                'NOTA': 'first', 
-                'PIEZA': 'count',
-                'ESTATUS': 'first'
-            }).reset_index()
-            
-            df_resumen['No.'] = range(1, len(df_resumen) + 1)
-            df_resumen['Estado'] = df_resumen['ESTATUS'].apply(lambda x: "✅ Completado" if str(x).strip().upper() == 'COMPLETADO' else "⏳ Pendiente")
-            df_resumen['Operación'] = df_resumen['TIPO_OPERACION'].str.upper() + " (" + df_resumen['PIEZA'].astype(str) + " pzas)"
-            
-            # --- FUNCIONES DE LIMPIEZA VISUAL ---
-            def extraer_destino(nota):
-                n = str(nota)
-                if "Llevar a: " in n: return n.split("Llevar a: ")[1].split(" | ")[0]
-                elif "Foráneo: " in n: return f"{n.split('Foráneo: ')[1].split(')')[0]} (Foráneo -> Base)"
-                return "Mismo Lugar"
-                
-            def extraer_instruccion(nota):
-                n = str(nota)
-                if " | " in n: return n.split(" | ", 1)[1]
-                elif "Llevar a: " not in n and "Foráneo: " not in n: return n
-                return ""
-                
-            def acortar_vehiculo(v_str):
-                partes = str(v_str).split('|')
-                if len(partes) >= 2:
-                    auto = partes[0].strip()
-                    palabras = auto.split()
-                    return f"{' '.join(palabras[:2]) if len(palabras) >= 2 else auto} | {partes[1].strip()}"
-                return str(v_str)
-
-            df_resumen['Destino Final'] = df_resumen['NOTA'].apply(extraer_destino)
-            df_resumen['Instrucción'] = df_resumen['NOTA'].apply(extraer_instruccion)
-            df_resumen['Vehículo Corto'] = df_resumen['VEHICULO'].apply(acortar_vehiculo)
-            
-            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'Destino Final', 'Vehículo Corto', 'Instrucción', 'Estado']].rename(
-                columns={'LUGAR': 'Lugar a Visitar', 'SINIESTRO': 'Siniestro(s)', 'Vehículo Corto': 'Vehículo'}
-            )
-            st.dataframe(df_destinos, hide_index=True, use_container_width=True)
-        else:
-            st.caption("No hay viajes activos despachados en este momento.")
-            
-    st.markdown("---")
-    
+       
     # --- FUNCIÓN MAESTRA DE DESPACHO ---
     def despachar_a_bd_rutas(df_seleccion, tipo_operacion, notas_general=""):
         if df_seleccion.empty: return False
@@ -2261,6 +2288,10 @@ elif vista_actual == "🚚 Rutas":
     # ---------------------------------------------------------
     with tab_entregas:
         df_ent = df_proceso[df_proceso[col_estatus].astype(str).str.upper() == "EN TRANSITO"].copy() if not df_proceso.empty and col_estatus else pd.DataFrame()
+        if not df_ent.empty and col_paqueteria in df_ent.columns:
+            # Excluir las que ya tienen paquetería asignada
+            df_ent = df_ent[df_ent[col_paqueteria].astype(str).str.strip().isin(['', 'nan', 'None', 'NAN'])]
+        
         if not df_ent.empty:
             df_ent['Enviar Hoy'] = False
             for taller, df_taller in df_ent.groupby(col_taller):
@@ -2323,6 +2354,31 @@ elif vista_actual == "🚚 Rutas":
                             if despachar_a_bd_rutas(df_envio, "recoleccion", notas_rec):
                                 st.success("¡Recolección asignada al operador!")
                                 st.rerun()
+                        else: st.warning("Selecciona al menos una pieza.")
+
+                        if st.button(f"🔙 El Taller se quedó la pieza (Regresar a Entregado)", key=f"btn_cancel_rec_{taller}"):
+                        seleccionados = ed_rec[ed_rec['Enviar Hoy'] == True]
+                        if not seleccionados.empty:
+                            try:
+                                doc = init_connection()
+                                ws_u = doc.worksheet("BD_UNIFICADA")
+                                datos_u = ws_u.get_all_values()
+                                head_u = [str(h).strip().upper() for h in datos_u[0]]
+                                idx_est = head_u.index(col_estatus.upper()) + 1
+                                idx_sin = head_u.index(col_id.upper())
+                                idx_desc = head_u.index(col_desc.upper())
+                                celdas_upd = []
+                                for _, r_sel in seleccionados.iterrows():
+                                    for i, r_u in enumerate(datos_u[1:]):
+                                        if str(r_u[idx_sin]).strip().upper() == str(r_sel[col_id]).strip().upper() and str(r_u[idx_desc]).strip().upper() == str(r_sel[col_desc]).strip().upper():
+                                            celdas_upd.append(gspread.Cell(row=i+2, col=idx_est, value="ENTREGADO"))
+                                if celdas_upd:
+                                    ws_u.update_cells(celdas_upd, value_input_option='USER_ENTERED')
+                                    st.success("Pieza regresada a 'Entregado' exitosamente.")
+                                    st.cache_data.clear()
+                                    time.sleep(1)
+                                    st.rerun()
+                            except Exception as e: st.error(f"Error: {e}")
                         else: st.warning("Selecciona al menos una pieza.")
         else:
             st.success("No hay recolecciones con estatus 'EN PROCESO DE RECOLECCIÓN'.")
@@ -2470,12 +2526,15 @@ elif vista_actual == "🚚 Rutas":
         # Selector fuera del form para que muestre/oculte los campos de nuevo proveedor al instante
         col_sel_p, col_vin_p = st.columns(2)
         with col_sel_p:
-            prov_eventual = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", ["-- ESCRIBIR NUEVO --"] + lista_provs_cot, key="sel_prov_cot_ruta")
+            prov_eventual = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", ["", "-- ESCRIBIR NUEVO --"] + lista_provs_cot, key="sel_prov_cot_ruta")
         with col_vin_p:
             vin_eventual = st.text_input("VIN / Número de Serie (Opcional)", key="vin_cot_ruta")
 
-        with st.form("form_cotizacion_ruta", clear_on_submit=False):
-            nuevo_prov = ""
+        if prov_eventual == "":
+            st.info("👆 Selecciona un lugar arriba para habilitar la captura.")
+        else:
+            with st.form("form_cotizacion_ruta", clear_on_submit=False):
+                nuevo_prov = ""
             nueva_suc_cot = ""
             nuevas_marcas_cot = ""
             nuevo_tel_cot = ""

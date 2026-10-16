@@ -1404,6 +1404,31 @@ elif vista_actual == "🛒 Compras":
         st.markdown("#### 📦 Próximas Llegadas (Línea de Tiempo)")
         if not df_c.empty:
             df_c['Recibido_Bool'] = df_c['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
+            
+            # Cruzar con BD_UNIFICADA: si ya tiene Remisión, Guía o ya está EN TRANSITO / ENTREGADO / RECIBIDO / FACTURADO, ya salió de compras
+            if not df_completo.empty:
+                c_id_u = buscar_columna_compras(df_completo, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+                c_de_u = buscar_columna_compras(df_completo, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
+                c_es_u = buscar_columna_compras(df_completo, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])
+                c_re_u = buscar_columna_compras(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
+                c_gu_u = buscar_columna_compras(df_completo, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"])
+                
+                def llave_cruce_c(s, d):
+                    sv = str(s).strip().upper()
+                    if sv.endswith('.0'): sv = sv[:-2]
+                    return f"{sv}_{' '.join(str(d).strip().upper().split())}"
+                
+                llaves_despachadas = set()
+                for _, ru in df_completo.iterrows():
+                    est_u = str(ru.get(c_es_u, '')).strip().upper() if c_es_u else ''
+                    rem_u = str(ru.get(c_re_u, '')).strip() if c_re_u else ''
+                    gui_u = str(ru.get(c_gu_u, '')).strip() if c_gu_u else ''
+                    if est_u in ['EN TRANSITO', 'ENTREGADO', 'RECIBIDO', 'FACTURADO', 'CANCELADO', 'PÉRDIDA TOTAL', 'PAGO DE DAÑOS'] or (rem_u not in ['', 'nan', 'None', 'NAN']) or (gui_u not in ['', 'nan', 'None', 'NAN']):
+                        llaves_despachadas.add(llave_cruce_c(ru.get(c_id_u, ''), ru.get(c_de_u, '')))
+                
+                df_c['_llave_c'] = df_c.apply(lambda r: llave_cruce_c(r.get('Siniestro', ''), r.get('Descripción Pieza', '')), axis=1)
+                df_c.loc[df_c['_llave_c'].isin(llaves_despachadas), 'Recibido_Bool'] = True
+                
             if not modo_consulta: df_c = df_c[df_c['Recibido_Bool'] == False].copy()
             if df_c.empty: st.success("✅ Todo está al día. No hay pedidos pendientes de recepción con estos filtros.")
             else:

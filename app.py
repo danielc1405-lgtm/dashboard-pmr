@@ -144,11 +144,10 @@ with col_menu:
     vista_actual = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
 
 with col_aseg:
-    # Quitamos "📝 Remisiones" de esta lista para que el selector desaparezca en esa pestaña
-    # y nos permita ver todas las aseguradoras a la vez.
     vistas_con_aseguradora = ["📊 Analítico", "⚙️ Panel Operativo", "🧾 Facturación", "🔍 Consultas"]
     if vista_actual in vistas_con_aseguradora:
-        aseguradora_sel = st.selectbox("Aseguradora", ["Multiasistencias", "GNP"], label_visibility="collapsed")
+        opciones_aseg = ["Multiasistencias", "GNP", "Todas (Consolidado)"] if vista_actual == "📊 Analítico" else ["Multiasistencias", "GNP"]
+        aseguradora_sel = st.selectbox("Aseguradora", opciones_aseg, label_visibility="collapsed")
     else:
         aseguradora_sel = "MULTI" 
 
@@ -207,21 +206,31 @@ df_uni = cargar_base_viva()
 if not df_uni.empty and 'Siniestro Relacionado' in df_uni.columns: 
     df_uni.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
 
-# Solo carga el histórico si la pestaña realmente lo requiere
+# Carga inteligente de histórico
 df_historico = pd.DataFrame()
-if vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio", "📝 Remisiones", "🛠️ Cuartel General"] or modo_consulta:
+if vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio", "📝 Remisiones", "🛠️ Cuartel General", "🚚 Operación del Día", "⚙️ Panel Operativo", "🚚 Rutas"] or modo_consulta:
     df_historico = cargar_historico()
+    if not df_historico.empty and 'Siniestro Relacionado' in df_historico.columns and 'Siniestro' not in df_historico.columns:
+        df_historico.rename(columns={'Siniestro Relacionado': 'Siniestro'}, inplace=True)
 
 df_completo = df_uni.copy()
-if not df_historico.empty and vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio", "🚚 Operación del Día"]:
-    df_completo = pd.concat([df_completo, df_historico], ignore_index=True)
+if not df_historico.empty:
+    if vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio"]:
+        df_completo = pd.concat([df_completo, df_historico], ignore_index=True)
+    elif vista_actual in ["⚙️ Panel Operativo", "🚚 Operación del Día", "🚚 Rutas"]:
+        # Rescatamos del histórico los reembolsos o recolecciones que sigan activos
+        c_est_h = next((c for c in df_historico.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
+        if c_est_h:
+            df_hist_activos = df_historico[df_historico[c_est_h].astype(str).str.upper().str.contains("PROCESO DE REEMBOLSO|PROCESO DE RECOLECC", na=False)].copy()
+            if not df_hist_activos.empty:
+                df_completo = pd.concat([df_completo, df_hist_activos], ignore_index=True)
 
-# Solo carga compras si la pestaña lo requiere
-df_compras = cargar_compras() if vista_actual in ["🛒 Compras", "📊 Analítico", "⚙️ Panel Operativo", "🚚 Rutas"] else pd.DataFrame()
+# Solo carga compras si la pestaña lo requiere (Incluye Operación del Día)
+df_compras = cargar_compras() if vista_actual in ["🛒 Compras", "📊 Analítico", "🚚 Operación del Día", "⚙️ Panel Operativo", "🚚 Rutas"] else pd.DataFrame()
 
 # Solo carga catálogos si la pestaña los usa
 df_catalogo = pd.DataFrame(); df_proveedores = pd.DataFrame()
-if vista_actual in ["⚙️ Panel Operativo", "🛒 Compras", "🚚 Rutas", "🏢 Directorio", "📝 Remisiones", "🔍 Consultas"]:
+if vista_actual in ["⚙️ Panel Operativo", "🚚 Operación del Día", "🛒 Compras", "🚚 Rutas", "🏢 Directorio", "📝 Remisiones", "🔍 Consultas"]:
     df_catalogo, df_proveedores = cargar_catalogos()
 
 # Solo carga inventario si entras a su pestaña
@@ -229,11 +238,16 @@ df_inventario = cargar_inventario() if vista_actual == "📦 Inventario" else pd
 
 # --- PROCESAMIENTO DE DATOS ---
 aseguradora_filtro = aseguradora_sel.strip().upper()
-palabra_clave_aseg = "MULTI" if "MULTI" in aseguradora_filtro else "GNP"
+if "TODAS" in aseguradora_filtro:
+    palabra_clave_aseg = "TODAS"
+elif "MULTI" in aseguradora_filtro:
+    palabra_clave_aseg = "MULTI"
+else:
+    palabra_clave_aseg = "GNP"
 
 if not df_completo.empty:
     col_aseg_val = next((c for c in df_completo.columns if "ASEGURADORA" in str(c).upper()), None)
-    if col_aseg_val:
+    if col_aseg_val and palabra_clave_aseg != "TODAS":
         df_trabajo_completo = df_completo[df_completo[col_aseg_val].astype(str).str.upper().str.contains(palabra_clave_aseg, na=False)].copy()
         if df_trabajo_completo.empty: df_trabajo_completo = df_completo.copy()
     else: df_trabajo_completo = df_completo.copy()
@@ -451,46 +465,18 @@ if not df_proceso.empty and col_estatus_envio and col_estatus:
 # --- VISTA 1: ANALÍTICO ---
 # ------------------------------------------------------------------------------
 if vista_actual == "📊 Analítico":
-    st.markdown("## 📊 Rendimiento de Operación")
+    st.markdown(f"## 📊 Rendimiento de Operación ({aseguradora_sel})")
     
-    # --- PREPARACIÓN DE DATOS CRUZADOS (Proveedor, Costo, ETA) ---
-    dict_prov_ana = {}; dict_costo_ana = {}; dict_llegada_ana = {}
-    if not df_compras.empty:
-        c_sin_a = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)
-        c_desc_a = next((c for c in df_compras.columns if "DESCRIPCI" in str(c).upper()), None)
-        if c_sin_a and c_desc_a:
-            def gen_llave_ana(s, d):
-                sv = str(s).strip().upper()
-                if sv.endswith('.0'): sv = sv[:-2]
-                return f"{sv}_{' '.join(str(d).strip().upper().split())}"
-            df_c_ana = df_compras.copy()
-            df_c_ana['LLAVE'] = df_c_ana.apply(lambda r: gen_llave_ana(r.get(c_sin_a,''), r.get(c_desc_a,'')), axis=1)
-            dict_prov_ana = dict(zip(df_c_ana['LLAVE'], df_c_ana['Proveedor']))
-            def sf(x):
-                try: return float(str(x).replace('$','').replace(',','').strip())
-                except: return 0.0
-            dict_costo_ana = dict(zip(df_c_ana['LLAVE'], df_c_ana['Costo Compra'].apply(sf)))
-            
-            def parse_spanish_date_comp_a(d_str):
-                if not isinstance(d_str, str): return pd.NaT
-                d_str = d_str.lower().replace('-', '/') 
-                meses = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
-                for text, num in meses.items():
-                    if text in d_str: d_str = d_str.replace(text, num); break
-                try: return pd.to_datetime(d_str, format='%d/%m/%y', errors='coerce')
-                except: return pd.NaT
-            
-            df_c_ana['Fecha_Compra_Dt'] = df_c_ana['Fecha Compra'].apply(parse_spanish_date_comp_a)
-            df_c_ana['ETA_Num'] = pd.to_numeric(df_c_ana['Tiempo Entrega (Días)'], errors='coerce').fillna(0)
-            df_c_ana['Llegada_Calc'] = df_c_ana['Fecha_Compra_Dt'] + pd.to_timedelta(df_c_ana['ETA_Num'], unit='d')
-            df_c_ana['Fecha Llegada'] = df_c_ana['Llegada_Calc'].dt.strftime('%d/%b/%y').fillna('-')
-            dict_llegada_ana = dict(zip(df_c_ana['LLAVE'], df_c_ana['Fecha Llegada']))
+    def gen_llave_ana(s, d):
+        sv = str(s).strip().upper()
+        if sv.endswith('.0'): sv = sv[:-2]
+        return f"{sv}_{' '.join(str(d).strip().upper().split())}"
 
     # --- 1. VELOCIDAD LOGÍSTICA ---
     st.markdown("#### ⏱️ 1. Velocidad Logística (Desde el 04/Sep/2026)")
-    st.caption("Promedios de tiempo calculados con datos reales desde el inicio del uso del sistema.")
-    if col_asignacion and col_fecha_confi and not df_completo.empty:
-        df_vel = df_completo.copy()
+    st.caption("Promedios de tiempo calculados con datos reales de la aseguradora seleccionada.")
+    if col_asignacion and col_fecha_confi and not df_trabajo.empty:
+        df_vel = df_trabajo.copy()
         
         def buscar_col_ana(keywords):
             for c in df_vel.columns:
@@ -541,11 +527,14 @@ if vista_actual == "📊 Analítico":
     c_graf1, c_graf2 = st.columns([1, 1.2])
     with c_graf1:
         st.markdown("#### 🌪️ 2. Embudo de Operación (Activos)")
-        if not df_proceso.empty:
-            f_conf = len(df_proceso[df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR")])
-            f_proc = len(df_proceso[df_proceso[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"])
-            f_tran = len(df_proceso[df_proceso[col_estatus].astype(str).str.upper() == "EN TRANSITO"])
-            f_ent = len(df_proceso[df_proceso[col_estatus].astype(str).str.upper() == "ENTREGADO"])
+        if not df_uni.empty and col_estatus:
+            df_emb = df_uni.copy()
+            if col_aseg and palabra_clave_aseg != "TODAS":
+                df_emb = df_emb[df_emb[col_aseg].astype(str).str.upper().str.contains(palabra_clave_aseg, na=False)]
+            f_conf = len(df_emb[df_emb[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR", na=False)])
+            f_proc = len(df_emb[df_emb[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"])
+            f_tran = len(df_emb[df_emb[col_estatus].astype(str).str.upper() == "EN TRANSITO"])
+            f_ent = len(df_emb[df_emb[col_estatus].astype(str).str.upper() == "ENTREGADO"])
             
             etapas_fun = ["Por Confirmar", "En Procesamiento", "En Tránsito", "Entregados a Taller"]
             valores_fun = [f_conf, f_proc, f_tran, f_ent]
@@ -559,125 +548,127 @@ if vista_actual == "📊 Analítico":
             
     with c_graf2:
         st.markdown("#### 🏆 3. Análisis Histórico por Marca (Top 4)")
-        if col_marca and col_modelo and not df_completo.empty:
-            df_m = df_completo.copy()
-            c_asig_h = buscar_col_ana(["ASIGNACION"])
-            c_env_h = buscar_col_ana(["FECHA", "ENVIO"])
-            
-            if c_asig_h and c_env_h:
-                df_m['FA'] = safe_apply_date(df_m, c_asig_h)
-                df_m['FE'] = safe_apply_date(df_m, c_env_h)
-                df_m['D_AE'] = (df_m['FE'] - df_m['FA']).dt.days
-            else: df_m['D_AE'] = pd.Series(dtype=float)
-            
+        if col_marca and col_modelo and not df_trabajo.empty:
+            df_m = df_trabajo.copy()
             df_m['M_Lim'] = df_m[col_marca].astype(str).str.strip().str.upper()
             df_m['Mod_Lim'] = df_m[col_modelo].astype(str).str.strip().str.upper()
             
             df_m = df_m[(df_m['M_Lim'] != '') & (df_m['M_Lim'] != 'NAN') & (df_m['M_Lim'] != 'S/D')]
             df_m = df_m[(df_m['Mod_Lim'] != '') & (df_m['Mod_Lim'] != 'NAN') & (df_m['Mod_Lim'] != 'S/D')]
+
+            def agrupar_pieza_familia(desc):
+                d = str(desc).strip().upper()
+                if not d or d in ['NAN', 'NONE', 'S/D']: return "OTRAS"
+                if "QUINTA PUERTA" in d or "5TA PUERTA" in d or "TAPA CAJUELA" in d or "CAJUELA" in d: return "Tapa Cajuela / 5ta Puerta"
+                if "PUERTA" in d or "PTA." in d or d.startswith("PTA "): return "Puertas"
+                if "SALPICADERA" in d: return "Salpicaderas"
+                if "GUARDAFANGO" in d or "TOLVA LODERA" in d or "LODERA" in d: return "Tolvas / Guardafangos"
+                if "FACIA" in d or "FASCIA" in d: return "Fascias"
+                if "FARO" in d: return "Faros"
+                if "CALAVERA" in d: return "Calaveras"
+                if "COFRE" in d: return "Cofres"
+                if "PARRILLA" in d: return "Parrillas"
+                if "ESPEJO" in d: return "Espejos"
+                if "RADIADOR" in d or "CONDENSADOR" in d: return "Radiadores / Condensadores"
+                if "TOLVA" in d: return "Tolvas"
+                if "MOLDURA" in d or d.startswith("MOLD."): return "Molduras"
+                if "REFUERZO" in d: return "Refuerzos"
+                if "SOPORTE" in d or d.startswith("SOP."): return "Soportes"
+                return d.split()[0].title()
             
-            top_brands = df_m.groupby('M_Lim').agg(
-                Siniestros=('M_Lim', 'count'),
-                Prom_Dias=('D_AE', lambda x: x[(x>=0) & (x<=365)].mean())
-            ).reset_index().sort_values('Siniestros', ascending=False).head(4)
+            if col_desc and col_desc in df_m.columns:
+                df_m['Familia_Pieza'] = df_m[col_desc].apply(agrupar_pieza_familia)
+            else:
+                df_m['Familia_Pieza'] = "S/D"
+            
+            top_brands = df_m.groupby('M_Lim').agg(Siniestros=('M_Lim', 'count')).reset_index().sort_values('Siniestros', ascending=False).head(4)
             
             for _, b_row in top_brands.iterrows():
                 b_name = b_row['M_Lim']
                 b_tot = b_row['Siniestros']
-                b_prom = round(b_row['Prom_Dias'], 1) if pd.notna(b_row['Prom_Dias']) else "N/A"
                 
                 df_mod = df_m[df_m['M_Lim'] == b_name]
-                top_models = df_mod['Mod_Lim'].value_counts().head(3)
-                modelos_str = ", ".join([f"{mod} ({cnt})" for mod, cnt in top_models.items()])
+                top_models = df_mod['Mod_Lim'].value_counts().head(4)
+                top_piezas = df_mod[df_mod['Familia_Pieza'] != 'OTRAS']['Familia_Pieza'].value_counts().head(5)
                 
-                with st.expander(f"🚗 **{b_name}** | {b_tot} Siniestros Históricos", expanded=True):
-                    st.caption(f"**Modelos más movidos:** {modelos_str}")
-                    st.markdown(f"**⏱️ Tiempo de Respuesta (Asignación ➔ Envío):** `{b_prom} días`")
+                with st.expander(f"🚗 **{b_name}** | {b_tot} Partidas Históricas", expanded=True):
+                    cm1, cm2 = st.columns(2)
+                    with cm1:
+                        st.markdown("**🚘 Modelos más movidos:**")
+                        for mod, cnt in top_models.items():
+                            st.markdown(f"- {mod} (`{cnt}`)")
+                    with cm2:
+                        st.markdown("**🛠️ Top 5 Piezas:**")
+                        for pza, cnt_p in top_piezas.items():
+                            st.markdown(f"- {pza} (`{cnt_p}`)")
 
     st.markdown("---")
 
     # --- 4. RESUMEN FINANCIERO MENSUAL ---
     st.markdown("#### 💰 4. Resumen Financiero Mensual")
-    st.caption("Evolución de montos de venta basada en la Fecha de Asignación. (Ordenado del más reciente al más antiguo)")
+    st.caption("Evolución de montos basada en la Fecha de Asignación (La suma de las 5 columnas equivale al total Asignado).")
     
-    if col_asignacion and col_precio and col_estatus:
-        # Fusión Inteligente de la BD Viva y el Histórico
-        frames = [df_completo] if not df_completo.empty else []
-        if 'df_historico' in globals() and not df_historico.empty:
-            frames.append(df_historico)
+    if col_asignacion and col_precio and col_estatus and not df_trabajo.empty:
+        df_fin = df_trabajo.copy()
+        df_fin['F_Asig_D'] = safe_apply_date(df_fin, col_asignacion)
+        
+        def clean_money(val):
+            try: return float(str(val).replace('$', '').replace(',', '').strip())
+            except: return 0.0
+        df_fin['Monto'] = df_fin[col_precio].apply(clean_money)
+        
+        def cat_financiera(e):
+            e_upper = str(e).upper().strip()
+            if "FACTURADO" in e_upper or "RECIBIDO" in e_upper or "ENTREGADO" in e_upper: return "✅ Concretado"
+            if "PÉRDIDA TOTAL" in e_upper or "PERDIDA TOTAL" in e_upper: return "💥 PT"
+            if "PAGO DE DAÑOS" in e_upper or "PAGO DE DANOS" in e_upper: return "💸 PDD"
+            if "CANCELADO" in e_upper: return "🚫 Cancelado"
+            return "⚙️ En Proceso"
             
-        df_fin = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        df_fin['Cat_Fin'] = df_fin[col_estatus].apply(cat_financiera)
+        df_fin = df_fin[df_fin['F_Asig_D'].notna()].copy()
         
         if not df_fin.empty:
-            df_fin['F_Asig_D'] = safe_apply_date(df_fin, col_asignacion)
+            df_fin['Año'] = df_fin['F_Asig_D'].dt.year
+            df_fin['Mes_Sort'] = df_fin['F_Asig_D'].dt.strftime('%Y-%m')
+            meses_es_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
+            df_fin['Mes_Str'] = df_fin['F_Asig_D'].apply(lambda d: f"{meses_es_nombres[d.month]} {d.year}")
             
-            def clean_money(val):
-                try: return float(str(val).replace('$', '').replace(',', '').strip())
-                except: return 0.0
-            df_fin['Monto'] = df_fin[col_precio].apply(clean_money)
+            pivot_fin = pd.pivot_table(df_fin, values='Monto', index=['Año', 'Mes_Sort', 'Mes_Str'], columns='Cat_Fin', aggfunc='sum', fill_value=0.0).reset_index()
             
-            def cat_financiera(e):
-                e_upper = str(e).upper().strip()
-                if "FACTURADO" in e_upper or "RECIBIDO" in e_upper or "ENTREGADO" in e_upper: return "✅ Concretado"
-                if "PÉRDIDA TOTAL" in e_upper or "PERDIDA TOTAL" in e_upper: return "💥 PT"
-                if "PAGO DE DAÑOS" in e_upper or "PAGO DE DANOS" in e_upper: return "💸 PDD"
-                if "CANCELADO" in e_upper: return "🚫 Cancelado"
-                return "⚙️ En Proceso"
+            cols_5 = ['⚙️ En Proceso', '✅ Concretado', '💸 PDD', '💥 PT', '🚫 Cancelado']
+            for col_req in cols_5:
+                if col_req not in pivot_fin.columns: pivot_fin[col_req] = 0.0
                 
-            df_fin['Cat_Fin'] = df_fin[col_estatus].apply(cat_financiera)
+            pivot_fin['📥 Asignado'] = pivot_fin['⚙️ En Proceso'] + pivot_fin['✅ Concretado'] + pivot_fin['💸 PDD'] + pivot_fin['💥 PT'] + pivot_fin['🚫 Cancelado']
             
-            # Filtramos fechas inválidas
-            df_fin = df_fin[df_fin['F_Asig_D'].notna()].copy()
+            pivot_fin = pivot_fin.sort_values('Mes_Sort', ascending=True)
+            pivot_fin['📈 Acumulado Concretado'] = pivot_fin['✅ Concretado'].cumsum()
             
-            if not df_fin.empty:
-                df_fin['Año'] = df_fin['F_Asig_D'].dt.year
-                df_fin['Mes_Sort'] = df_fin['F_Asig_D'].dt.strftime('%Y-%m')
-                meses_es_nombres = {1:'Enero', 2:'Febrero', 3:'Marzo', 4:'Abril', 5:'Mayo', 6:'Junio', 7:'Julio', 8:'Agosto', 9:'Septiembre', 10:'Octubre', 11:'Noviembre', 12:'Diciembre'}
-                df_fin['Mes_Str'] = df_fin['F_Asig_D'].apply(lambda d: f"{meses_es_nombres[d.month]} {d.year}")
+            cols_dinero = ['📥 Asignado', '⚙️ En Proceso', '✅ Concretado', '💸 PDD', '💥 PT', '🚫 Cancelado', '📈 Acumulado Concretado']
+            for c in cols_dinero:
+                pivot_fin[c] = pivot_fin[c].apply(lambda x: f"${x:,.2f}")
                 
-                # Tabla Pivot
-                pivot_fin = pd.pivot_table(df_fin, values='Monto', index=['Año', 'Mes_Sort', 'Mes_Str'], columns='Cat_Fin', aggfunc='sum', fill_value=0).reset_index()
+            pivot_fin = pivot_fin.sort_values('Mes_Sort', ascending=False)
+            cols_mostrar = ['Mes_Str'] + cols_dinero
+            
+            anios_disp = sorted(pivot_fin['Año'].unique(), reverse=True)
+            if anios_disp:
+                anio_actual = anios_disp[0]
+                df_actual = pivot_fin[pivot_fin['Año'] == anio_actual]
+                st.markdown(f"##### 📅 Año {anio_actual}")
+                st.dataframe(df_actual[cols_mostrar].rename(columns={'Mes_Str': 'Mes de Asignación'}), use_container_width=True, hide_index=True)
                 
-                for col_req in ['✅ Concretado', '⚙️ En Proceso', '💥 PT', '💸 PDD', '🚫 Cancelado']:
-                    if col_req not in pivot_fin.columns: pivot_fin[col_req] = 0.0
-                    
-                # Acumulado requiere orden ASCENDENTE primero para que la suma corra hacia el futuro
-                pivot_fin = pivot_fin.sort_values('Mes_Sort', ascending=True)
-                pivot_fin['📈 Acumulado Concretado'] = pivot_fin['✅ Concretado'].cumsum()
-                
-                # Formato Dinero sin diagonal
-                cols_dinero = ['✅ Concretado', '⚙️ En Proceso', '💥 PT', '💸 PDD', '🚫 Cancelado', '📈 Acumulado Concretado']
-                for c in cols_dinero:
-                    pivot_fin[c] = pivot_fin[c].apply(lambda x: f"${x:,.2f}")
-                    
-                # AHORA VOLTEAMOS LA TABLA: Orden DESCENDENTE para la pantalla (El más nuevo arriba)
-                pivot_fin = pivot_fin.sort_values('Mes_Sort', ascending=False)
-                cols_mostrar = ['Mes_Str'] + cols_dinero
-                
-                # LÓGICA DE VISUALIZACIÓN POR AÑOS (Expander para viejos)
-                anios_disp = sorted(pivot_fin['Año'].unique(), reverse=True)
-                
-                if anios_disp:
-                    # Año Más Reciente (Abierto y Visible)
-                    anio_actual = anios_disp[0]
-                    df_actual = pivot_fin[pivot_fin['Año'] == anio_actual]
-                    st.markdown(f"##### 📅 Año {anio_actual}")
-                    st.dataframe(df_actual[cols_mostrar].rename(columns={'Mes_Str': 'Mes de Asignación'}), use_container_width=True, hide_index=True)
-                    
-                    # Años Anteriores (En Expanders)
-                    for anio_ant in anios_disp[1:]:
-                        df_ant = pivot_fin[pivot_fin['Año'] == anio_ant]
-                        with st.expander(f"📁 Historial Financiero {anio_ant} (Da clic para expandir)"):
-                            st.dataframe(df_ant[cols_mostrar].rename(columns={'Mes_Str': 'Mes de Asignación'}), use_container_width=True, hide_index=True)
-            else:
-                st.info("No hay fechas de asignación válidas para procesar el financiero.")
+                for anio_ant in anios_disp[1:]:
+                    df_ant = pivot_fin[pivot_fin['Año'] == anio_ant]
+                    with st.expander(f"📁 Historial Financiero {anio_ant} (Da clic para expandir)"):
+                        st.dataframe(df_ant[cols_mostrar].rename(columns={'Mes_Str': 'Mes de Asignación'}), use_container_width=True, hide_index=True)
         else:
-            st.info("No hay datos para calcular.")
+            st.info("No hay fechas de asignación válidas para procesar el financiero.")
+    else:
+        st.info("No hay datos para calcular.")
 
-    st.markdown("---")
-
-    # --- 5. MONITOR LOGÍSTICO ---
-    # ------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # --- VISTA 1.5: OPERACIÓN DEL DÍA ---
 # ------------------------------------------------------------------------------
 elif vista_actual == "🚚 Operación del Día":
@@ -689,7 +680,7 @@ elif vista_actual == "🚚 Operación del Día":
         ws_rutas = doc.worksheet("BD_RUTAS")
         datos_rutas = ws_rutas.get_all_values()
         df_rutas = pd.DataFrame(datos_rutas[1:], columns=[str(h).strip().upper() for h in datos_rutas[0]]) if len(datos_rutas) > 1 else pd.DataFrame()
-    except Exception as e:
+    except Exception:
         df_rutas = pd.DataFrame()
         
     if not df_rutas.empty and 'ESTATUS' in df_rutas.columns:
@@ -751,8 +742,13 @@ elif vista_actual == "🚚 Operación del Día":
             st.caption("No hay viajes activos despachados en este momento.")
 
     st.markdown("---")
-    st.markdown("### 📦 Estatus de Piezas en Operación")
+    st.markdown("### 📦 Estatus de Piezas en Operación (Multiasistencias + GNP)")
     
+    def gen_llave_op_dia(s, d):
+        sv = str(s).strip().upper()
+        if sv.endswith('.0'): sv = sv[:-2]
+        return f"{sv}_{' '.join(str(d).strip().upper().split())}"
+
     df_op_dia = df_completo.copy() if not df_completo.empty else pd.DataFrame()
     
     if not df_op_dia.empty and col_estatus:
@@ -774,12 +770,8 @@ elif vista_actual == "🚚 Operación del Día":
                 c_sin_a = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)
                 c_desc_a = next((c for c in df_compras.columns if "DESCRIPCI" in str(c).upper()), None)
                 if c_sin_a and c_desc_a:
-                    def gen_llave_ana(s, d):
-                        sv = str(s).strip().upper()
-                        if sv.endswith('.0'): sv = sv[:-2]
-                        return f"{sv}_{' '.join(str(d).strip().upper().split())}"
                     df_c_ana = df_compras.copy()
-                    df_c_ana['LLAVE'] = df_c_ana.apply(lambda r: gen_llave_ana(r.get(c_sin_a,''), r.get(c_desc_a,'')), axis=1)
+                    df_c_ana['LLAVE'] = df_c_ana.apply(lambda r: gen_llave_op_dia(r.get(c_sin_a,''), r.get(c_desc_a,'')), axis=1)
                     dict_prov_dia = dict(zip(df_c_ana['LLAVE'], df_c_ana['Proveedor']))
                     
                     def parse_spanish_date_comp_a(d_str):
@@ -807,7 +799,7 @@ elif vista_actual == "🚚 Operación del Día":
                 return vehiculo
 
             df_mon['Vehiculo_Info'] = df_mon.apply(armar_vehiculo_dia, axis=1)
-            df_mon['LLAVE'] = df_mon.apply(lambda r: gen_llave_ana(r.get(col_id,''), r.get(col_desc,'')), axis=1)
+            df_mon['LLAVE'] = df_mon.apply(lambda r: gen_llave_op_dia(r.get(col_id,''), r.get(col_desc,'')), axis=1)
             df_mon['Proveedor'] = df_mon['LLAVE'].map(dict_prov_dia).fillna("-")
             df_mon['Llegada Est.'] = df_mon['LLAVE'].map(dict_llegada_dia).fillna("-")
             df_mon['Aseguradora'] = df_mon.get(col_aseg, pd.Series(["MULTI"]*len(df_mon))).apply(lambda x: "MULTI" if "MULTI" in str(x).upper() else ("GNP" if "GNP" in str(x).upper() else "OTRA"))
@@ -1104,14 +1096,14 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_reembolsos.empty:
             if permiso_edicion:
                 df_reembolsos['Marcar Reembolsado'] = False
-                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_estatus] if c in df_reembolsos.columns] + ['Marcar Reembolsado'] + [c for c in ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_comentarios] if c in df_reembolsos.columns]
+                cols_visibles = [c for c in [col_id, col_taller, col_cant, col_desc, col_origen, col_precio, col_estatus] if c in df_reembolsos.columns] + ['Marcar Reembolsado'] + [c for c in ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_comentarios] if c in df_reembolsos.columns]
                 config_reemb = base_config.copy()
                 config_reemb.update({"Marcar Reembolsado": st.column_config.CheckboxColumn("✅ Reembolsado", default=False)})
-                df_editado_reemb = st.data_editor(df_reembolsos[cols_visibles], column_config=config_reemb, disabled=[c for c in cols_visibles if c not in ['Marcar Reembolsado', col_comentarios]], hide_index=True, use_container_width=True, key="ed_reemb")
+                df_editado_reemb = st.data_editor(df_reembolsos[cols_visibles], column_config=config_reemb, disabled=[c for c in cols_visibles if c not in ['Marcar Reembolsado', col_paqueteria, col_guia, col_comentarios]], hide_index=True, use_container_width=True, key="ed_reemb")
                 for col in df_reembolsos.columns: 
                     if col not in df_editado_reemb.columns: df_editado_reemb[col] = df_reembolsos[col].values
             else:
-                cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_estatus, 'Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_comentarios] if c in df_reembolsos.columns]
+                cols_visibles = [c for c in [col_id, col_taller, col_cant, col_desc, col_origen, col_precio, col_estatus, 'Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_comentarios] if c in df_reembolsos.columns]
                 st.dataframe(df_reembolsos[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
 
     df_recoleccion = df_recoleccion_total.copy()
@@ -2280,22 +2272,43 @@ elif vista_actual == "🚚 Rutas":
             return False
         return False
 
+    doc = init_connection()
+
     # --- PESTAÑAS DE OPERACIÓN ---
     tab_entregas, tab_recolecciones, tab_compras, tab_cotizaciones = st.tabs(["📦 Entregas (CDR)", "↩️ Recolecciones (CDR)", "🛒 Compras", "🔎 Cotizaciones"])
     
     # ---------------------------------------------------------
-    # TAB 1: ENTREGAS
+    # TAB 1: ENTREGAS (SOLO NUEVO LEÓN Y SIN PAQUETERÍA)
     # ---------------------------------------------------------
     with tab_entregas:
-        df_ent = df_proceso[df_proceso[col_estatus].astype(str).str.upper() == "EN TRANSITO"].copy() if not df_proceso.empty and col_estatus else pd.DataFrame()
-        if not df_ent.empty and col_paqueteria in df_ent.columns:
-            # Excluir las que ya tienen paquetería asignada
-            df_ent = df_ent[df_ent[col_paqueteria].astype(str).str.strip().isin(['', 'nan', 'None', 'NAN'])]
+        st.caption("Muestra únicamente piezas con remisión generada (**EN TRÁNSITO**), sin guía de paquetería y cuyo taller pertenece a **Nuevo León**.")
+        # Unificamos ambas aseguradoras para que el despachador vea todas las entregas locales juntas
+        df_base_ent = df_completo.copy() if not df_completo.empty else pd.DataFrame()
+        df_ent = df_base_ent[df_base_ent[col_estatus].astype(str).str.upper() == "EN TRANSITO"].copy() if not df_base_ent.empty and col_estatus else pd.DataFrame()
         
         if not df_ent.empty:
+            # 1. Excluir las que ya tienen paquetería o número de guía
+            if col_paqueteria and col_paqueteria in df_ent.columns:
+                df_ent = df_ent[df_ent[col_paqueteria].astype(str).str.strip().isin(['', 'nan', 'None', 'NAN'])]
+            if col_guia and col_guia in df_ent.columns:
+                df_ent = df_ent[df_ent[col_guia].astype(str).str.strip().isin(['', 'nan', 'None', 'NAN'])]
+                
+            # 2. Filtrar estrictamente talleres de NUEVO LEÓN
+            if not df_catalogo.empty and col_taller:
+                c_tall_cat = next((c for c in df_catalogo.columns if 'TALLER' in str(c).upper()), None)
+                c_est_cat = next((c for c in df_catalogo.columns if 'ESTADO' in str(c).upper()), None)
+                if c_tall_cat and c_est_cat:
+                    dict_est_cdr = dict(zip(df_catalogo[c_tall_cat].astype(str).str.strip().str.upper(), df_catalogo[c_est_cat].astype(str).str.strip().str.upper()))
+                    def es_taller_nl(t_val):
+                        est_t = dict_est_cdr.get(str(t_val).strip().upper(), "NUEVO LEON").replace("Ó", "O")
+                        return ("NUEVO LEON" in est_t or "NL" in est_t or "N.L" in est_t)
+                    df_ent = df_ent[df_ent[col_taller].apply(es_taller_nl)].copy()
+
+        if not df_ent.empty:
+            df_ent['Vehiculo_Info'] = df_ent.apply(armar_vehiculo, axis=1)
             df_ent['Enviar Hoy'] = False
             for taller, df_taller in df_ent.groupby(col_taller):
-                with st.expander(f"🏢 {taller} | {len(df_taller)} piezas en sistema", expanded=False):
+                with st.expander(f"🏢 {taller} | {len(df_taller)} pieza(s) lista(s) para ruta local", expanded=False):
                     cols_ver = [c for c in ['Enviar Hoy', col_id, 'Vehiculo_Info', col_desc, col_estatus, col_remision] if c in df_taller.columns]
                     cfg = {
                         "Enviar Hoy": st.column_config.CheckboxColumn("🚚 Enviar Hoy", default=False),
@@ -2316,23 +2329,16 @@ elif vista_actual == "🚚 Rutas":
                                 st.rerun()
                         else: st.warning("Selecciona al menos una pieza.")
         else:
-            st.success("No hay piezas 'En Tránsito' pendientes de envío a CDR.")
+            st.success("No hay piezas 'En Tránsito' de Nuevo León pendientes de envío local a CDR.")
 
     # ---------------------------------------------------------
     # TAB 2: RECOLECCIONES
     # ---------------------------------------------------------
     with tab_recolecciones:
-        # Buscamos en df_recoleccion_total (que proviene de Unificada) 
-        df_rec = df_recoleccion_total[df_recoleccion_total[col_estatus].astype(str).str.upper() == "EN PROCESO DE RECOLECCIÓN"].copy() if not df_recoleccion_total.empty and col_estatus else pd.DataFrame()
-            
-        # Le pegamos las de Histórico si es que andan por ahí
-        if 'df_historico' in globals() and not df_historico.empty and col_estatus in df_historico.columns:
-            df_rec_hist = df_historico[df_historico[col_estatus].astype(str).str.upper() == "EN PROCESO DE RECOLECCIÓN"].copy()
-            if not df_rec_hist.empty:
-                if 'Vehiculo_Info' not in df_rec_hist.columns: df_rec_hist['Vehiculo_Info'] = "Vehículo Histórico S/D"
-                df_rec = pd.concat([df_rec, df_rec_hist], ignore_index=True)
+        df_rec = df_completo[df_completo[col_estatus].astype(str).str.upper() == "EN PROCESO DE RECOLECCIÓN"].copy() if not df_completo.empty and col_estatus else pd.DataFrame()
 
         if not df_rec.empty:
+            df_rec['Vehiculo_Info'] = df_rec.apply(armar_vehiculo, axis=1)
             df_rec['Enviar Hoy'] = False
             for taller, df_taller in df_rec.groupby(col_taller):
                 with st.expander(f"↩️ {taller} | {len(df_taller)} piezas a recolectar", expanded=False):
@@ -2360,7 +2366,6 @@ elif vista_actual == "🚚 Rutas":
                         seleccionados = ed_rec[ed_rec['Enviar Hoy'] == True]
                         if not seleccionados.empty:
                             try:
-                                doc = init_connection()
                                 ws_u = doc.worksheet("BD_UNIFICADA")
                                 datos_u = ws_u.get_all_values()
                                 head_u = [str(h).strip().upper() for h in datos_u[0]]
@@ -2387,55 +2392,51 @@ elif vista_actual == "🚚 Rutas":
     # TAB 3: COMPRAS (ALIMENTADO DIRECTO DE PRÓXIMAS LLEGADAS)
     # ---------------------------------------------------------
     with tab_compras:
-        st.caption("Lista de compras activas en **📦 Próximas Llegadas** pendientes de recolectar con proveedor (unifica GNP y Multiasistencia). Al enviarlas con el operador, se marcarán automáticamente como **Recibidas** en el módulo de Compras.")
+        st.caption("Lista de compras activas en **📦 Próximas Llegadas** pendientes de recolectar con proveedor. Al enviarlas con el operador, se marcarán automáticamente como **Recibidas** en el módulo de Compras.")
         if not df_compras.empty and not df_completo.empty:
             def gen_llave_rutas(id_val, desc_val):
                 id_str = str(id_val).strip().upper()
                 if id_str.endswith('.0'): id_str = id_str[:-2]
                 return f"{id_str}_{' '.join(str(desc_val).strip().upper().split())}"
 
-            # 1. Tomamos de BD_COMPRAS únicamente las que siguen en 'Próximas Llegadas' (Recibido == False)
-            df_c_pend = df_compras.copy()
-            df_c_pend['_GS_Row_Comp'] = df_c_pend.index + 2
-            df_c_pend['Recibido_Bool'] = df_c_pend['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
-            df_c_pend = df_c_pend[df_c_pend['Recibido_Bool'] == False].copy()
-            # Ignorar proveedores que no se recolectan con chofer local (ej. eBay, Paqueterías web, Inventario propio)
-            df_c_pend = df_c_pend[
-                df_c_pend['Proveedor'].notna() & 
-                (~df_c_pend['Proveedor'].astype(str).str.strip().str.upper().isin(['', 'NAN', 'NONE', 'INVENTARIO', 'EBAY']))
+            df_c_todas_pend = df_compras.copy()
+            df_c_todas_pend['_GS_Row_Comp'] = df_c_todas_pend.index + 2
+            df_c_todas_pend['Recibido_Bool'] = df_c_todas_pend['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
+            df_c_todas_pend = df_c_todas_pend[df_c_todas_pend['Recibido_Bool'] == False].copy()
+            
+            total_en_prox_llegadas = len(df_c_todas_pend)
+            excluidas_ebay = len(df_c_todas_pend[df_c_todas_pend['Proveedor'].astype(str).str.strip().str.upper().isin(['EBAY', 'INVENTARIO'])])
+
+            df_c_pend = df_c_todas_pend[
+                df_c_todas_pend['Proveedor'].notna() & 
+                (~df_c_todas_pend['Proveedor'].astype(str).str.strip().str.upper().isin(['', 'NAN', 'NONE', 'INVENTARIO', 'EBAY']))
             ].copy()
 
             if not df_c_pend.empty:
                 df_c_pend['LLAVE'] = df_c_pend.apply(lambda r: gen_llave_rutas(r.get('Siniestro', ''), r.get('Descripción Pieza', '')), axis=1)
 
-                # 2. Cruzamos con df_completo (ambas aseguradoras: GNP y MULTI) para verificar estatus real y excluir lo que ya está EN TRANSITO / con Guía
                 df_base_global = df_completo.copy()
                 c_id_g = next((c for c in df_base_global.columns if "SINIESTRO" in str(c).upper()), col_id)
                 c_desc_g = next((c for c in df_base_global.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), col_desc)
                 c_est_g = next((c for c in df_base_global.columns if "ESTATUS" in str(c).upper() and "ENV" not in str(c).upper() and "PAGO" not in str(c).upper()), col_estatus)
-                c_guia_g = next((c for c in df_base_global.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), col_guia)
-                c_rem_g = next((c for c in df_base_global.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), col_remision)
                 c_vin_g = next((c for c in df_base_global.columns if "VIN" in str(c).upper() or "SERIE" in str(c).upper()), col_vin)
 
                 df_base_global['LLAVE'] = df_base_global.apply(lambda r: gen_llave_rutas(r.get(c_id_g, ''), r.get(c_desc_g, '')), axis=1)
                 
                 dict_est_g = dict(zip(df_base_global['LLAVE'], df_base_global[c_est_g].astype(str).str.strip().str.upper())) if c_est_g else {}
-                dict_guia_g = dict(zip(df_base_global['LLAVE'], df_base_global[c_guia_g].astype(str).str.strip())) if c_guia_g else {}
-                dict_rem_g = dict(zip(df_base_global['LLAVE'], df_base_global[c_rem_g].astype(str).str.strip())) if c_rem_g else {}
                 dict_vin_g = dict(zip(df_base_global['LLAVE'], df_base_global[c_vin_g].astype(str).str.strip())) if c_vin_g else {}
 
                 df_c_pend['Estatus_Real'] = df_c_pend['LLAVE'].map(dict_est_g).fillna("EN PROCESAMIENTO")
-                df_c_pend['Guia_Real'] = df_c_pend['LLAVE'].map(dict_guia_g).fillna("")
-                df_c_pend['Rem_Real'] = df_c_pend['LLAVE'].map(dict_rem_g).fillna("")
                 df_c_pend['VIN_Real'] = df_c_pend['LLAVE'].map(dict_vin_g).fillna("S/D")
 
-                # 3. FILTRO ESTRICTO: Solo mostrar piezas que NO estén ya en tránsito, entregadas, canceladas ni tengan guía o remisión
-                estatus_excluidos = ["EN TRANSITO", "ENTREGADO", "RECIBIDO", "FACTURADO", "CANCELADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS"]
-                cond_activo = ~df_c_pend['Estatus_Real'].isin(estatus_excluidos)
-                cond_sin_guia = df_c_pend['Guia_Real'].isin(["", "nan", "None", "NAN"])
-                cond_sin_rem = df_c_pend['Rem_Real'].isin(["", "nan", "None", "NAN"])
+                estatus_excluidos = ["ENTREGADO", "RECIBIDO", "FACTURADO", "CANCELADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS"]
+                df_comp_rutas = df_c_pend[~df_c_pend['Estatus_Real'].isin(estatus_excluidos)].copy()
 
-                df_comp_rutas = df_c_pend[cond_activo & cond_sin_guia & cond_sin_rem].copy()
+                # --- RESUMEN VISUAL DE CONTEO ---
+                kc1, kc2, kc3 = st.columns(3)
+                kc1.metric("📦 Total en Próximas Llegadas", total_en_prox_llegadas)
+                kc2.metric("🚚 Listas para Recolección", f"{len(df_comp_rutas)} pza(s) en {df_comp_rutas['Proveedor'].nunique()} prov.")
+                kc3.metric("🌐 Excluidas (eBay / Inv.)", excluidas_ebay)
 
                 if not df_comp_rutas.empty:
                     df_comp_rutas['Enviar Hoy'] = False
@@ -2458,7 +2459,7 @@ elif vista_actual == "🚚 Rutas":
                             }
                             ed_comp = st.data_editor(df_prov[cols_ver], column_config=cfg_comp, hide_index=True, use_container_width=True, key=f"comp_{prov}")
                             
-                            notas_comp = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Pagar en efectivo al llegar / Pedir factura", key=f"notas_comp_{prov}")
+                            notas_comp = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Pagar en efectivo al llegar / Ir a Papelería Angie", key=f"notas_comp_{prov}")
                             
                             if st.button(f"➕ Enviar al Operador a {prov} y Marcar Recibido", type="primary", key=f"btn_comp_{prov}"):
                                 seleccionados = ed_comp[ed_comp['Enviar Hoy'] == True]
@@ -2469,9 +2470,7 @@ elif vista_actual == "🚚 Rutas":
                                     if col_desc: df_envio[col_desc] = df_envio['Pieza_Col']
                                     if col_vin: df_envio[col_vin] = df_envio['VIN_Real']
                                     
-                                    # 1. Enviamos a BD_RUTAS
                                     if despachar_a_bd_rutas(df_envio, "compra", notas_comp):
-                                        # 2. Marcamos automáticamente 'SI' en la columna Recibido de BD_COMPRAS (Próximas Llegadas)
                                         try:
                                             ws_c_upd = doc.worksheet("BD_COMPRAS")
                                             headers_c_upd = [str(h).strip().upper() for h in ws_c_upd.row_values(1)]
@@ -2523,7 +2522,6 @@ elif vista_actual == "🚚 Rutas":
                         dict_dir_cot[llave_p] = str(rp_c.get(c_dir_c, '')).strip()
                 lista_provs_cot = sorted(list(set(lista_provs_cot)))
 
-        # Selector fuera del form para que muestre/oculte los campos de nuevo proveedor al instante
         col_sel_p, col_vin_p = st.columns(2)
         with col_sel_p:
             prov_eventual = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", ["", "-- ESCRIBIR NUEVO --"] + lista_provs_cot, key="sel_prov_cot_ruta")
@@ -2535,135 +2533,132 @@ elif vista_actual == "🚚 Rutas":
         else:
             with st.form("form_cotizacion_ruta", clear_on_submit=False):
                 nuevo_prov = ""
-            nueva_suc_cot = ""
-            nuevas_marcas_cot = ""
-            nuevo_tel_cot = ""
-            nuevo_tiempo_cot = "Inmediata"
-            nueva_cond_cot = "Contra Entrega"
-            nuevos_dias_cot = 0
-            guardar_en_directorio = True
+                nueva_suc_cot = ""
+                nuevas_marcas_cot = ""
+                nuevo_tel_cot = ""
+                nuevo_tiempo_cot = "Inmediata"
+                nueva_cond_cot = "Contra Entrega"
+                nuevos_dias_cot = 0
+                guardar_en_directorio = True
 
-            if prov_eventual == "-- ESCRIBIR NUEVO --":
-                st.markdown("##### 🏢 Datos del Nuevo Proveedor (Se registrará en `BD_PROVEEDORES`)")
-                cp1, cp2, cp3 = st.columns([2, 1.5, 1.5])
-                nuevo_prov = cp1.text_input("Nombre del Proveedor * (Ej. GOVI)").strip().upper()
-                nueva_suc_cot = cp2.text_input("Sucursal / Zona (Ej. STO DOMINGO)").strip().upper()
-                nuevo_tel_cot = cp3.text_input("Teléfono / Contacto").strip()
-
-                cp4, cp5 = st.columns([2.5, 1.5])
-                dir_eventual = cp4.text_input("Dirección Completa (Para navegación del chofer) *").strip()
-                nuevas_marcas_cot = cp5.text_input("Marcas / Especialidad", placeholder="Ej. Suspensión, General").strip().upper()
-
-                cp6, cp7, cp8 = st.columns(3)
-                nuevo_tiempo_cot = cp6.selectbox("Tiempo Promedio de Entrega", ["Inmediata", "1 a 2 días", "3 a 5 días", "Más de 5 días", "Bajo Pedido"])
-                nueva_cond_cot = cp7.selectbox("Condición de Pago", ["Contra Entrega", "Pago Anticipado", "Anticipo", "Crédito", "Pago en Plataforma"])
-                nuevos_dias_cot = cp8.number_input("Días Crédito", min_value=0, value=0, step=1)
-                guardar_en_directorio = st.checkbox("☑️ Guardar este proveedor en el Directorio (BD_PROVEEDORES)", value=True)
-            else:
-                dir_precargada = dict_dir_cot.get(prov_eventual, "")
-                dir_eventual = st.text_input("Dirección o Zona (Para que navegue el chofer)", value=dir_precargada)
-
-            st.markdown("##### ⚙️ Piezas a buscar / comprar")
-            st.caption("Puedes capturar solo el **# Parte**, solo la **Descripción**, o ambos. Usa el signo **`+`** abajo de la tabla para agregar más renglones.")
-            
-            df_piezas_base = pd.DataFrame([
-                {"No. Parte": "", "Descripción de la Pieza": ""},
-                {"No. Parte": "", "Descripción de la Pieza": ""}
-            ])
-            ed_piezas_cot = st.data_editor(
-                df_piezas_base,
-                num_rows="dynamic",
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "No. Parte": st.column_config.TextColumn("🔢 # Parte / SKU", width="medium"),
-                    "Descripción de la Pieza": st.column_config.TextColumn("🛠️ Descripción de la Pieza", width="large")
-                },
-                key="ed_tabla_piezas_cot"
-            )
-            
-            notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. NIP de tarjeta 4728 / Pedir factura")
-            
-            btn_cot = st.form_submit_button("➕ Enviar Cotización a la Ruta", type="primary")
-            
-            if btn_cot:
                 if prov_eventual == "-- ESCRIBIR NUEVO --":
-                    nombre_final = f"{nuevo_prov} - {nueva_suc_cot}" if nueva_suc_cot else nuevo_prov
+                    st.markdown("##### 🏢 Datos del Nuevo Proveedor (Se registrará en `BD_PROVEEDORES`)")
+                    cp1, cp2, cp3 = st.columns([2, 1.5, 1.5])
+                    nuevo_prov = cp1.text_input("Nombre del Proveedor * (Ej. GOVI)").strip().upper()
+                    nueva_suc_cot = cp2.text_input("Sucursal / Zona (Ej. STO DOMINGO)").strip().upper()
+                    nuevo_tel_cot = cp3.text_input("Teléfono / Contacto").strip()
+
+                    cp4, cp5 = st.columns([2.5, 1.5])
+                    dir_eventual = cp4.text_input("Dirección Completa (Para navegación del chofer) *").strip()
+                    nuevas_marcas_cot = cp5.text_input("Marcas / Especialidad", placeholder="Ej. Suspensión, General").strip().upper()
+
+                    cp6, cp7, cp8 = st.columns(3)
+                    nuevo_tiempo_cot = cp6.selectbox("Tiempo Promedio de Entrega", ["Inmediata", "1 a 2 días", "3 a 5 días", "Más de 5 días", "Bajo Pedido"])
+                    nueva_cond_cot = cp7.selectbox("Condición de Pago", ["Contra Entrega", "Pago Anticipado", "Anticipo", "Crédito", "Pago en Plataforma"])
+                    nuevos_dias_cot = cp8.number_input("Días Crédito", min_value=0, value=0, step=1)
+                    guardar_en_directorio = st.checkbox("☑️ Guardar este proveedor en el Directorio (BD_PROVEEDORES)", value=True)
                 else:
-                    nombre_final = prov_eventual
+                    dir_precargada = dict_dir_cot.get(prov_eventual, "")
+                    dir_eventual = st.text_input("Dirección o Zona (Para que navegue el chofer)", value=dir_precargada)
 
-                # Construir la lista de piezas combinando # Parte y Descripción
-                piezas_lista = []
-                for _, r_pz in ed_piezas_cot.iterrows():
-                    np_val = str(r_pz.get("No. Parte", "")).strip().upper()
-                    ds_val = str(r_pz.get("Descripción de la Pieza", "")).strip().upper()
-                    if np_val == "NAN": np_val = ""
-                    if ds_val == "NAN": ds_val = ""
-                    
-                    if np_val and ds_val:
-                        piezas_lista.append(f"[{np_val}] {ds_val}")
-                    elif np_val:
-                        piezas_lista.append(f"NP: {np_val}")
-                    elif ds_val:
-                        piezas_lista.append(ds_val)
+                st.markdown("##### ⚙️ Piezas a buscar / comprar")
+                st.caption("Puedes capturar solo el **# Parte**, solo la **Descripción**, o ambos. Usa el signo **`+`** abajo de la tabla para agregar más renglones.")
+                
+                df_piezas_base = pd.DataFrame([
+                    {"No. Parte": "", "Descripción de la Pieza": ""},
+                    {"No. Parte": "", "Descripción de la Pieza": ""}
+                ])
+                ed_piezas_cot = st.data_editor(
+                    df_piezas_base,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "No. Parte": st.column_config.TextColumn("🔢 # Parte / SKU", width="medium"),
+                        "Descripción de la Pieza": st.column_config.TextColumn("🛠️ Descripción de la Pieza", width="large")
+                    },
+                    key="ed_tabla_piezas_cot"
+                )
+                
+                notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. NIP de tarjeta 4728 / Pedir factura")
+                
+                btn_cot = st.form_submit_button("➕ Enviar Cotización a la Ruta", type="primary")
+                
+                if btn_cot:
+                    if prov_eventual == "-- ESCRIBIR NUEVO --":
+                        nombre_final = f"{nuevo_prov} - {nueva_suc_cot}" if nueva_suc_cot else nuevo_prov
+                    else:
+                        nombre_final = prov_eventual
 
-                if not nombre_final or len(piezas_lista) == 0:
-                    st.error("⚠️ El Lugar y al menos 1 Pieza (No. Parte o Descripción) son obligatorios.")
-                else:
-                    # 1. Si es nuevo proveedor y está marcada la casilla, guardarlo completo en BD_PROVEEDORES
-                    if prov_eventual == "-- ESCRIBIR NUEVO --" and guardar_en_directorio and nuevo_prov:
-                        try:
-                            ws_p = doc.worksheet("BD_PROVEEDORES")
-                            headers_p = [str(h).strip() for h in ws_p.row_values(1)]
-                            fila_prov = [""] * max(len(headers_p), 10)
-                            
-                            def safe_idx_p(name):
-                                for idx_h, h_val in enumerate(headers_p):
-                                    if h_val.upper() == name.upper():
-                                        return idx_h
-                                return -1
+                    piezas_lista = []
+                    for _, r_pz in ed_piezas_cot.iterrows():
+                        np_val = str(r_pz.get("No. Parte", "")).strip().upper()
+                        ds_val = str(r_pz.get("Descripción de la Pieza", "")).strip().upper()
+                        if np_val == "NAN": np_val = ""
+                        if ds_val == "NAN": ds_val = ""
+                        
+                        if np_val and ds_val:
+                            piezas_lista.append(f"[{np_val}] {ds_val}")
+                        elif np_val:
+                            piezas_lista.append(f"NP: {np_val}")
+                        elif ds_val:
+                            piezas_lista.append(ds_val)
 
-                            i_prv = safe_idx_p('Proveedor')
-                            i_suc = safe_idx_p('Sucursal')
-                            i_mar = safe_idx_p('Marcas Especialidad')
-                            i_tel = safe_idx_p('Teléfono')
-                            i_dir = safe_idx_p('Dirección')
-                            i_tie = safe_idx_p('Tiempo de Entrega')
-                            i_con = safe_idx_p('Condición Pago')
-                            i_dia = safe_idx_p('Días Crédito')
+                    if not nombre_final or len(piezas_lista) == 0:
+                        st.error("⚠️ El Lugar y al menos 1 Pieza (No. Parte o Descripción) son obligatorios.")
+                    else:
+                        if prov_eventual == "-- ESCRIBIR NUEVO --" and guardar_en_directorio and nuevo_prov:
+                            try:
+                                ws_p = doc.worksheet("BD_PROVEEDORES")
+                                headers_p = [str(h).strip() for h in ws_p.row_values(1)]
+                                fila_prov = [""] * max(len(headers_p), 10)
+                                
+                                def safe_idx_p(name):
+                                    for idx_h, h_val in enumerate(headers_p):
+                                        if h_val.upper() == name.upper():
+                                            return idx_h
+                                    return -1
 
-                            if i_prv >= 0: fila_prov[i_prv] = nuevo_prov
-                            if i_suc >= 0: fila_prov[i_suc] = nueva_suc_cot
-                            if i_mar >= 0: fila_prov[i_mar] = nuevas_marcas_cot
-                            if i_tel >= 0: fila_prov[i_tel] = str(nuevo_tel_cot)
-                            if i_dir >= 0: fila_prov[i_dir] = dir_eventual.upper()
-                            if i_tie >= 0: fila_prov[i_tie] = nuevo_tiempo_cot
-                            if i_con >= 0: fila_prov[i_con] = nueva_cond_cot
-                            if i_dia >= 0: fila_prov[i_dia] = str(nuevos_dias_cot)
+                                i_prv = safe_idx_p('Proveedor')
+                                i_suc = safe_idx_p('Sucursal')
+                                i_mar = safe_idx_p('Marcas Especialidad')
+                                i_tel = safe_idx_p('Teléfono')
+                                i_dir = safe_idx_p('Dirección')
+                                i_tie = safe_idx_p('Tiempo de Entrega')
+                                i_con = safe_idx_p('Condición Pago')
+                                i_dia = safe_idx_p('Días Crédito')
 
-                            ws_p.append_row(fila_prov[:len(headers_p)] if headers_p else fila_prov, value_input_option='USER_ENTERED')
-                            st.cache_data.clear()
-                        except Exception as e_prov:
-                            st.warning(f"Nota: No se pudo guardar en BD_PROVEEDORES ({e_prov}), pero se enviará a la ruta.")
-                    
-                    # 2. Despachar todas las partidas a BD_RUTAS
-                    datos_cot = {
-                        'Proveedor': [nombre_final] * len(piezas_lista),
-                        'Vehiculo_Info': ["Cotización / Compra Directa"] * len(piezas_lista),
-                        'Descrip.': piezas_lista,
-                        'Direccion_Manual': [dir_eventual] * len(piezas_lista)
-                    }
-                    if col_vin: datos_cot[col_vin] = [vin_eventual if vin_eventual else "S/D"] * len(piezas_lista)
-                    if col_id: datos_cot[col_id] = ["N/A"] * len(piezas_lista)
-                    
-                    df_cot = pd.DataFrame(datos_cot)
-                    if col_desc and col_desc not in df_cot.columns:
-                        df_cot[col_desc] = piezas_lista
-                    
-                    if despachar_a_bd_rutas(df_cot, "cotizacion", notas_eventual):
-                        st.success(f"✅ ¡Enviado a ruta para {nombre_final} ({len(piezas_lista)} pieza(s))!")
-                        time.sleep(1)
-                        st.rerun()
+                                if i_prv >= 0: fila_prov[i_prv] = nuevo_prov
+                                if i_suc >= 0: fila_prov[i_suc] = nueva_suc_cot
+                                if i_mar >= 0: fila_prov[i_mar] = nuevas_marcas_cot
+                                if i_tel >= 0: fila_prov[i_tel] = str(nuevo_tel_cot)
+                                if i_dir >= 0: fila_prov[i_dir] = dir_eventual.upper()
+                                if i_tie >= 0: fila_prov[i_tie] = nuevo_tiempo_cot
+                                if i_con >= 0: fila_prov[i_con] = nueva_cond_cot
+                                if i_dia >= 0: fila_prov[i_dia] = str(nuevos_dias_cot)
+
+                                ws_p.append_row(fila_prov[:len(headers_p)] if headers_p else fila_prov, value_input_option='USER_ENTERED')
+                                st.cache_data.clear()
+                            except Exception as e_prov:
+                                st.warning(f"Nota: No se pudo guardar en BD_PROVEEDORES ({e_prov}), pero se enviará a la ruta.")
+                        
+                        datos_cot = {
+                            'Proveedor': [nombre_final] * len(piezas_lista),
+                            'Vehiculo_Info': ["Cotización / Compra Directa"] * len(piezas_lista),
+                            'Descrip.': piezas_lista,
+                            'Direccion_Manual': [dir_eventual] * len(piezas_lista)
+                        }
+                        if col_vin: datos_cot[col_vin] = [vin_eventual if vin_eventual else "S/D"] * len(piezas_lista)
+                        if col_id: datos_cot[col_id] = ["N/A"] * len(piezas_lista)
+                        
+                        df_cot = pd.DataFrame(datos_cot)
+                        if col_desc and col_desc not in df_cot.columns:
+                            df_cot[col_desc] = piezas_lista
+                        
+                        if despachar_a_bd_rutas(df_cot, "cotizacion", notas_eventual):
+                            st.success(f"✅ ¡Enviado a ruta para {nombre_final} ({len(piezas_lista)} pieza(s))!")
+                            time.sleep(1)
+                            st.rerun()
 
 elif vista_actual == "Precios Promedio":
     st.markdown("## 💲 Precios Promedio Históricos")
@@ -3754,6 +3749,5 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         st.session_state['pdfs_list'] = pdfs_list
                         if avisos_unicos: st.session_state['avisos_remision'] = list(avisos_unicos)
 
-                    st.write("DEBUG - Cambios a guardar detectados:", cambios_a_guardar)
                     st.toast("✅ ¡Bases actualizadas exitosamente en la nube!", icon="✅"); st.cache_data.clear(); st.rerun()
                 except Exception as e: st.error(f"❌ Error guardando: {e}")

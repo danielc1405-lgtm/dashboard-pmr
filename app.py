@@ -3085,10 +3085,67 @@ elif vista_actual == "🛠️ Cuartel General":
     # =========================================================================
     # PESTAÑA 1: CENTRO DE BOTS Y ALERTAS (PANTALLA COMPLETA)
     # =========================================================================
-    # =========================================================================
-    # PESTAÑA 1: CENTRO DE BOTS Y ALERTAS (PANTALLA COMPLETA)
-    # =========================================================================
     with tab_bots:
+        st.markdown("""
+            <style>
+            @keyframes matrix_pulse {
+                0% { box-shadow: 0 0 10px rgba(0, 255, 65, 0.25), inset 0 0 15px rgba(0, 255, 65, 0.15); }
+                50% { box-shadow: 0 0 22px rgba(0, 255, 65, 0.55), inset 0 0 25px rgba(0, 255, 65, 0.25); }
+                100% { box-shadow: 0 0 10px rgba(0, 255, 65, 0.25), inset 0 0 15px rgba(0, 255, 65, 0.15); }
+            }
+            @keyframes matrix_scanline {
+                0% { background-position: 0 0; }
+                100% { background-position: 0 100%; }
+            }
+            .matrix-terminal {
+                background-color: #020502;
+                background-image: 
+                    linear-gradient(rgba(0, 255, 65, 0.04) 1px, transparent 1px),
+                    radial-gradient(rgba(0, 40, 10, 0.35), #000000 90%);
+                background-size: 100% 3px, 100% 100%;
+                color: #00FF41;
+                font-family: 'Consolas', 'Courier New', monospace;
+                font-size: 13.5px;
+                line-height: 1.45;
+                padding: 16px 20px;
+                border-radius: 10px;
+                border: 1px solid #00FF41;
+                animation: matrix_pulse 3s infinite ease-in-out;
+                height: 310px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+                position: relative;
+                text-shadow: 0 0 6px rgba(0, 255, 65, 0.65);
+            }
+            .matrix-header {
+                color: #88FF99;
+                font-family: 'Consolas', monospace;
+                font-size: 11.5px;
+                letter-spacing: 2px;
+                border-bottom: 1px dashed rgba(0, 255, 65, 0.4);
+                padding-bottom: 6px;
+                margin-bottom: 10px;
+                display: flex;
+                justify-content: space-between;
+            }
+            .matrix-katakana {
+                color: rgba(0, 255, 65, 0.22);
+                font-size: 11px;
+                letter-spacing: 3px;
+                user-select: none;
+            }
+            .matrix-cursor {
+                display: inline-block;
+                width: 9px;
+                height: 15px;
+                background-color: #00FF41;
+                vertical-align: middle;
+                animation: blink_mtx 0.8s infinite;
+            }
+            @keyframes blink_mtx { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+            </style>
+        """, unsafe_allow_html=True)
+
         col_ctrl, col_wa = st.columns([1.1, 1.9], gap="large")
 
         with col_ctrl:
@@ -3116,7 +3173,6 @@ elif vista_actual == "🛠️ Cuartel General":
                 st.session_state.pop('temp_bot_resumen', None)
                 st.rerun()
 
-            # ✨ AQUÍ CREAMOS EL ESPACIO RESERVADO PARA EL SPINNER
             espacio_spinner = st.empty()
 
         with col_wa:
@@ -3126,6 +3182,31 @@ elif vista_actual == "🛠️ Cuartel General":
                 texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
                 st.text_area("WhatsApp Output", value=texto_wa, height=175, label_visibility="collapsed")
 
+        # --- CONSOLA MATRIX EN TIEMPO REAL ---
+        st.markdown("**🖥️ Consola Matrix en Tiempo Real (Streaming Directo del Robot)**")
+        contenedor_matrix = st.empty()
+
+        def render_matrix_terminal(log_txt, activo=False):
+            import html
+            estado_mtx = "🟢 EJECUTANDO EN VIVO..." if activo else "⚡ SISTEMA EN ESPERA / COMPLETADO"
+            cursor_html = '<span class="matrix-cursor"></span>' if activo else ''
+            contenido_limpio = html.escape(log_txt) if log_txt else "Esperando orden de ejecución en el Cuartel General..."
+            html_box = f"""
+            <div class="matrix-terminal">
+                <div class="matrix-header">
+                    <span>PMR // MATRIX_CORE_TERMINAL v2.6</span>
+                    <span class="matrix-katakana">ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄ010110</span>
+                    <span>{estado_mtx}</span>
+                </div>
+                <div>{contenido_limpio}{cursor_html}</div>
+            </div>
+            """
+            contenedor_matrix.markdown(html_box, unsafe_allow_html=True)
+
+        # Mostrar bitácora previa si no se está corriendo en este instante
+        if not btn_extraer:
+            render_matrix_terminal(st.session_state.get('temp_bot_log', ''), activo=False)
+
         # --- CUADRO INDEPENDIENTE PARA REVISIÓN DE ESTATUS CRÍTICO ---
         with st.container(border=True):
             st.markdown("**3. 🚨 Revisión de Estatus Crítico (Hoy y Vencidos en Base Maestra)**")
@@ -3133,7 +3214,7 @@ elif vista_actual == "🛠️ Cuartel General":
             texto_criticos = st.session_state.get('temp_criticos_alerts', "Realiza una extracción de GNP Inpart o Multiasistencia para ver el radar de vencimientos aquí.")
             st.text_area("Criticos Output", value=texto_criticos, height=185, label_visibility="collapsed")
 
-        # --- LÓGICA DE EJECUCIÓN DEL ROBOT ---
+        # --- LÓGICA DE EJECUCIÓN DEL ROBOT CON STREAMING EN TIEMPO REAL ---
         if btn_extraer:
             if bot_seleccionado == "GNP Inpart":
                 archivo_ejecutar = "gnp_inpart.py"
@@ -3144,24 +3225,47 @@ elif vista_actual == "🛠️ Cuartel General":
                 
             arg_modo = "--oculto" if "Oculto" in modo_extraccion else "--visual"
             
-            # ✨ INYECTAMOS EL RELOJITO EXACTAMENTE EN EL ESPACIO QUE RESERVAMOS ARRIBA
             with espacio_spinner:
-                with st.spinner(f"Ejecutando {bot_seleccionado}... (Esto puede tomar unos minutos)"):
+                with st.spinner(f"Corriendo {bot_seleccionado} en vivo..."):
                     try:
-                        # 1. Credenciales temporales
                         with open("credentials.json", "w", encoding="utf-8") as f:
                             f.write(st.secrets["google_credentials"])
                             
-                        # 2. Asegurar navegador en servidor
+                        render_matrix_terminal(f"[SISTEMA] Verificando motor Chromium y despertando a {bot_seleccionado}...\n", activo=True)
                         subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
                         
-                        # 3. Ejecutar script
-                        cmd = [sys.executable, archivo_ejecutar]
+                        # Bandera -u obligatoria para que Python escupa cada línea en tiempo real sin esperar al final
+                        cmd = [sys.executable, "-u", archivo_ejecutar]
                         if bot_seleccionado != "Paquetexpress (Rastreo)":
                             cmd.append(arg_modo)
+                        
+                        env_bot = os.environ.copy()
+                        env_bot["PYTHONIOENCODING"] = "utf-8"
+                        env_bot["PYTHONUNBUFFERED"] = "1"
+
+                        proceso = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            bufsize=1,
+                            env=env_bot,
+                            encoding="utf-8",
+                            errors="replace"
+                        )
+                        
+                        lineas_acumuladas = []
+                        for linea_rt in iter(proceso.stdout.readline, ''):
+                            if not linea_rt:
+                                break
+                            lineas_acumuladas.append(linea_rt)
+                            # Mostramos las últimas 22 líneas en vivo para que siempre veas el avance actual
+                            vista_reciente = "".join(lineas_acumuladas[-22:])
+                            render_matrix_terminal(vista_reciente, activo=True)
                             
-                        resultado = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                        salida_completa = ((resultado.stdout or "") + "\n" + (resultado.stderr or "")).strip()
+                        proceso.stdout.close()
+                        returncode = proceso.wait()
+                        salida_completa = "".join(lineas_acumuladas).strip()
                         
                         # 4. Calcular resumen de pedidos revisados
                         if bot_seleccionado == "Paquetexpress (Rastreo)":
@@ -3205,28 +3309,21 @@ elif vista_actual == "🛠️ Cuartel General":
                         elif bot_seleccionado != "Paquetexpress (Rastreo)":
                             st.session_state['temp_criticos_alerts'] = "✅ Sin alertas críticas ni partidas vencidas en este momento."
 
-                        # 7. Dejar en la consola técnica únicamente la bitácora del robot
+                        # 7. Guardar la bitácora completa en la consola Matrix (conservando el progreso [1/N])
                         salida_tecnica = salida_completa
                         if idx_inicio_crit != -1:
                             salida_tecnica = salida_tecnica[:idx_inicio_crit]
                         if "REPORTES LISTOS PARA COPIAR" in salida_tecnica:
                             salida_tecnica = re.split(r"=+\s*\n\s*📱?\s*REPORTES LISTOS PARA COPIAR", salida_tecnica)[0]
                             
-                        lineas_limpias = []
-                        for linea in salida_tecnica.splitlines():
-                            if re.match(r"^\[\d+/\d+\]\s*\|\s*Siniestro .* procesado\.$", linea.strip()):
-                                continue
-                            if set(linea.strip()) == {'!'}:
-                                continue
-                            lineas_limpias.append(linea)
-                        st.session_state['temp_bot_log'] = "\n".join(lineas_limpias).strip()
+                        st.session_state['temp_bot_log'] = salida_tecnica.strip()
+                        render_matrix_terminal(st.session_state['temp_bot_log'], activo=False)
                         
-                        if resultado.returncode == 0:
+                        if returncode == 0:
                             st.session_state['temp_bot_status'] = f"✅ Ejecución de {bot_seleccionado} finalizada con éxito."
                         else:
-                            st.session_state['temp_bot_status'] = f"⚠️ {bot_seleccionado} terminó con advertencias (revisa el detalle abajo)."
+                            st.session_state['temp_bot_status'] = f"⚠️ {bot_seleccionado} terminó con advertencias (revisa la consola Matrix)."
                             
-                        # 8. Limpiar caché de datos para reflejar cambios al instante
                         st.cache_data.clear()
                         st.rerun()
                             
@@ -3236,7 +3333,7 @@ elif vista_actual == "🛠️ Cuartel General":
                         if os.path.exists("credentials.json"):
                             os.remove("credentials.json")
 
-        # --- SECCIÓN INFERIOR: ESTATUS, RESUMEN Y BITÁCORA TÉCNICA ---
+        # --- SECCIÓN INFERIOR: ESTATUS Y RESUMEN ---
         if st.session_state.get('temp_bot_status'):
             st.markdown("---")
             c_stat1, c_stat2 = st.columns(2)
@@ -3248,10 +3345,6 @@ elif vista_actual == "🛠️ Cuartel General":
             with c_stat2:
                 if st.session_state.get('temp_bot_resumen'):
                     st.info(st.session_state['temp_bot_resumen'])
-                
-        if st.session_state.get('temp_bot_log'):
-            with st.expander("🖥️ Ver Bitácora Técnica del Servidor", expanded=False):
-                st.text_area("Terminal Output", value=st.session_state['temp_bot_log'], height=220, disabled=True, label_visibility="collapsed")
 
     # =========================================================================
     # PESTAÑA 2: MANTENIMIENTO Y PENDIENTES

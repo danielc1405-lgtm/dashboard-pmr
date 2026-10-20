@@ -120,33 +120,44 @@ def cargar_rutas_nube():
                 st.error("Error: Faltan columnas clave (ID_Ruta o Estatus) en BD_RUTAS.")
                 return False
 
+            tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
+            hoy_str_r = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
+            col_fecha = next((c for c in df.columns if 'FECHA' in c), None)
+
             df_pendientes = df[df[col_estatus].astype(str).str.upper() == 'PENDIENTE'].copy()
+            if col_fecha:
+                df_completadas = df[(df[col_estatus].astype(str).str.upper() == 'COMPLETADO') & (df[col_fecha].astype(str).str.contains(hoy_str_r, na=False))].copy()
+            else:
+                df_completadas = df[df[col_estatus].astype(str).str.upper() == 'COMPLETADO'].tail(15).copy()
             
-            rutas_dict = {}
-            for _, row in df_pendientes.iterrows():
-                id_ruta = str(row.get(col_id_ruta, ''))
-                pieza_actual = str(row.get(col_piezas, '')) if col_piezas else ''
-                sin_actual = str(row.get(col_siniestros, '')) if col_siniestros else ''
-                
-                if id_ruta not in rutas_dict:
-                    rutas_dict[id_ruta] = {
-                        "id": id_ruta,
-                        "tipo": str(row.get('TIPO_OPERACION', 'entrega')).lower(),
-                        "lugar": str(row.get('LUGAR', 'S/D')),
-                        "direccion": str(row.get('DIRECCION', 'S/D')),
-                        "vehiculo": str(row.get('VEHICULO', 'S/D')),
-                        "serie": formatear_vin(row.get('VIN', '')),
-                        "piezas": [{"desc": pieza_actual, "np": ""}] if pieza_actual and pieza_actual not in ['S/D', ''] else [],
-                        "siniestros": [sin_actual] if sin_actual and sin_actual not in ['S/D', ''] else [],
-                        "notas": str(row.get(col_notas, '')) if col_notas else ""
-                    }
-                else:
-                    if pieza_actual and pieza_actual not in ['S/D', '']: 
-                        rutas_dict[id_ruta]["piezas"].append({"desc": pieza_actual, "np": ""})
-                    if sin_actual and sin_actual not in ['S/D', ''] and sin_actual not in rutas_dict[id_ruta]["siniestros"]:
-                        rutas_dict[id_ruta]["siniestros"].append(sin_actual)
+            def armar_diccionario_rutas(df_sub):
+                r_dict = {}
+                for _, row in df_sub.iterrows():
+                    id_ruta = str(row.get(col_id_ruta, ''))
+                    pieza_actual = str(row.get(col_piezas, '')) if col_piezas else ''
+                    sin_actual = str(row.get(col_siniestros, '')) if col_siniestros else ''
+                    
+                    if id_ruta not in r_dict:
+                        r_dict[id_ruta] = {
+                            "id": id_ruta,
+                            "tipo": str(row.get('TIPO_OPERACION', 'entrega')).lower(),
+                            "lugar": str(row.get('LUGAR', 'S/D')),
+                            "direccion": str(row.get('DIRECCION', 'S/D')),
+                            "vehiculo": str(row.get('VEHICULO', 'S/D')),
+                            "serie": formatear_vin(row.get('VIN', '')),
+                            "piezas": [{"desc": pieza_actual, "np": ""}] if pieza_actual and pieza_actual not in ['S/D', ''] else [],
+                            "siniestros": [sin_actual] if sin_actual and sin_actual not in ['S/D', ''] else [],
+                            "notas": str(row.get(col_notas, '')) if col_notas else ""
+                        }
+                    else:
+                        if pieza_actual and pieza_actual not in ['S/D', '']: 
+                            r_dict[id_ruta]["piezas"].append({"desc": pieza_actual, "np": ""})
+                        if sin_actual and sin_actual not in ['S/D', ''] and sin_actual not in r_dict[id_ruta]["siniestros"]:
+                            r_dict[id_ruta]["siniestros"].append(sin_actual)
+                return list(r_dict.values())
             
-            st.session_state['ruta_hoy'] = list(rutas_dict.values())
+            st.session_state['ruta_hoy'] = armar_diccionario_rutas(df_pendientes)
+            st.session_state['ruta_completadas_hoy'] = armar_diccionario_rutas(df_completadas)
             return True
     except Exception as e:
         st.error(f"Error conectando a BD_RUTAS: {e}")
@@ -257,3 +268,29 @@ else:
                                 st.rerun()
                             else: st.error("Error: No se encontró este folio en la base.")
                         except Exception as e: st.error(f"Error actualizando sistema: {e}")
+# ==========================================
+# 5. SECCIÓN PARA REVIVIR VISITAS COMPLETADAS POR ERROR
+# ==========================================
+if st.session_state.get('ruta_completadas_hoy'):
+    st.markdown("---")
+    with st.expander(f"✅ Visitas Completadas Hoy ({len(st.session_state['ruta_completadas_hoy'])}) — ¿Marcaste una por error?", expanded=False):
+        st.caption("Si marcaste una visita por accidente, presiona **♻️ Revivir a mi Ruta** para regresarla a tu lista activa.")
+        for comp in st.session_state['ruta_completadas_hoy']:
+            st.markdown(f"**{comp['lugar']}** ({comp['tipo'].upper()} - {len(comp['piezas'])} pza(s))")
+            if st.button(f"♻️ Revivir: {comp['lugar']}", key=f"rev_{comp['id']}", use_container_width=True):
+                with st.spinner("Regresando visita a tu ruta activa..."):
+                    try:
+                        doc = init_connection()
+                        ws_rutas = doc.worksheet("BD_RUTAS")
+                        datos = ws_rutas.get_all_values()
+                        filas_rev = [idx + 1 for idx, r in enumerate(datos) if r[0] == comp['id']]
+                        if filas_rev:
+                            celdas_rev = [gspread.Cell(row=f_idx, col=11, value="PENDIENTE") for f_idx in filas_rev]
+                            ws_rutas.update_cells(celdas_rev, value_input_option='USER_ENTERED')
+                            st.success("¡Visita restaurada a tu ruta! 🚚")
+                            time.sleep(0.8)
+                            cargar_rutas_nube()
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al revivir: {e}")
+            st.markdown("---")

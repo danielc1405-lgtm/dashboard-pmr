@@ -739,6 +739,30 @@ elif vista_actual == "🚚 Operación del Día":
             
             df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'Destino Final', 'Vehículo Corto', 'Instrucción', 'Estado']].rename(columns={'LUGAR': 'Lugar a Visitar', 'SINIESTRO': 'Siniestro(s)', 'Vehículo Corto': 'Vehículo'})
             st.dataframe(df_destinos, hide_index=True, use_container_width=True)
+            
+            # --- APARTADO PARA REVIVIR COMPLETADAS POR ERROR DESDE EL DASHBOARD ---
+            df_comp_hoy = df_resumen[df_resumen['ESTATUS'].astype(str).str.upper() == 'COMPLETADO'].copy()
+            if not df_comp_hoy.empty:
+                with st.expander(f"♻️ Visitas Completadas Hoy ({len(df_comp_hoy)}) — Revivir si el operador marcó por error", expanded=False):
+                    c_rev1, c_rev2 = st.columns([3, 1], vertical_alignment="bottom")
+                    with c_rev1:
+                        opciones_rev = [f"{r['ID_RUTA']} | {r['LUGAR']} ({r['Operación']} - {r['SINIESTRO']})" for _, r in df_comp_hoy.iterrows()]
+                        ruta_a_revivir = st.selectbox("Selecciona la visita que deseas regresar al celular del chofer:", opciones_rev, key="sel_revivir_ruta_op")
+                    with c_rev2:
+                        if st.button("♻️ Revivir a Ruta Activa", type="primary", use_container_width=True, key="btn_revivir_ruta_op"):
+                            id_target = ruta_a_revivir.split(" | ")[0].strip()
+                            with st.spinner("Restaurando parada a PENDIENTE..."):
+                                try:
+                                    idx_id_r = [str(h).strip().upper() for h in datos_rutas[0]].index("ID_RUTA")
+                                    idx_est_r = [str(h).strip().upper() for h in datos_rutas[0]].index("ESTATUS") + 1
+                                    celdas_r = [gspread.Cell(row=i+2, col=idx_est_r, value="PENDIENTE") for i, fila_r in enumerate(datos_rutas[1:]) if len(fila_r) > idx_id_r and str(fila_r[idx_id_r]).strip() == id_target]
+                                    if celdas_r:
+                                        ws_rutas.update_cells(celdas_r, value_input_option='USER_ENTERED')
+                                        st.success(f"✅ Parada {id_target} devuelta a PENDIENTE.")
+                                        time.sleep(0.8)
+                                        st.rerun()
+                                except Exception as e_r:
+                                    st.error(f"Error al revivir ruta: {e_r}")
         else:
             st.caption("No hay viajes activos despachados en este momento.")
 
@@ -1176,6 +1200,25 @@ elif vista_actual == "🛒 Compras":
                 if p in c_up and not any(exc in c_up for exc in excluidos): return cols[i]
         return None
 
+    def normalizar_llave_compra(sin_val, desc_val):
+        s_clean = str(sin_val).strip().upper()
+        if s_clean.endswith('.0'): s_clean = s_clean[:-2]
+        d_clean = " ".join(str(desc_val).strip().upper().split())
+        return f"{s_clean}_{d_clean}"
+
+    # Diccionario global de Comentarios desde BD_UNIFICADA para que viajen a Compras
+    dict_obs_global = {}
+    if not df_completo.empty:
+        c_id_obs = buscar_columna_compras(df_completo, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
+        c_de_obs = buscar_columna_compras(df_completo, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
+        c_co_obs = buscar_columna_compras(df_completo, ["COMENTARIOS", "OBSERVACIONES", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])
+        if c_id_obs and c_de_obs and c_co_obs:
+            for _, r_ob in df_completo.iterrows():
+                k_ob = normalizar_llave_compra(r_ob.get(c_id_obs, ''), r_ob.get(c_de_obs, ''))
+                val_ob = str(r_ob.get(c_co_obs, '')).strip()
+                if val_ob not in ['', 'nan', 'None']:
+                    dict_obs_global[k_ob] = val_ob
+
     # 1. Ignoramos el filtro de aseguradora para compras y tomamos df_completo
     df_proceso_compras = pd.DataFrame()
     if not df_completo.empty:
@@ -1196,11 +1239,15 @@ elif vista_actual == "🛒 Compras":
     if not df_proveedores.empty and 'Condición Pago' in df_proveedores.columns:
         df_proveedores['Condición Pago'] = df_proveedores['Condición Pago'].apply(normalizar_pago)
 
-    # --- DICCIONARIO DE PROVEEDORES Y OPCIONES PARA DESPLEGABLE ---
-    dict_provs = {}
+    # --- DICCIONARIO DE PROVEEDORES Y OPCIONES PARA DESPLEGABLE (INCLUYE EBAY / MERCADO LIBRE / INVENTARIO) ---
+    dict_provs = {
+        'EBAY': {'eta': '10', 'cond': 'Pago en Plataforma', 'dias': '0'},
+        'MERCADO LIBRE': {'eta': '5', 'cond': 'Pago en Plataforma', 'dias': '0'},
+        'INVENTARIO': {'eta': '0', 'cond': 'Pago Anticipado', 'dias': '0'}
+    }
     lista_opciones_prov = [""]
+    temp_provs = ["EBAY", "MERCADO LIBRE", "INVENTARIO"]
     if not df_proveedores.empty:
-        temp_provs = []
         for _, rp in df_proveedores.iterrows():
             p_n = str(rp.get('Proveedor', '')).strip().upper()
             s_n = str(rp.get('Sucursal', '')).strip().upper()
@@ -1214,29 +1261,26 @@ elif vista_actual == "🛒 Compras":
             dict_provs[llave_full] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v}
             dict_provs[p_n] = {'eta': eta_v, 'cond': cond_v, 'dias': dias_v}
             temp_provs.append(llave_full)
-        lista_opciones_prov = [""] + sorted(list(set(temp_provs)))
+    lista_opciones_prov = [""] + sorted(list(set(temp_provs)))
 
     # ==========================================================================
     # 1. BANDEJA RÁPIDA: PEDIDOS PENDIENTES DE COMPRA (CAPTURA DIRECTA)
     # ==========================================================================
     if not df_proceso_compras.empty and col_est_comp:
         df_en_proc = df_proceso_compras[df_proceso_compras[col_est_comp].astype(str).str.upper().str.strip() == "EN PROCESAMIENTO"].copy()
-        
-        def normalizar_llave_compra(sin_val, desc_val):
-            s_clean = str(sin_val).strip().upper()
-            if s_clean.endswith('.0'): s_clean = s_clean[:-2]
-            d_clean = " ".join(str(desc_val).strip().upper().split())
-            return f"{s_clean}_{d_clean}"
 
         llaves_ya_compradas = set()
         if not df_compras.empty:
-            c_sin_comp = next((c for c in df_compras.columns if "SINIESTRO" in str(c).upper()), None)
-            c_pza_comp = next((c for c in df_compras.columns if "DESCRIP" in str(c).upper() or "PIEZA" in str(c).upper()), None)
+            c_sin_comp = buscar_columna_compras(df_compras, ["SINIESTRO", "PEDIDO / SINIESTRO"], ["SINIESTRO"])
+            c_pza_comp = buscar_columna_compras(df_compras, ["DESCRIPCIÓN PIEZA", "DESCRIPCION PIEZA", "PIEZA"], ["DESCRIP", "PIEZA"])
+            c_prv_comp = buscar_columna_compras(df_compras, ["PROVEEDOR"], ["PROVEEDOR"])
             if c_sin_comp and c_pza_comp:
                 for _, rc in df_compras.iterrows():
                     s_c = str(rc.get(c_sin_comp, '')).strip()
                     d_c = str(rc.get(c_pza_comp, '')).strip()
-                    if s_c and d_c:
+                    p_c = str(rc.get(c_prv_comp, '')).strip() if c_prv_comp else 'OK'
+                    # Solo se considera comprada si ya tiene un proveedor válido asignado
+                    if s_c and d_c and p_c not in ['', 'nan', 'None', 'NAN']:
                         llaves_ya_compradas.add(normalizar_llave_compra(s_c, d_c))
 
         if not df_en_proc.empty:
@@ -1251,7 +1295,7 @@ elif vista_actual == "🛒 Compras":
 
         with st.expander(f"🛒 Pedidos Pendientes de Compra ({len(df_por_comprar)}) — Captura Rápida", expanded=True):
             if not df_por_comprar.empty:
-                st.caption("Selecciona el **Proveedor** y captura el **Costo Compra**. Al guardar, pasarán a *Próximas Llegadas*.")
+                st.caption("Selecciona el **Proveedor** (incluso con costo $0.00), agrega **Observaciones** o marca **🚫 Cancelar** y presiona el botón rojo para aplicar.")
                 
                 c_id_c = buscar_columna_compras(df_por_comprar, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
                 c_marca_c = buscar_columna_compras(df_por_comprar, ["MARCA"], ["MARCA"])
@@ -1262,6 +1306,7 @@ elif vista_actual == "🛒 Compras":
                 c_desc_c = buscar_columna_compras(df_por_comprar, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
                 c_precio_c = buscar_columna_compras(df_por_comprar, ["PRECIO", "COSTO VENTA"], ["PRECIO", "COSTO"])
                 c_aseg_c = buscar_columna_compras(df_por_comprar, ["ASEGURADORA"], ["ASEGURADORA"])
+                c_obs_c = buscar_columna_compras(df_por_comprar, ["COMENTARIOS", "OBSERVACIONES", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])
                 
                 def armar_auto_limpio(r):
                     m = str(r.get(c_marca_c, '')).strip().upper() if c_marca_c else ''
@@ -1284,6 +1329,8 @@ elif vista_actual == "🛒 Compras":
 
                 df_cap['Proveedor'] = ""
                 df_cap['Costo Compra'] = 0.0
+                df_cap['Cancelar'] = False
+                df_cap['Observaciones'] = df_por_comprar[c_obs_c].fillna("").astype(str).replace(['nan', 'None'], '').str.strip().values if c_obs_c else ""
 
                 if not modo_consulta and permiso_edicion:
                     if 'reset_key_compras' not in st.session_state: st.session_state['reset_key_compras'] = 0
@@ -1298,6 +1345,8 @@ elif vista_actual == "🛒 Compras":
                         'Precio Aut.': st.column_config.NumberColumn("Precio Aut.", format="$ %.2f", disabled=True, width="small"),
                         'Proveedor': st.column_config.SelectboxColumn("🏪 Proveedor", options=lista_opciones_prov, width="medium"),
                         'Costo Compra': st.column_config.NumberColumn("💲 Costo Compra", format="$ %.2f", min_value=0.0, step=0.01, width="small"),
+                        'Cancelar': st.column_config.CheckboxColumn("🚫 Can", default=False, width="small"),
+                        'Observaciones': st.column_config.TextColumn("📝 Obs.", width="medium")
                     }
                     df_cap_edit = st.data_editor(
                         df_cap.drop(columns=['_Aseguradora']),
@@ -1308,37 +1357,63 @@ elif vista_actual == "🛒 Compras":
                     )
                     
                     df_cap_edit['_Aseguradora'] = df_cap['_Aseguradora'].values
+                    df_cap_edit['_Obs_Orig'] = df_cap['Observaciones'].values
 
-                    if st.button("💾 Registrar Compras Capturadas", type="primary", key="btn_guardar_compras_rapidas"):
-                        filas_listas = df_cap_edit[df_cap_edit['Proveedor'].astype(str).str.strip() != ""].copy()
-                        if filas_listas.empty:
-                            st.warning("⚠️ Selecciona al menos un Proveedor en la tabla para registrar la compra.")
+                    if st.button("💾 Registrar Compras / Cambios Capturados", type="primary", key="btn_guardar_compras_rapidas"):
+                        cond_prov = ~df_cap_edit['Proveedor'].astype(str).str.strip().isin(["", "None", "nan", "NAN"])
+                        cond_canc = df_cap_edit['Cancelar'] == True
+                        cond_obs = df_cap_edit['Observaciones'].astype(str).str.strip() != df_cap_edit['_Obs_Orig'].astype(str).str.strip()
+                        
+                        filas_listas = df_cap_edit[cond_prov & (~cond_canc)].copy()
+                        filas_uni_upd = df_cap_edit[cond_canc | cond_obs].copy()
+
+                        if filas_listas.empty and filas_uni_upd.empty:
+                            st.warning("⚠️ Selecciona un Proveedor, marca Cancelar o edita una Observación antes de guardar.")
                         else:
-                            with st.spinner("Registrando compras y enviándolas a Próximas Llegadas..."):
+                            with st.spinner("Sincronizando compras y observaciones en la nube..."):
                                 try:
                                     doc = init_connection()
-                                    ws_comp = doc.worksheet("BD_COMPRAS")
-                                    headers_comp = [str(h).strip() for h in ws_comp.row_values(1)]
-                                    headers_up = [h.upper() for h in headers_comp]
-
-                                    def idx_col_c(posibles):
-                                        for p in posibles:
-                                            if p.upper() in headers_up: return headers_up.index(p.upper())
-                                        return -1
-
-                                    tz_mx_c = datetime.timezone(datetime.timedelta(hours=-6))
-                                    meses_es = {1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep', 10:'oct', 11:'nov', 12:'dic'}
-                                    hoy_dt_c = datetime.datetime.now(tz_mx_c)
-                                    fecha_hoy_c = f"{hoy_dt_c.day:02d}/{meses_es[hoy_dt_c.month]}/{hoy_dt_c.strftime('%y')}"
-
-                                    nuevas_filas_c = []
-                                    for _, r_new in filas_listas.iterrows():
-                                        prov_sel = str(r_new['Proveedor']).strip().upper()
-                                        costo_sel = round(float(r_new['Costo Compra']), 2) if pd.notna(r_new['Costo Compra']) else 0.0
-                                        datos_p_sel = dict_provs.get(prov_sel, {'eta': '0', 'cond': '', 'dias': '0'})
-
-                                        fila_c = [""] * len(headers_comp)
+                                    
+                                    # A) Actualizar Cancelaciones y Observaciones en BD_UNIFICADA
+                                    if not filas_uni_upd.empty:
+                                        ws_u_c = doc.worksheet("BD_UNIFICADA")
+                                        datos_u_c = ws_u_c.get_all_values()
+                                        head_u_c = [str(h).strip() for h in datos_u_c[0]]
+                                        id_u_idx = head_u_c.index(buscar_columna_compras(head_u_c, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"]))
+                                        de_u_idx = head_u_c.index(buscar_columna_compras(head_u_c, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"]))
+                                        es_u_idx = head_u_c.index(buscar_columna_compras(head_u_c, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"]))
+                                        co_u_col = buscar_columna_compras(head_u_c, ["COMENTARIOS", "OBSERVACIONES", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])
+                                        co_u_idx = head_u_c.index(co_u_col) if co_u_col else -1
                                         
+                                        mapa_filas_u = {}
+                                        for idx_r, r_u in enumerate(datos_u_c[1:], start=2):
+                                            if len(r_u) > max(id_u_idx, de_u_idx):
+                                                mapa_filas_u[normalizar_llave_compra(r_u[id_u_idx], r_u[de_u_idx])] = idx_r
+                                                
+                                        celdas_u_mod = []
+                                        for _, r_up in filas_uni_upd.iterrows():
+                                            k_up = normalizar_llave_compra(r_up['Siniestro'], r_up['Pieza'])
+                                            if k_up in mapa_filas_u:
+                                                fila_gs = mapa_filas_u[k_up]
+                                                if r_up['Cancelar']:
+                                                    celdas_u_mod.append(gspread.Cell(row=fila_gs, col=es_u_idx + 1, value="CANCELADO"))
+                                                if co_u_idx >= 0 and str(r_up['Observaciones']).strip() != str(r_up['_Obs_Orig']).strip():
+                                                    celdas_u_mod.append(gspread.Cell(row=fila_gs, col=co_u_idx + 1, value=str(r_up['Observaciones']).strip()))
+                                        if celdas_u_mod:
+                                            ws_u_c.update_cells(celdas_u_mod, value_input_option='USER_ENTERED')
+
+                                    # B) Insertar o actualizar compras en BD_COMPRAS (Permite Costo $0.00 como eBay)
+                                    if not filas_listas.empty:
+                                        ws_comp = doc.worksheet("BD_COMPRAS")
+                                        datos_comp_all = ws_comp.get_all_values()
+                                        headers_comp = [str(h).strip() for h in datos_comp_all[0]]
+                                        headers_up = [h.upper() for h in headers_comp]
+
+                                        def idx_col_c(posibles):
+                                            for p in posibles:
+                                                if p.upper() in headers_up: return headers_up.index(p.upper())
+                                            return -1
+
                                         i_sin = idx_col_c(["SINIESTRO", "PEDIDO / SINIESTRO"])
                                         i_veh = idx_col_c(["VEHÍCULO", "VEHICULO", "AUTO"])
                                         i_tal = idx_col_c(["TALLER", "CDR"])
@@ -1353,36 +1428,68 @@ elif vista_actual == "🛒 Compras":
                                         i_rec = idx_col_c(["RECIBIDO"])
                                         i_ase = idx_col_c(["ASEGURADORA"])
 
-                                        partes_v = [str(r_new['Auto']).strip(), str(r_new['Año']).strip(), str(r_new['VIN / Serie']).strip()]
-                                        veh_limpio = " | ".join([p for p in partes_v if p and p not in ['NAN', 'NONE']])
-                                        
-                                        if i_sin >= 0: fila_c[i_sin] = str(r_new['Siniestro']).strip()
-                                        if i_veh >= 0: fila_c[i_veh] = veh_limpio
-                                        if i_tal >= 0: fila_c[i_tal] = str(r_new['Taller']).strip()
-                                        if i_pza >= 0: fila_c[i_pza] = str(r_new['Pieza']).strip()
-                                        if i_prv >= 0: fila_c[i_prv] = prov_sel
-                                        if i_cos >= 0: fila_c[i_cos] = costo_sel if costo_sel > 0 else ""
-                                        if i_fec >= 0: fila_c[i_fec] = fecha_hoy_c
-                                        if i_eta >= 0: fila_c[i_eta] = int(datos_p_sel['eta']) if str(datos_p_sel['eta']).isdigit() else 0
-                                        if i_con >= 0: fila_c[i_con] = datos_p_sel['cond']
-                                        if i_dia >= 0: fila_c[i_dia] = int(datos_p_sel['dias']) if str(datos_p_sel['dias']).isdigit() else 0
-                                        if i_pag >= 0: fila_c[i_pag] = "Pendiente"
-                                        if i_rec >= 0: fila_c[i_rec] = "NO"
-                                        if i_ase >= 0: fila_c[i_ase] = str(r_new['_Aseguradora']).strip()
+                                        mapa_existentes_comp = {}
+                                        for idx_c_r, r_comp in enumerate(datos_comp_all[1:], start=2):
+                                            if i_sin >= 0 and i_pza >= 0 and len(r_comp) > max(i_sin, i_pza):
+                                                mapa_existentes_comp[normalizar_llave_compra(r_comp[i_sin], r_comp[i_pza])] = idx_c_r
 
-                                        nuevas_filas_c.append(fila_c)
+                                        tz_mx_c = datetime.timezone(datetime.timedelta(hours=-6))
+                                        meses_es = {1:'ene', 2:'feb', 3:'mar', 4:'abr', 5:'may', 6:'jun', 7:'jul', 8:'ago', 9:'sep', 10:'oct', 11:'nov', 12:'dic'}
+                                        hoy_dt_c = datetime.datetime.now(tz_mx_c)
+                                        fecha_hoy_c = f"{hoy_dt_c.day:02d}/{meses_es[hoy_dt_c.month]}/{hoy_dt_c.strftime('%y')}"
 
-                                    if nuevas_filas_c:
-                                        ws_comp.append_rows(nuevas_filas_c, value_input_option='USER_ENTERED', table_range="A1")
-                                        st.session_state['reset_key_compras'] += 1
-                                        st.cache_data.clear()
-                                        st.success(f"✅ Se registraron {len(nuevas_filas_c)} compra(s) y pasaron a Próximas Llegadas.")
-                                        time.sleep(0.8)
-                                        st.rerun()
+                                        nuevas_filas_c = []
+                                        celdas_comp_upd = []
+                                        for _, r_new in filas_listas.iterrows():
+                                            prov_sel = str(r_new['Proveedor']).strip().upper()
+                                            costo_sel = round(float(r_new['Costo Compra']), 2) if pd.notna(r_new['Costo Compra']) else 0.0
+                                            datos_p_sel = dict_provs.get(prov_sel, {'eta': '0', 'cond': '', 'dias': '0'})
+                                            k_check = normalizar_llave_compra(r_new['Siniestro'], r_new['Pieza'])
+
+                                            if k_check in mapa_existentes_comp:
+                                                # Si la fila ya existía en BD_COMPRAS sin proveedor, la actualizamos directo
+                                                f_row_c = mapa_existentes_comp[k_check]
+                                                if i_prv >= 0: celdas_comp_upd.append(gspread.Cell(row=f_row_c, col=i_prv+1, value=prov_sel))
+                                                if i_cos >= 0: celdas_comp_upd.append(gspread.Cell(row=f_row_c, col=i_cos+1, value=costo_sel))
+                                                if i_fec >= 0: celdas_comp_upd.append(gspread.Cell(row=f_row_c, col=i_fec+1, value=fecha_hoy_c))
+                                                if i_eta >= 0: celdas_comp_upd.append(gspread.Cell(row=f_row_c, col=i_eta+1, value=int(datos_p_sel['eta']) if str(datos_p_sel['eta']).isdigit() else 0))
+                                                if i_con >= 0: celdas_comp_upd.append(gspread.Cell(row=f_row_c, col=i_con+1, value=datos_p_sel['cond']))
+                                                if i_rec >= 0: celdas_comp_upd.append(gspread.Cell(row=f_row_c, col=i_rec+1, value="NO"))
+                                            else:
+                                                fila_c = [""] * len(headers_comp)
+                                                partes_v = [str(r_new['Auto']).strip(), str(r_new['Año']).strip(), str(r_new['VIN / Serie']).strip()]
+                                                veh_limpio = " | ".join([p for p in partes_v if p and p not in ['NAN', 'NONE']])
+                                                
+                                                if i_sin >= 0: fila_c[i_sin] = str(r_new['Siniestro']).strip()
+                                                if i_veh >= 0: fila_c[i_veh] = veh_limpio
+                                                if i_tal >= 0: fila_c[i_tal] = str(r_new['Taller']).strip()
+                                                if i_pza >= 0: fila_c[i_pza] = str(r_new['Pieza']).strip()
+                                                if i_prv >= 0: fila_c[i_prv] = prov_sel
+                                                if i_cos >= 0: fila_c[i_cos] = costo_sel
+                                                if i_fec >= 0: fila_c[i_fec] = fecha_hoy_c
+                                                if i_eta >= 0: fila_c[i_eta] = int(datos_p_sel['eta']) if str(datos_p_sel['eta']).isdigit() else 0
+                                                if i_con >= 0: fila_c[i_con] = datos_p_sel['cond']
+                                                if i_dia >= 0: fila_c[i_dia] = int(datos_p_sel['dias']) if str(datos_p_sel['dias']).isdigit() else 0
+                                                if i_pag >= 0: fila_c[i_pag] = "Pendiente"
+                                                if i_rec >= 0: fila_c[i_rec] = "NO"
+                                                if i_ase >= 0: fila_c[i_ase] = str(r_new['_Aseguradora']).strip()
+
+                                                nuevas_filas_c.append(fila_c)
+
+                                        if celdas_comp_upd:
+                                            ws_comp.update_cells(celdas_comp_upd, value_input_option='USER_ENTERED')
+                                        if nuevas_filas_c:
+                                            ws_comp.append_rows(nuevas_filas_c, value_input_option='USER_ENTERED', table_range="A1")
+
+                                    st.session_state['reset_key_compras'] += 1
+                                    st.cache_data.clear()
+                                    st.success("✅ ¡Cambios y compras actualizados exitosamente!")
+                                    time.sleep(0.8)
+                                    st.rerun()
                                 except Exception as e:
                                     st.error(f"Error al registrar compras: {e}")
                 else:
-                    st.dataframe(df_cap.drop(columns=['Proveedor', 'Costo Compra', '_Aseguradora']), hide_index=True, use_container_width=True)
+                    st.dataframe(df_cap.drop(columns=['Proveedor', 'Costo Compra', 'Cancelar', '_Aseguradora']), hide_index=True, use_container_width=True)
             else:
                 st.success("🎉 ¡Excelente! Todas las piezas en procesamiento ya tienen su compra registrada.")
 
@@ -1414,26 +1521,24 @@ elif vista_actual == "🛒 Compras":
                 c_re_u = buscar_columna_compras(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
                 c_gu_u = buscar_columna_compras(df_completo, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"])
                 
-                def llave_cruce_c(s, d):
-                    sv = str(s).strip().upper()
-                    if sv.endswith('.0'): sv = sv[:-2]
-                    return f"{sv}_{' '.join(str(d).strip().upper().split())}"
-                
                 llaves_despachadas = set()
                 for _, ru in df_completo.iterrows():
                     est_u = str(ru.get(c_es_u, '')).strip().upper() if c_es_u else ''
                     rem_u = str(ru.get(c_re_u, '')).strip() if c_re_u else ''
                     gui_u = str(ru.get(c_gu_u, '')).strip() if c_gu_u else ''
                     if est_u in ['EN TRANSITO', 'ENTREGADO', 'RECIBIDO', 'FACTURADO', 'CANCELADO', 'PÉRDIDA TOTAL', 'PAGO DE DAÑOS'] or (rem_u not in ['', 'nan', 'None', 'NAN']) or (gui_u not in ['', 'nan', 'None', 'NAN']):
-                        llaves_despachadas.add(llave_cruce_c(ru.get(c_id_u, ''), ru.get(c_de_u, '')))
+                        llaves_despachadas.add(normalizar_llave_compra(ru.get(c_id_u, ''), ru.get(c_de_u, '')))
                 
-                df_c['_llave_c'] = df_c.apply(lambda r: llave_cruce_c(r.get('Siniestro', ''), r.get('Descripción Pieza', '')), axis=1)
+                df_c['_llave_c'] = df_c.apply(lambda r: normalizar_llave_compra(r.get('Siniestro', ''), r.get('Descripción Pieza', '')), axis=1)
                 df_c.loc[df_c['_llave_c'].isin(llaves_despachadas), 'Recibido_Bool'] = True
+            else:
+                df_c['_llave_c'] = df_c.apply(lambda r: normalizar_llave_compra(r.get('Siniestro', ''), r.get('Descripción Pieza', '')), axis=1)
                 
             if not modo_consulta: df_c = df_c[df_c['Recibido_Bool'] == False].copy()
             if df_c.empty: st.success("✅ Todo está al día. No hay pedidos pendientes de recepción con estos filtros.")
             else:
                 df_c['Cancelar Compra'] = False
+                df_c['Observaciones'] = df_c['_llave_c'].map(dict_obs_global).fillna("")
                 if 'Condición Pago' in df_c.columns:
                     df_c['Condición Pago'] = df_c['Condición Pago'].apply(normalizar_pago)
 
@@ -1501,7 +1606,7 @@ elif vista_actual == "🛒 Compras":
                     return v_str
                 
                 df_c['Vehículo_Corto'] = df_c.get('Vehículo', pd.Series([""]*len(df_c))).apply(formato_auto_corto)
-                cols_mostrar = ['Siniestro', 'Vehículo_Corto', 'Taller', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Recibido_Bool', 'Cancelar Compra', 'Alerta Financiera']
+                cols_mostrar = ['Siniestro', 'Vehículo_Corto', 'Taller', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Recibido_Bool', 'Cancelar Compra', 'Alerta Financiera', 'Observaciones']
                 df_disp = df_c[[c for c in cols_mostrar if c in df_c.columns]].copy()
                 df_disp.rename(columns={'Vehículo_Corto': 'Auto', 'Taller': 'CDR', 'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'ETA (Días)': 'ETA', 'Recibido_Bool': 'Recibido', 'Estatus Pago': 'Pago', 'Condición Pago': 'Cond. Pago', 'Días Crédito': 'Días Cr.'}, inplace=True)
                 
@@ -1521,7 +1626,8 @@ elif vista_actual == "🛒 Compras":
                         'Pago': st.column_config.SelectboxColumn("Pago", options=["", "Pendiente", "Pagado", "En Aclaración"], width="small"),
                         'Recibido': st.column_config.CheckboxColumn("🏁 Recibido", width="small"), 
                         'Cancelar Compra': st.column_config.CheckboxColumn("🚫 Cancelar", width="small"),
-                        'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True, width="medium")
+                        'Alerta Financiera': st.column_config.TextColumn("Alerta Financiera", disabled=True, width="medium"),
+                        'Observaciones': st.column_config.TextColumn("📝 Obs.", width="medium")
                     }
                     df_editado_compras = st.data_editor(df_disp, column_config=config_c, hide_index=True, use_container_width=True, key="ed_compras_main")
                     df_editado_compras.rename(columns={'Auto': 'Vehículo_Corto', 'CDR': 'Taller', 'Pieza': 'Descripción Pieza', 'Costo': 'Costo Compra', 'ETA': 'Tiempo Entrega (Días)', 'Cond. Pago': 'Condición Pago', 'Días Cr.': 'Días Crédito', 'Pago': 'Estatus Pago'}, inplace=True)
@@ -2365,7 +2471,7 @@ elif vista_actual == "🚚 Rutas":
             df_ent['Enviar Hoy'] = False
             for taller, df_taller in df_ent.groupby(col_taller):
                 with st.expander(f"🏢 {taller} | {len(df_taller)} pieza(s) lista(s) para ruta local", expanded=False):
-                    cols_ver = [c for c in ['Enviar Hoy', col_id, 'Vehiculo_Info', col_desc, col_estatus, col_remision] if c in df_taller.columns]
+                    cols_ver = [c for c in ['Enviar Hoy', col_id, 'Vehiculo_Info', col_desc, col_estatus, col_remision, col_comentarios] if c in df_taller.columns]
                     cfg = {
                         "Enviar Hoy": st.column_config.CheckboxColumn("🚚 Enviar Hoy", default=False),
                         col_id: st.column_config.TextColumn("Pedido / Siniestro", disabled=True),
@@ -2479,11 +2585,14 @@ elif vista_actual == "🚚 Rutas":
 
                 df_base_global['LLAVE'] = df_base_global.apply(lambda r: gen_llave_rutas(r.get(c_id_g, ''), r.get(c_desc_g, '')), axis=1)
                 
+                c_obs_g = next((c for c in df_base_global.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), col_comentarios)
                 dict_est_g = dict(zip(df_base_global['LLAVE'], df_base_global[c_est_g].astype(str).str.strip().str.upper())) if c_est_g else {}
                 dict_vin_g = dict(zip(df_base_global['LLAVE'], df_base_global[c_vin_g].astype(str).str.strip())) if c_vin_g else {}
+                dict_obs_g = dict(zip(df_base_global['LLAVE'], df_base_global[c_obs_g].astype(str).str.strip())) if c_obs_g else {}
 
                 df_c_pend['Estatus_Real'] = df_c_pend['LLAVE'].map(dict_est_g).fillna("EN PROCESAMIENTO")
                 df_c_pend['VIN_Real'] = df_c_pend['LLAVE'].map(dict_vin_g).fillna("S/D")
+                df_c_pend['Observaciones'] = df_c_pend['LLAVE'].map(dict_obs_g).replace(['nan', 'None'], '').fillna("")
 
                 estatus_excluidos = ["ENTREGADO", "RECIBIDO", "FACTURADO", "CANCELADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS"]
                 df_comp_rutas = df_c_pend[~df_c_pend['Estatus_Real'].isin(estatus_excluidos)].copy()
@@ -3495,6 +3604,11 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             if not df_editado_compras.empty:
                 for _, row in df_editado_compras.iterrows():
                     k = generar_llave(row.get('Siniestro', ''), row.get('Descripción Pieza', ''))
+                    orig = originales.get(k, {'comentario': ''})
+                    obs_comp = str(row.get('Observaciones', '')).strip()
+                    if obs_comp not in ['nan', 'None'] and obs_comp != orig.get('comentario', ''):
+                        cambios_a_guardar.setdefault(k, {})['comentario'] = obs_comp
+                        
                     cambios_bd_compras.setdefault(k, {})
                     if row.get('Cancelar Compra'):
                         cambios_bd_compras[k]['cancelar_compra'] = True

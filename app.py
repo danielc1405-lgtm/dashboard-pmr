@@ -1219,12 +1219,12 @@ elif vista_actual == "⚙️ Panel Operativo":
     with st.expander(f"↩️ Piezas para Recolección | {len(df_recoleccion)} Partida(s)", expanded=False):
         if not df_recoleccion.empty:
             if permiso_edicion:
-                cols_rec = [c for c in [col_id, col_cant, col_desc, col_precio, col_estatus] if c in df_recoleccion.columns] + [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_recoleccion.columns]
+                cols_rec = [c for c in [col_id, col_taller, col_cant, col_desc, col_precio, col_estatus] if c in df_recoleccion.columns] + [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_recoleccion.columns]
                 df_editado_rec = st.data_editor(df_recoleccion[cols_rec], column_config=base_config, disabled=[c for c in cols_rec if c not in [col_paqueteria, col_guia, col_comentarios]], hide_index=True, use_container_width=True, key="ed_rec_panel")
                 for col in df_recoleccion.columns: 
                     if col not in df_editado_rec.columns: df_editado_rec[col] = df_recoleccion[col].values
             else:
-                cols_rec = [c for c in [col_id, col_cant, col_desc, col_precio, col_estatus, col_paqueteria, col_guia, col_comentarios] if c in df_recoleccion.columns]
+                cols_rec = [c for c in [col_id, col_taller, col_cant, col_desc, col_precio, col_estatus, col_paqueteria, col_guia, col_comentarios] if c in df_recoleccion.columns]
                 st.dataframe(df_recoleccion[cols_rec], column_config=base_config, hide_index=True, use_container_width=True)
 
 # ==============================================================================

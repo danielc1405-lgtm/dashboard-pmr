@@ -874,6 +874,8 @@ elif vista_actual == "🚚 Operación del Día":
             df_reembolsos_op = df_mon[df_mon[col_estatus].astype(str).str.upper() == "EN PROCESO DE REEMBOLSO"].copy()
             df_mon_normal = df_mon[df_mon[col_estatus].astype(str).str.upper() != "EN PROCESO DE REEMBOLSO"].copy()
 
+            c_quien_rec = next((c for c in df_mon.columns if any(k in str(c).upper() for k in ["RECEPTOR", "QUIEN REC", "QUIÉN REC", "FIRMA"])), col_estatus_envio)
+
             # 1. ENTREGADO Y 2. EN TRÁNSITO
             for est in ["ENTREGADO", "EN TRANSITO"]:
                 df_est = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == est].copy()
@@ -881,8 +883,8 @@ elif vista_actual == "🚚 Operación del Día":
                     if est == "ENTREGADO":
                         titulo = f"📥 Entregados a Taller (Pedir Recepción en Portal) | {len(df_est)} Partida(s)"
                         if c_rec_disp: df_est[c_rec_disp] = df_est[c_rec_disp].apply(estandarizar_fechas_mx)
-                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, c_rec_disp, col_comentarios]
-                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', c_rec_disp: '📅 F. Entrega', col_comentarios: 'Observaciones'}
+                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, c_rec_disp, c_quien_rec, col_comentarios]
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', c_rec_disp: '📅 F. Entrega', c_quien_rec: '👤 Recibió / Detalle', col_comentarios: 'Observaciones'}
                     elif est == "EN TRANSITO":
                         titulo = f"🚚 En Tránsito / Paquetería | {len(df_est)} Partida(s)"
                         cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, col_estatus_envio, c_env_disp, col_comentarios]

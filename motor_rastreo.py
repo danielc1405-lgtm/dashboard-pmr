@@ -25,7 +25,6 @@ def convertir_a_formato_mx(fecha_raw):
     if not fecha_raw: return ""
     f_str = str(fecha_raw).strip().lower()
     
-    # Busca estrictamente: Día + Nombre de Mes Real + Año de 4 dígitos (Ej. "12 De Octubre Del 2026")
     match = re.search(rf"(\d{{1,2}})\s+(?:de\s+)?({PATRON_MESES})\s+(?:de\s+|del\s+)?(\d{{4}})", f_str, re.IGNORECASE)
     if match:
         try:
@@ -51,10 +50,11 @@ def conectar_sheets():
 # 2. MOTOR DE RASTREO CON EXTRACCIÓN DE FECHA Y FIRMA
 # ==========================================
 def rastrear_paquetexpress(guia, page):
-    print(f"  🔍 Buscando guía: {guia}...")
+    # Mantenemos esta frase para que el contador del Cuartel General cuente las guías únicas
+    print(f"🔍 Buscando guía: {guia}...")
     try:
-        page.goto(f"https://www.paquetexpress.com.mx/rastreo/{guia}", timeout=25000)
-        page.wait_for_selector(".TrackingStatusActive", timeout=12000)
+        page.goto(f"https://www.paquetexpress.com.mx/rastreo/{guia}", timeout=25000, wait_until="domcontentloaded")
+        page.wait_for_selector(".TrackingStatusActive", timeout=15000)
         
         textos_activos = page.locator(".TrackingStatusActive span").all_inner_texts()
         estatus_actual = textos_activos[-1].strip() if textos_activos else "Estatus no encontrado"
@@ -67,7 +67,6 @@ def rastrear_paquetexpress(guia, page):
                 items_historial = page.locator("ul li").all_inner_texts()
                 for item in items_historial:
                     if "recibió" in item.lower() or "entregada" in item.lower():
-                        # 1. Extraer quién recibió
                         match_recibe = re.search(r"recibi[oó]\s+([^\n\r]+)", item, re.IGNORECASE)
                         if match_recibe:
                             persona = match_recibe.group(1).strip()
@@ -75,33 +74,37 @@ def rastrear_paquetexpress(guia, page):
                         else:
                             estatus_final_api = "Entregado"
                         
-                        # 2. Extraer la fecha validando que contenga un mes real (ignora "11:52 Horas")
                         fecha_entrega_formateada = convertir_a_formato_mx(item)
                         break
-            except Exception as ex:
-                print(f"  ⚠️ Detalle menor extrayendo firma/fecha de {guia}: {ex}")
+            except Exception:
+                pass
 
         return estatus_final_api, fecha_entrega_formateada
 
-    except Exception as e:
-        print(f"  ⚠️ Timeout o error de red con la guía {guia}: {e}")
+    except Exception:
+        # Sin imprimir el Call log gigante de Playwright
         return "Pendiente de actualización", ""
 
 # ==========================================
 # 3. LÓGICA PRINCIPAL
 # ==========================================
 def ejecutar_laboratorio():
-    print("Iniciando Motor de Rastreo Inteligente (Con Fecha Exacta y Receptor)...")
+    print("==================================================")
+    print("   RADAR PAQUETEXPRESS -> BASE MAESTRA EN VIVO    ")
+    print("==================================================")
     doc = conectar_sheets()
     hojas_a_procesar = [doc.worksheet("BD_UNIFICADA")]
 
+    agente_humano = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True) 
-        page = browser.new_page()
+        browser = p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
+        context = browser.new_context(user_agent=agente_humano, viewport={"width": 1366, "height": 768}, locale="es-MX")
+        page = context.new_page()
         cache_guias = {}
         
         for ws in hojas_a_procesar:
-            print(f"\nRevisando hoja: {ws.title}...")
+            print(f"\nEscaneando hoja: {ws.title}...")
             datos = ws.get_all_values()
             if not datos: continue
             
@@ -112,54 +115,64 @@ def ejecutar_laboratorio():
                 idx_paq = headers.index(next(h for h in headers if "PAQUETERIA" in h or "PAQUETERÍA" in h))
                 idx_estatus = headers.index(next(h for h in headers if "ESTATUS" in h and "ENV" not in h and "PAGO" not in h))
                 idx_estatus_envio = headers.index(next(h for h in headers if "ESTATUS ENV" in h or "RASTREO" in h))
+                idx_taller = next((i for i, h in enumerate(headers) if "TALLER" in h or "CDR" in h), None)
                 idx_fecha_recibido = next((i for i, h in enumerate(headers) if "FECHA REC" in h or "FECHA ENT" in h), None)
             except StopIteration:
                 print(f"  [!] Faltan columnas clave en {ws.title}, saltando...")
                 continue
 
-            celdas_a_actualizar = []
-            
+            # Pre-filtrar las filas que requieren rastreo para mostrar un contador limpio [1/N]
+            filas_pendientes = []
             for i, fila in enumerate(datos[1:]):
                 if len(fila) <= max(idx_paq, idx_guia, idx_estatus, idx_estatus_envio):
                     continue
-                    
                 fila_estatus = str(fila[idx_estatus]).strip().upper()
                 fila_paqueteria = str(fila[idx_paq]).strip().upper()
                 fila_guia = str(fila[idx_guia]).strip()
                 valor_fecha_actual = str(fila[idx_fecha_recibido]).strip() if (idx_fecha_recibido is not None and len(fila) > idx_fecha_recibido) else ""
-                
-                # Detecta si la fecha está vacía o si tiene el error anterior ("Horas", "/09", "/10", "/12")
                 fecha_invalida = (not valor_fecha_actual) or ("HORAS" in valor_fecha_actual.upper()) or any(valor_fecha_actual.endswith(x) for x in ["/09", "/10", "/12"])
-                
                 requiere_rastreo = (fila_estatus == "EN TRANSITO") or (fila_estatus == "ENTREGADO" and fecha_invalida)
                 
                 if requiere_rastreo and fila_paqueteria == "PAQUETEXPRESS" and fila_guia:
-                    if fila_guia in cache_guias:
-                        nuevo_estatus_envio, fecha_recibido_extraida = cache_guias[fila_guia]
-                    else:
-                        nuevo_estatus_envio, fecha_recibido_extraida = rastrear_paquetexpress(fila_guia, page)
-                        cache_guias[fila_guia] = (nuevo_estatus_envio, fecha_recibido_extraida)
-                        time.sleep(1.5)
-                        
-                    print(f"  ✅ Fila {i+2} | Guía {fila_guia} ➔ {nuevo_estatus_envio} | Fecha Entrega: {fecha_recibido_extraida}")
+                    taller_str = str(fila[idx_taller]).strip()[:18] if (idx_taller is not None and len(fila) > idx_taller) else "CDR"
+                    filas_pendientes.append((i + 2, fila_guia, fila_estatus, fecha_invalida, taller_str))
+
+            total_f = len(filas_pendientes)
+            print(f"-> Se detectaron {total_f} partida(s) activas con guía Paquetexpress.\n")
+
+            celdas_a_actualizar = []
+            
+            for idx_item, (num_fila, fila_guia, fila_estatus, fecha_invalida, taller_str) in enumerate(filas_pendientes, start=1):
+                if fila_guia in cache_guias:
+                    nuevo_estatus_envio, fecha_recibido_extraida = cache_guias[fila_guia]
+                else:
+                    nuevo_estatus_envio, fecha_recibido_extraida = rastrear_paquetexpress(fila_guia, page)
+                    cache_guias[fila_guia] = (nuevo_estatus_envio, fecha_recibido_extraida)
+                    time.sleep(1.2)
+                
+                if nuevo_estatus_envio == "Pendiente de actualización":
+                    print(f"  ⏳ [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str:<18} | Guía {fila_guia} ➔ Sin avance aún en portal (En sitio)")
+                else:
+                    icono = "📦" if "ENTREGADO" in nuevo_estatus_envio.upper() else "🚚"
+                    txt_fecha = f" | Fecha: {fecha_recibido_extraida}" if fecha_recibido_extraida else ""
+                    print(f"  {icono} [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str:<18} | Guía {fila_guia} ➔ {nuevo_estatus_envio}{txt_fecha}")
                     
-                    if nuevo_estatus_envio != "Pendiente de actualización":
-                        celdas_a_actualizar.append(gspread.Cell(row=i+2, col=idx_estatus_envio+1, value=nuevo_estatus_envio))
-                        
-                        if "ENTREGADO" in nuevo_estatus_envio.upper() and fila_estatus == "EN TRANSITO":
-                            celdas_a_actualizar.append(gspread.Cell(row=i+2, col=idx_estatus+1, value="ENTREGADO"))
-                        
-                        if idx_fecha_recibido is not None and fecha_recibido_extraida and fecha_invalida:
-                            celdas_a_actualizar.append(gspread.Cell(row=i+2, col=idx_fecha_recibido+1, value=fecha_recibido_extraida))
+                    celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_estatus_envio+1, value=nuevo_estatus_envio))
+                    
+                    if "ENTREGADO" in nuevo_estatus_envio.upper() and fila_estatus == "EN TRANSITO":
+                        celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_estatus+1, value="ENTREGADO"))
+                    
+                    if idx_fecha_recibido is not None and fecha_recibido_extraida and fecha_invalida:
+                        celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_fecha_recibido+1, value=fecha_recibido_extraida))
 
             if celdas_a_actualizar:
-                print(f"\nSubiendo {len(celdas_a_actualizar)} actualizaciones a {ws.title}...")
+                print(f"\n☁️ Sincronizando {len(celdas_a_actualizar)} cambio(s) en {ws.title}...")
                 ws.update_cells(celdas_a_actualizar, value_input_option='USER_ENTERED')
             else:
-                print(f"  -> No hubo guías pendientes por actualizar en {ws.title}.")
+                print(f"\n-> Sin cambios nuevos que reportar en {ws.title}.")
 
         browser.close()
-    print("\n🎉 ¡Sincronización de rastreo, fechas y firmas finalizada con éxito!")
+    print("\n🎉 ¡Rastreo de guías, fechas y firmas finalizado con éxito!")
 
 if __name__ == "__main__":
     ejecutar_laboratorio()

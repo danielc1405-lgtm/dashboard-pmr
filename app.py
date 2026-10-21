@@ -1358,8 +1358,10 @@ elif vista_actual == "🛒 Compras":
                     
                     df_cap_edit['_Aseguradora'] = df_cap['_Aseguradora'].values
                     df_cap_edit['_Obs_Orig'] = df_cap['Observaciones'].values
+                    st.session_state['df_cap_edit_temp'] = df_cap_edit
 
-                    if st.button("💾 Registrar Compras / Cambios Capturados", type="primary", key="btn_guardar_compras_rapidas"):
+                    btn_rapido = st.button("💾 Registrar Compras / Cambios Capturados", type="primary", key="btn_guardar_compras_rapidas")
+                    if btn_rapido or (btn_guardar and vista_actual == "🛒 Compras"):
                         cond_prov = ~df_cap_edit['Proveedor'].astype(str).str.strip().isin(["", "None", "nan", "NAN"])
                         cond_canc = df_cap_edit['Cancelar'] == True
                         cond_obs = df_cap_edit['Observaciones'].astype(str).str.strip() != df_cap_edit['_Obs_Orig'].astype(str).str.strip()
@@ -3693,6 +3695,34 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         cambios_a_guardar[k]['compra_vehiculo'] = vehiculo_homologado
 
         if vista_actual == "🛒 Compras":
+            # 1. Leer cambios de la bandeja superior (Captura Rápida)
+            df_cap_temp = st.session_state.get('df_cap_edit_temp', pd.DataFrame())
+            if not df_cap_temp.empty:
+                for _, r_cap in df_cap_temp.iterrows():
+                    k_cap = generar_llave(r_cap.get('Siniestro', ''), r_cap.get('Pieza', ''))
+                    orig_cap = originales.get(k_cap, {'comentario': ''})
+                    
+                    obs_cap = str(r_cap.get('Observaciones', '')).strip()
+                    if obs_cap not in ['nan', 'None'] and obs_cap != orig_cap.get('comentario', ''):
+                        cambios_a_guardar.setdefault(k_cap, {})['comentario'] = obs_cap
+                        
+                    if r_cap.get('Cancelar') == True:
+                        cambios_a_guardar.setdefault(k_cap, {})['estatus'] = "CANCELADO"
+                    else:
+                        prov_cap = str(r_cap.get('Proveedor', '')).strip().upper()
+                        if prov_cap not in ['', 'NONE', 'NAN']:
+                            costo_val = r_cap.get('Costo Compra', 0.0)
+                            costo_str = str(round(float(costo_val), 2)) if pd.notna(costo_val) else '0'
+                            partes_v = [str(r_cap.get('Auto', '')).strip(), str(r_cap.get('Año', '')).strip(), str(r_cap.get('VIN / Serie', '')).strip()]
+                            veh_hom = " | ".join([p for p in partes_v if p and p not in ['NAN', 'NONE']])
+                            
+                            cambios_a_guardar.setdefault(k_cap, {})['crear_compra'] = True
+                            cambios_a_guardar[k_cap]['compra_prov'] = prov_cap
+                            cambios_a_guardar[k_cap]['compra_costo'] = costo_str
+                            cambios_a_guardar[k_cap]['compra_taller'] = str(r_cap.get('Taller', '')).strip()
+                            cambios_a_guardar[k_cap]['compra_vehiculo'] = veh_hom
+
+            # 2. Leer cambios de la bandeja inferior (Próximas Llegadas)
             df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
             if not df_editado_compras.empty:
                 for _, row in df_editado_compras.iterrows():
@@ -3860,7 +3890,11 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                                     dias_c = str(row_p.get('Días Crédito', '0')).strip()
                                                     if dias_c: datos_comp[i][i_dias_cred] = dias_c
                                                     break
-                                    if po_costo and po_costo not in ['0', '0.0', 'None', 'nan', '']:
+                                    if po_prov == 'EBAY':
+                                        datos_comp[i][i_tiempo] = '10'; datos_comp[i][i_cond_pago] = 'Pago en Plataforma'; datos_comp[i][i_dias_cred] = '0'
+                                    elif po_prov == 'MERCADO LIBRE':
+                                        datos_comp[i][i_tiempo] = '5'; datos_comp[i][i_cond_pago] = 'Pago en Plataforma'; datos_comp[i][i_dias_cred] = '0'
+                                    if po_costo and po_costo not in ['None', 'nan', '']:
                                         datos_comp[i][i_costo] = po_costo
 
                                 if not eliminar_fila: nuevos_datos_comp.append(datos_comp[i])

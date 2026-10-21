@@ -3755,7 +3755,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                     if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
                     if guia_actual != orig['guia']:
-                    cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                       cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
                     if guia_actual not in ['', 'nan', 'None', 'NAN']:
                         if 'estatus' not in cambios_a_guardar.get(k, {}):
                             cambios_a_guardar.setdefault(k, {})['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'

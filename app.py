@@ -816,14 +816,22 @@ elif vista_actual == "🚚 Operación del Día":
     df_op_dia = df_completo.copy() if not df_completo.empty else pd.DataFrame()
     
     if not df_op_dia.empty and col_estatus:
-        if col_estatus_envio:
-            def verificar_entrega_global(row):
-                rastreo = str(row.get(col_estatus_envio, '')).strip().lower()
-                est = str(row.get(col_estatus, '')).strip().upper()
-                if "delivery" in rastreo or "entregado" in rastreo:
-                    if est not in ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN", "PÉRDIDA TOTAL", "PAGO DE DAÑOS"]: return "ENTREGADO"
-                return row[col_estatus]
-            df_op_dia[col_estatus] = df_op_dia.apply(verificar_entrega_global, axis=1)
+        # 1. Interceptor automático:1) Si Rastreo dice Entregado -> ENTREGADO. 2) Si tiene Guía activa y sigue En Procesamiento -> EN TRANSITO.
+        def clasificar_estatus_logistico(row):
+            est = str(row.get(col_estatus, '')).strip().upper()
+            rastreo = str(row.get(col_estatus_envio, '')).strip().lower() if col_estatus_envio else ''
+            guia_val = str(row.get(col_guia, '')).strip() if col_guia else ''
+            
+            est_cerrados = ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "PAGO A TALLER"]
+            if est in est_cerrados:
+                return est
+            if "delivery" in rastreo or "entregado" in rastreo:
+                return "ENTREGADO"
+            if est != "ENTREGADO" and guia_val not in ['', 'nan', 'None', 'NAN']:
+                return "EN TRANSITO"
+            return est
+
+        df_op_dia[col_estatus] = df_op_dia.apply(clasificar_estatus_logistico, axis=1)
 
         estatus_validos = ["ENTREGADO", "EN TRANSITO", "EN PROCESAMIENTO", "EN PROCESO DE REEMBOLSO"]
         df_mon = df_op_dia[df_op_dia[col_estatus].astype(str).str.upper().isin(estatus_validos)].copy()
@@ -870,25 +878,28 @@ elif vista_actual == "🚚 Operación del Día":
             
             c_env_disp = next((c for c in df_mon.columns if "FECHA ENV" in str(c).upper()), None)
             c_rec_disp = next((c for c in df_mon.columns if "FECHA REC" in str(c).upper() or "FECHA ENT" in str(c).upper()), None)
+            c_quien_rec = next((c for c in df_mon.columns if any(k in str(c).upper() for k in ["RECEPTOR", "QUIEN REC", "QUIÉN REC", "FIRMA"])), col_estatus_envio)
             
             df_reembolsos_op = df_mon[df_mon[col_estatus].astype(str).str.upper() == "EN PROCESO DE REEMBOLSO"].copy()
             df_mon_normal = df_mon[df_mon[col_estatus].astype(str).str.upper() != "EN PROCESO DE REEMBOLSO"].copy()
 
-            c_quien_rec = next((c for c in df_mon.columns if any(k in str(c).upper() for k in ["RECEPTOR", "QUIEN REC", "QUIÉN REC", "FIRMA"])), col_estatus_envio)
-
-            # 1. ENTREGADO Y 2. EN TRÁNSITO
+            # 1. ENTREGADO (CON FECHA ENVÍO + FECHA ENTREGA + QUIÉN RECIBIÓ) Y 2. EN TRÁNSITO
             for est in ["ENTREGADO", "EN TRANSITO"]:
                 df_est = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == est].copy()
                 if not df_est.empty:
+                    if c_env_disp and c_env_disp in df_est.columns:
+                        df_est[c_env_disp] = df_est[c_env_disp].apply(estandarizar_fechas_mx)
+                    if c_rec_disp and c_rec_disp in df_est.columns:
+                        df_est[c_rec_disp] = df_est[c_rec_disp].apply(estandarizar_fechas_mx)
+                        
                     if est == "ENTREGADO":
                         titulo = f"📥 Entregados a Taller (Pedir Recepción en Portal) | {len(df_est)} Partida(s)"
-                        if c_rec_disp: df_est[c_rec_disp] = df_est[c_rec_disp].apply(estandarizar_fechas_mx)
-                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, c_rec_disp, c_quien_rec, col_comentarios]
-                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', c_rec_disp: '📅 F. Entrega', c_quien_rec: '👤 Recibió / Detalle', col_comentarios: 'Observaciones'}
+                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, c_env_disp, c_rec_disp, c_quien_rec, col_comentarios]
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', c_env_disp: '📤 F. Envío', c_rec_disp: '📅 F. Entrega', c_quien_rec: '👤 Recibió / Detalle', col_comentarios: 'Observaciones'}
                     elif est == "EN TRANSITO":
                         titulo = f"🚚 En Tránsito / Paquetería | {len(df_est)} Partida(s)"
                         cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, col_estatus_envio, c_env_disp, col_comentarios]
-                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', col_estatus_envio: 'Rastreo API', c_env_disp: 'F. Envío', col_comentarios: 'Observaciones'}
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', col_estatus_envio: 'Rastreo API', c_env_disp: '📤 F. Envío', col_comentarios: 'Observaciones'}
                             
                     with st.expander(titulo, expanded=True):
                         cols_finales = [c for c in cols_ver if c and c in df_est.columns]
@@ -3728,7 +3739,13 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     
                     if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                     if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                    if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                    if guia_actual != orig['guia']:
+                        cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                        if guia_actual not in ['', 'nan', 'None', 'NAN']:
+                            cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
+                            if 'estatus' not in cambios_a_guardar.get(k, {}) and orig['estatus_db'] in ['EN PROCESAMIENTO', 'POR CONFIRMAR', '']:
+                                cambios_a_guardar[k]['estatus'] = 'EN TRANSITO'
+                                cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
                     if venc_actual and venc_actual != orig['vencimiento_db'] and 'vencimiento' not in cambios_a_guardar.get(k, {}): cambios_a_guardar.setdefault(k, {})['vencimiento'] = venc_actual
                     if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
                     

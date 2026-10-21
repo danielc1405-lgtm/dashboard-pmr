@@ -131,7 +131,8 @@ def ejecutar_laboratorio():
                 fila_guia = str(fila[idx_guia]).strip()
                 valor_fecha_actual = str(fila[idx_fecha_recibido]).strip() if (idx_fecha_recibido is not None and len(fila) > idx_fecha_recibido) else ""
                 fecha_invalida = (not valor_fecha_actual) or ("HORAS" in valor_fecha_actual.upper()) or any(valor_fecha_actual.endswith(x) for x in ["/09", "/10", "/12"])
-                requiere_rastreo = (fila_estatus == "EN TRANSITO") or (fila_estatus == "ENTREGADO" and fecha_invalida)
+                # Rastrea cualquier guía activa aunque su estatus siga diciendo EN PROCESAMIENTO
+                requiere_rastreo = (fila_estatus in ["EN TRANSITO", "EN PROCESAMIENTO"]) or (fila_estatus == "ENTREGADO" and fecha_invalida)
                 
                 if requiere_rastreo and fila_paqueteria == "PAQUETEXPRESS" and fila_guia:
                     taller_str = str(fila[idx_taller]).strip()[:18] if (idx_taller is not None and len(fila) > idx_taller) else "CDR"
@@ -159,7 +160,7 @@ def ejecutar_laboratorio():
                     
                     celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_estatus_envio+1, value=nuevo_estatus_envio))
                     
-                    if "ENTREGADO" in nuevo_estatus_envio.upper() and fila_estatus == "EN TRANSITO":
+                    if "ENTREGADO" in nuevo_estatus_envio.upper() and fila_estatus in ["EN TRANSITO", "EN PROCESAMIENTO"]:
                         celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_estatus+1, value="ENTREGADO"))
                     
                     if idx_fecha_recibido is not None and fecha_recibido_extraida and fecha_invalida:

@@ -222,7 +222,7 @@ if not df_historico.empty:
         # Rescatamos del histórico los reembolsos o recolecciones que sigan activos
         c_est_h = next((c for c in df_historico.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
         if c_est_h:
-            df_hist_activos = df_historico[df_historico[c_est_h].astype(str).str.upper().str.contains("PROCESO DE REEMBOLSO|PROCESO DE RECOLECC", na=False)].copy()
+            df_hist_activos = df_historico[df_historico[c_est_h].astype(str).str.upper().str.contains("PROCESO DE REEMBOLSO|RECOLECC", na=False)].copy()
             if not df_hist_activos.empty:
                 df_completo = pd.concat([df_completo, df_hist_activos], ignore_index=True)
 
@@ -822,15 +822,14 @@ elif vista_actual == "🚚 Operación del Día":
             rastreo = str(row.get(col_estatus_envio, '')).strip().lower() if col_estatus_envio else ''
             guia_val = str(row.get(col_guia, '')).strip() if col_guia else ''
             
+            if "TRANSITO (RECOLECC" in est:
+                return "EN TRANSITO (RECOLECCIÓN)"
             est_cerrados = ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "PAGO A TALLER"]
             if est in est_cerrados:
                 return est
             if "delivery" in rastreo or "entregado" in rastreo:
                 return "ENTREGADO"
-            # Si tiene guía y estaba en recolección, aseguramos su estatus de devolución
-            if est == "EN PROCESO DE RECOLECCIÓN" and guia_val not in ['', 'nan', 'None', 'NAN']:
-                return "EN TRANSITO (RECOLECCIÓN)"
-            if est != "ENTREGADO" and guia_val not in ['', 'nan', 'None', 'NAN'] and est != "EN TRANSITO (RECOLECCIÓN)":
+            if est != "ENTREGADO" and guia_val not in ['', 'nan', 'None', 'NAN']:
                 return "EN TRANSITO"
             return est
 
@@ -1234,8 +1233,15 @@ elif vista_actual == "⚙️ Panel Operativo":
     with st.expander(f"↩️ Piezas para Recolección | {len(df_recoleccion)} Partida(s)", expanded=False):
         if not df_recoleccion.empty:
             if permiso_edicion:
-                cols_rec = [c for c in [col_id, col_taller, col_cant, col_desc, col_precio, col_estatus] if c in df_recoleccion.columns] + [c for c in [col_paqueteria, col_guia, col_comentarios] if c in df_recoleccion.columns]
-                df_editado_rec = st.data_editor(df_recoleccion[cols_rec], column_config=base_config, disabled=[c for c in cols_rec if c not in [col_paqueteria, col_guia, col_comentarios]], hide_index=True, use_container_width=True, key="ed_rec_panel")
+                df_recoleccion['En_Retorno'] = df_recoleccion[col_estatus].astype(str).str.upper().str.contains("TRANSITO", na=False)
+                df_recoleccion['Guia_Retorno'] = ""
+                cols_rec = [c for c in [col_id, col_taller, col_cant, col_desc, col_precio, col_estatus] if c in df_recoleccion.columns] + [c for c in [col_paqueteria, col_guia] if c in df_recoleccion.columns] + ['Guia_Retorno', 'En_Retorno'] + [c for c in [col_comentarios] if c in df_recoleccion.columns]
+                config_rec = base_config.copy()
+                if col_guia: config_rec[col_guia] = st.column_config.TextColumn("Guía Actual / Ida")
+                config_rec["Guia_Retorno"] = st.column_config.TextColumn("🆕 Guía Retorno (Capturar aquí)")
+                config_rec["En_Retorno"] = st.column_config.CheckboxColumn("🚚 En Retorno", default=False)
+                cols_edit_rec = [col_paqueteria, col_guia, 'Guia_Retorno', 'En_Retorno', col_comentarios]
+                df_editado_rec = st.data_editor(df_recoleccion[cols_rec], column_config=config_rec, disabled=[c for c in cols_rec if c not in cols_edit_rec], hide_index=True, use_container_width=True, key="ed_rec_panel")
                 for col in df_recoleccion.columns: 
                     if col not in df_editado_rec.columns: df_editado_rec[col] = df_recoleccion[col].values
             else:
@@ -3633,71 +3639,34 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     vehiculo_homologado = " | ".join([p for p in [v_auto, v_ano, v_vin] if p and p not in ['NAN', 'NONE']])
                     cambios_a_guardar[k]['compra_vehiculo'] = vehiculo_homologado
 
-        for df_venc in [df_editado_venc, df_editado_atrasadas]:
-            if not df_venc.empty:
-                for _, row in df_venc.iterrows():
-                    k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                    orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
-                    
-                    nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
-                    comentario_actual = str(row.get(col_comentarios, '')).strip()
-                    paq_actual = str(row.get(col_paqueteria, '')).strip()
-                    guia_actual = str(row.get(col_guia, '')).strip()
-                    nueva_fecha = row.get('Nueva Fecha')
-                    
-                    if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                        try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
-                        except: fecha_str = str(nueva_fecha)
-                        cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
-                        if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                    
-                    if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                    rem_actual = str(row.get(col_remision, '')).strip() if col_remision else ''
-                    if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-                    if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                    if guia_actual != orig['guia']:
-                        cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-                        if guia_actual not in ['', 'nan', 'None']: cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
-                    if rem_actual not in ['', 'nan', 'None'] and not orig['remision_bool']:
-                        cambios_a_guardar.setdefault(k, {})['remision_num'] = rem_actual
-                    if cambios_a_guardar.get(k, {}).get('estatus') in ['ENTREGADO', 'RECIBIDO']:
-                        cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
-
-        for df_venc in [df_editado_venc, df_editado_atrasadas]:
-            if not df_venc.empty:
-                for _, row in df_venc.iterrows():
-                    k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                    orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
-                    
-                    nuevo_estatus = "CANCELADO" if row.get('Cancelar') else None
-                    comentario_actual = str(row.get(col_comentarios, '')).strip()
-                    paq_actual = str(row.get(col_paqueteria, '')).strip()
-                    guia_actual = str(row.get(col_guia, '')).strip()
-                    nueva_fecha = row.get('Nueva Fecha')
-                    
-                    if pd.notnull(nueva_fecha) and str(nueva_fecha).strip() not in ['', 'NaT', 'None']:
-                        try: fecha_str = pd.to_datetime(nueva_fecha).strftime('%d/%b/%y')
-                        except: fecha_str = str(nueva_fecha)
-                        cambios_a_guardar.setdefault(k, {})['vencimiento'] = fecha_str
-                        if not nuevo_estatus: nuevo_estatus = "EN PROCESAMIENTO"
-                    
-                    if nuevo_estatus and nuevo_estatus != orig['estatus_db']: cambios_a_guardar.setdefault(k, {})['estatus'] = nuevo_estatus
-                    if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-                    if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                    if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-
         if 'df_editado_rec' in locals() and not df_editado_rec.empty:
             for _, row in df_editado_rec.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': ''})
+                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
                 
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 paq_actual = str(row.get(col_paqueteria, '')).strip()
                 guia_actual = str(row.get(col_guia, '')).strip()
+                guia_retorno_nueva = str(row.get('Guia_Retorno', '')).strip()
+                en_retorno_chk = bool(row.get('En_Retorno', False))
                 
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                 if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                
+                # Si escribiste una Guía Retorno nueva o cambiaste la columna Guía o marcaste la casilla En Retorno:
+                if guia_retorno_nueva not in ['', 'nan', 'None', 'NAN']:
+                    cambios_a_guardar.setdefault(k, {})['guia'] = guia_retorno_nueva
+                    cambios_a_guardar[k]['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
+                    cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
+                    cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
+                elif guia_actual != orig['guia'] and guia_actual not in ['', 'nan', 'None', 'NAN']:
+                    cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                    cambios_a_guardar[k]['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
+                    cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
+                    cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
+                elif en_retorno_chk and orig['estatus_db'] != 'EN TRANSITO (RECOLECCIÓN)':
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
+                    cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
 
         if not df_editado_cobro.empty:
             for _, row in df_editado_cobro.iterrows():
@@ -3726,13 +3695,11 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
 
         if not df_editado.empty:
-            # Buscamos la columna ID real dentro de df_editado
             c_id_real = buscar_columna(df_editado, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
             c_desc_real = buscar_columna(df_editado, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
             
             if c_id_real and c_desc_real:
                 for _, row in df_editado.iterrows():
-                    # Usamos c_id_real explícitamente, que es el ID puro (ej. 1153085), NO el agrupador
                     k = generar_llave(row.get(c_id_real, ''), row.get(c_desc_real, ''))
                     orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': '', 'remision_bool': False, 'vencimiento_db': '', 'asignacion_db': ''})
                     
@@ -3755,10 +3722,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                     if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
                     if guia_actual != orig['guia']:
-                       cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-                    if guia_actual not in ['', 'nan', 'None', 'NAN']:
-                        if 'estatus' not in cambios_a_guardar.get(k, {}):
-                            cambios_a_guardar.setdefault(k, {})['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
+                        cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
                         if guia_actual not in ['', 'nan', 'None', 'NAN']:
                             cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
                             if 'estatus' not in cambios_a_guardar.get(k, {}) and orig['estatus_db'] in ['EN PROCESAMIENTO', 'POR CONFIRMAR', '']:
@@ -3774,7 +3738,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
                         cambios_a_guardar[k]['compra_taller'] = str(row.get(col_taller, '')).strip()
                         
-                        # Armar vehículo homologado
                         v_info = str(row.get('Vehiculo_Info', '')).strip()
                         partes = v_info.split(' | ')
                         v_auto = partes[0].strip() if len(partes) > 0 else v_info
@@ -3786,7 +3749,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         cambios_a_guardar[k]['compra_vehiculo'] = vehiculo_homologado
 
         if vista_actual == "🛒 Compras":
-            # 1. Leer cambios de la bandeja superior (Captura Rápida)
             df_cap_temp = st.session_state.get('df_cap_edit_temp', pd.DataFrame())
             if not df_cap_temp.empty:
                 for _, r_cap in df_cap_temp.iterrows():
@@ -3813,7 +3775,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             cambios_a_guardar[k_cap]['compra_taller'] = str(r_cap.get('Taller', '')).strip()
                             cambios_a_guardar[k_cap]['compra_vehiculo'] = veh_hom
 
-            # 2. Leer cambios de la bandeja inferior (Próximas Llegadas)
             df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
             if not df_editado_compras.empty:
                 for _, row in df_editado_compras.iterrows():
@@ -3861,6 +3822,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                 'id': headers.index(buscar_columna(headers, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])) if buscar_columna(headers, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"]) else -1,
                                 'desc': headers.index(buscar_columna(headers, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])) if buscar_columna(headers, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"]) else -1,
                                 'estatus': headers.index(buscar_columna(headers, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])) if buscar_columna(headers, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"]) else -1,
+                                'est_env': headers.index(buscar_columna(headers, ["ESTATUS ENVIO", "ESTATUS ENVÍO", "RASTREO"], ["ESTATUS ENV", "RASTREO"], excluidos=[])) if buscar_columna(headers, ["ESTATUS ENVIO", "ESTATUS ENVÍO", "RASTREO"], ["ESTATUS ENV", "RASTREO"], excluidos=[]) else -1,
                                 'rem': headers.index(buscar_columna(headers, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])) if buscar_columna(headers, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"]) else -1,
                                 'usr_rem': headers.index(buscar_columna(headers, ["USUARIO REMISION", "USUARIO REMISIÓN"], ["USUARIO REM"])) if buscar_columna(headers, ["USUARIO REMISION", "USUARIO REMISIÓN"], ["USUARIO REM"]) else -1,
                                 'coment': headers.index(buscar_columna(headers, ["COMENTARIOS", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])) if buscar_columna(headers, ["COMENTARIOS", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"]) else -1,
@@ -3899,6 +3861,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                     c = cambios_a_guardar[k]
                                     cambio_realizado = True
                                     if 'estatus' in c and mapa_hoja['estatus'] >= 0: datos_hoja[i][mapa_hoja['estatus']] = c['estatus']
+                                    if 'estatus_envio' in c and mapa_hoja.get('est_env', -1) >= 0: datos_hoja[i][mapa_hoja['est_env']] = c['estatus_envio']
                                     if 'remision_num' in c and mapa_hoja['rem'] >= 0: datos_hoja[i][mapa_hoja['rem']] = c['remision_num']
                                     if 'usuario_rem' in c and mapa_hoja['usr_rem'] >= 0: datos_hoja[i][mapa_hoja['usr_rem']] = c['usuario_rem']
                                     if 'comentario' in c and mapa_hoja['coment'] >= 0: datos_hoja[i][mapa_hoja['coment']] = c['comentario']

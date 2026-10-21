@@ -3674,7 +3674,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
         if 'df_editado_rec' in locals() and not df_editado_rec.empty:
             for _, row in df_editado_rec.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': ''})
+                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
                 
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 paq_actual = str(row.get(col_paqueteria, '')).strip()
@@ -3682,7 +3682,13 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                 if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                if guia_actual != orig['guia']:
+                    cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                    if guia_actual not in ['', 'nan', 'None', 'NAN']:
+                        # Al ingresar la guía de devolución, pasa a EN TRANSITO igual que las de ida
+                        if 'estatus' not in cambios_a_guardar.get(k, {}):
+                            cambios_a_guardar.setdefault(k, {})['estatus'] = 'EN TRANSITO'
+                            cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
 
         if not df_editado_cobro.empty:
             for _, row in df_editado_cobro.iterrows():

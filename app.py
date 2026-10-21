@@ -686,10 +686,9 @@ elif vista_actual == "🚚 Operación del Día":
         
     if not df_rutas.empty and 'ESTATUS' in df_rutas.columns:
         fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
-        cond_pendientes = df_rutas['ESTATUS'].astype(str).str.upper() == 'PENDIENTE'
-        cond_hoy = df_rutas['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
+        # Solo rutas programadas el día de HOY (las de días anteriores ya no se arrastran)
+        df_rutas_dia = df_rutas[df_rutas['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)].copy()
         
-        df_rutas_dia = df_rutas[cond_pendientes | cond_hoy].copy()
         df_rutas_pendientes = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'PENDIENTE']
         df_rutas_completados = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'COMPLETADO']
         
@@ -736,9 +735,41 @@ elif vista_actual == "🚚 Operación del Día":
             df_resumen['Destino Final'] = df_resumen['NOTA'].apply(extraer_destino)
             df_resumen['Instrucción'] = df_resumen['NOTA'].apply(extraer_instruccion)
             df_resumen['Vehículo Corto'] = df_resumen['VEHICULO'].apply(acortar_vehiculo)
+            df_resumen['Eliminar'] = False
             
-            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'Destino Final', 'Vehículo Corto', 'Instrucción', 'Estado']].rename(columns={'LUGAR': 'Lugar a Visitar', 'SINIESTRO': 'Siniestro(s)', 'Vehículo Corto': 'Vehículo'})
-            st.dataframe(df_destinos, hide_index=True, use_container_width=True)
+            df_destinos = df_resumen[['No.', 'LUGAR', 'Operación', 'SINIESTRO', 'Destino Final', 'Vehículo Corto', 'Instrucción', 'Estado', 'Eliminar']].rename(
+                columns={'LUGAR': 'Lugar a Visitar', 'SINIESTRO': 'Siniestro(s)', 'Vehículo Corto': 'Vehículo'}
+            )
+            
+            ed_destinos = st.data_editor(
+                df_destinos,
+                column_config={
+                    "Eliminar": st.column_config.CheckboxColumn("❌", default=False, width="small")
+                },
+                disabled=['No.', 'Lugar a Visitar', 'Operación', 'Siniestro(s)', 'Destino Final', 'Vehículo', 'Instrucción', 'Estado'],
+                hide_index=True,
+                use_container_width=True,
+                key="ed_destinos_dia_op"
+            )
+            
+            seleccion_borrar = ed_destinos[ed_destinos['Eliminar'] == True]
+            if not seleccion_borrar.empty:
+                ids_borrar = set(df_resumen.loc[seleccion_borrar.index, 'ID_RUTA'].astype(str).str.strip())
+                if st.button("🗑️ Eliminar", type="primary", key="btn_del_ruta_op"):
+                    with st.spinner("Eliminando de la ruta..."):
+                        try:
+                            idx_id_r = [str(h).strip().upper() for h in datos_rutas[0]].index("ID_RUTA")
+                            filas_conservar = [datos_rutas[0]] + [
+                                fila_r for fila_r in datos_rutas[1:]
+                                if not (len(fila_r) > idx_id_r and str(fila_r[idx_id_r]).strip() in ids_borrar)
+                            ]
+                            ws_rutas.clear()
+                            ws_rutas.update(range_name='A1', values=filas_conservar, value_input_option='USER_ENTERED')
+                            st.toast("Visita(s) eliminada(s)", icon="🗑️")
+                            time.sleep(0.6)
+                            st.rerun()
+                        except Exception as e_del:
+                            st.error(f"Error al eliminar: {e_del}")
             
             # --- APARTADO PARA REVIVIR COMPLETADAS POR ERROR DESDE EL DASHBOARD ---
             df_comp_hoy = df_resumen[df_resumen['ESTATUS'].astype(str).str.upper() == 'COMPLETADO'].copy()
@@ -749,7 +780,7 @@ elif vista_actual == "🚚 Operación del Día":
                         opciones_rev = [f"{r['ID_RUTA']} | {r['LUGAR']} ({r['Operación']} - {r['SINIESTRO']})" for _, r in df_comp_hoy.iterrows()]
                         ruta_a_revivir = st.selectbox("Selecciona la visita que deseas regresar al celular del chofer:", opciones_rev, key="sel_revivir_ruta_op")
                     with c_rev2:
-                        if st.button("♻️ Revivir a Ruta Activa", type="primary", use_container_width=True, key="btn_revivir_ruta_op"):
+                        if st.button("♻️ Revivir", type="primary", use_container_width=True, key="btn_revivir_ruta_op"):
                             id_target = ruta_a_revivir.split(" | ")[0].strip()
                             with st.spinner("Restaurando parada a PENDIENTE..."):
                                 try:
@@ -764,7 +795,7 @@ elif vista_actual == "🚚 Operación del Día":
                                 except Exception as e_r:
                                     st.error(f"Error al revivir ruta: {e_r}")
         else:
-            st.caption("No hay viajes activos despachados en este momento.")
+            st.caption("No hay viajes activos despachados el día de hoy.")
 
     st.markdown("---")
     st.markdown("### 📦 Estatus de Piezas en Operación (Multiasistencias + GNP)")
@@ -1515,7 +1546,7 @@ elif vista_actual == "🛒 Compras":
         if not df_c.empty:
             df_c['Recibido_Bool'] = df_c['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
             
-            # Cruzar con BD_UNIFICADA: si ya tiene Remisión, Guía o ya está EN TRANSITO / ENTREGADO / RECIBIDO / FACTURADO, ya salió de compras
+            # Cruzar con BD_UNIFICADA: Solo sale en automático si ya tiene GUÍA, si ya fue ENTREGADO/RECIBIDO/FACTURADO/CANCELADO, o si es de INVENTARIO y ya tiene remisión
             if not df_completo.empty:
                 c_id_u = buscar_columna_compras(df_completo, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])
                 c_de_u = buscar_columna_compras(df_completo, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])
@@ -1523,16 +1554,21 @@ elif vista_actual == "🛒 Compras":
                 c_re_u = buscar_columna_compras(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
                 c_gu_u = buscar_columna_compras(df_completo, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"])
                 
-                llaves_despachadas = set()
+                llaves_finalizadas = set()
+                llaves_con_remision = set()
                 for _, ru in df_completo.iterrows():
+                    k_u = normalizar_llave_compra(ru.get(c_id_u, ''), ru.get(c_de_u, ''))
                     est_u = str(ru.get(c_es_u, '')).strip().upper() if c_es_u else ''
                     rem_u = str(ru.get(c_re_u, '')).strip() if c_re_u else ''
                     gui_u = str(ru.get(c_gu_u, '')).strip() if c_gu_u else ''
-                    if est_u in ['EN TRANSITO', 'ENTREGADO', 'RECIBIDO', 'FACTURADO', 'CANCELADO', 'PÉRDIDA TOTAL', 'PAGO DE DAÑOS'] or (rem_u not in ['', 'nan', 'None', 'NAN']) or (gui_u not in ['', 'nan', 'None', 'NAN']):
-                        llaves_despachadas.add(normalizar_llave_compra(ru.get(c_id_u, ''), ru.get(c_de_u, '')))
+                    if est_u in ['ENTREGADO', 'RECIBIDO', 'FACTURADO', 'CANCELADO', 'PÉRDIDA TOTAL', 'PAGO DE DAÑOS'] or (gui_u not in ['', 'nan', 'None', 'NAN']):
+                        llaves_finalizadas.add(k_u)
+                    if rem_u not in ['', 'nan', 'None', 'NAN'] or est_u == 'EN TRANSITO':
+                        llaves_con_remision.add(k_u)
                 
                 df_c['_llave_c'] = df_c.apply(lambda r: normalizar_llave_compra(r.get('Siniestro', ''), r.get('Descripción Pieza', '')), axis=1)
-                df_c.loc[df_c['_llave_c'].isin(llaves_despachadas), 'Recibido_Bool'] = True
+                es_inv = df_c['Proveedor'].astype(str).str.strip().str.upper() == 'INVENTARIO'
+                df_c.loc[df_c['_llave_c'].isin(llaves_finalizadas) | (es_inv & df_c['_llave_c'].isin(llaves_con_remision)), 'Recibido_Bool'] = True
             else:
                 df_c['_llave_c'] = df_c.apply(lambda r: normalizar_llave_compra(r.get('Siniestro', ''), r.get('Descripción Pieza', '')), axis=1)
                 
@@ -2427,14 +2463,34 @@ elif vista_actual == "🚚 Rutas":
             
             if filas_insertar:
                 ws_r = doc.worksheet("BD_RUTAS")
-                if len(ws_r.get_all_values()) == 0: 
+                existentes_r = ws_r.get_all_values()
+                if len(existentes_r) == 0: 
                     ws_r.append_row(["ID_RUTA", "FECHA", "TIPO_OPERACION", "LUGAR", "DIRECCION", "VEHICULO", "VIN", "PIEZA", "SINIESTRO", "NOTA", "ESTATUS"])
-                ws_r.append_rows(filas_insertar, value_input_option='USER_ENTERED')
-                return True
+                    existentes_r = []
+                
+                hoy_prefijo = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
+                llaves_hoy_r = set()
+                for r_ex in existentes_r[1:]:
+                    if len(r_ex) >= 11 and hoy_prefijo in str(r_ex[1]) and str(r_ex[10]).strip().upper() == "PENDIENTE":
+                        # Llave: TIPO_OPERACION + LUGAR + PIEZA + SINIESTRO
+                        llaves_hoy_r.add(f"{str(r_ex[2]).strip().upper()}_{str(r_ex[3]).strip().upper()}_{str(r_ex[7]).strip().upper()}_{str(r_ex[8]).strip().upper()}")
+                
+                filas_unicas = []
+                for f_ins in filas_insertar:
+                    k_ins = f"{str(f_ins[2]).strip().upper()}_{str(f_ins[3]).strip().upper()}_{str(f_ins[7]).strip().upper()}_{str(f_ins[8]).strip().upper()}"
+                    if k_ins not in llaves_hoy_r:
+                        filas_unicas.append(f_ins)
+                        llaves_hoy_r.add(k_ins)
+                
+                if filas_unicas:
+                    ws_r.append_rows(filas_unicas, value_input_option='USER_ENTERED')
+                    return True
+                else:
+                    st.toast("ℹ️ Esta partida ya estaba en la ruta activa de hoy.", icon="ℹ️")
+                    return False
         except Exception as e:
             st.error(f"Error al despachar: {e}")
             return False
-        return False
 
     doc = init_connection()
 
@@ -3509,7 +3565,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             orig = originales.get(k, {'remision_bool': False})
             cambios_a_guardar.setdefault(k, {}).update({'estatus': 'EN TRANSITO', 'imprimir_remision': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
             if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
-            cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
     if btn_guardar:
         if not df_editado_conf.empty:
@@ -3577,8 +3632,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         if guia_actual not in ['', 'nan', 'None']: cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
                     if rem_actual not in ['', 'nan', 'None'] and not orig['remision_bool']:
                         cambios_a_guardar.setdefault(k, {})['remision_num'] = rem_actual
-                        cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
-                    if cambios_a_guardar.get(k, {}).get('estatus') in ['EN TRANSITO', 'ENTREGADO', 'RECIBIDO']:
+                    if cambios_a_guardar.get(k, {}).get('estatus') in ['ENTREGADO', 'RECIBIDO']:
                         cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
         for df_venc in [df_editado_venc, df_editado_atrasadas]:
@@ -3961,6 +4015,10 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                                 
                                                 dias_cred_calc = str(row_p.get('Días Crédito', '0')).strip()
                                                 break
+                                    if nombre_prov_completo == 'EBAY':
+                                        eta_calc = '10'; cond_pago_calc = 'Pago en Plataforma'; dias_cred_calc = '0'
+                                    elif nombre_prov_completo == 'MERCADO LIBRE':
+                                        eta_calc = '5'; cond_pago_calc = 'Pago en Plataforma'; dias_cred_calc = '0'
                                     n_row[i_prov] = nombre_prov_completo; n_row[i_tiempo] = eta_calc if eta_calc else '0'
                                     n_row[i_cond_pago] = cond_pago_calc; n_row[i_dias_cred] = dias_cred_calc
                                     nuevas_filas.append(n_row)

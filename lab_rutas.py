@@ -124,7 +124,7 @@ def cargar_rutas_nube():
             hoy_str_r = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
             col_fecha = next((c for c in df.columns if 'FECHA' in c), None)
 
-            df_pendientes = df[df[col_estatus].astype(str).str.upper() == 'PENDIENTE'].copy()
+            df_pendientes = df[(df[col_estatus].astype(str).str.upper() == 'PENDIENTE') & (df[col_fecha].astype(str).str.contains(hoy_str_r, na=False))].copy()
             if col_fecha:
                 df_completadas = df[(df[col_estatus].astype(str).str.upper() == 'COMPLETADO') & (df[col_fecha].astype(str).str.contains(hoy_str_r, na=False))].copy()
             else:

@@ -828,7 +828,7 @@ elif vista_actual == "🚚 Operación del Día":
     df_op_dia = df_completo.copy() if not df_completo.empty else pd.DataFrame()
     
     if not df_op_dia.empty and col_estatus:
-        c_rec_ sync_col = next((c for c in df_op_dia.columns if "FECHA REC" in str(c).upper() or "FECHA ENT" in str(c).upper()), None)
+        c_rec_sync_col = next((c for c in df_op_dia.columns if "FECHA REC" in str(c).upper() or "FECHA ENT" in str(c).upper()), None)
         llaves_por_sincronizar_chofer = {}
 
         def clasificar_estatus_logistico(row):

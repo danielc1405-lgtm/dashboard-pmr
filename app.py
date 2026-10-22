@@ -68,6 +68,59 @@ st.markdown("""
         [data-testid="stDataGrid"] { opacity: 1 !important; }
         .st-emotion-cache-1kyxreq { display: none !important; }
         div[data-testid="stAppViewContainer"] { transition: none !important; }
+
+        /* --- ESTILO GLOBAL TERMINAL MATRIX --- */
+        @keyframes matrix_pulse {
+            0% { box-shadow: 0 0 10px rgba(0, 255, 65, 0.25), inset 0 0 15px rgba(0, 255, 65, 0.15); }
+            50% { box-shadow: 0 0 22px rgba(0, 255, 65, 0.55), inset 0 0 25px rgba(0, 255, 65, 0.25); }
+            100% { box-shadow: 0 0 10px rgba(0, 255, 65, 0.25), inset 0 0 15px rgba(0, 255, 65, 0.15); }
+        }
+        .matrix-terminal {
+            background-color: #020502;
+            background-image: 
+                linear-gradient(rgba(0, 255, 65, 0.04) 1px, transparent 1px),
+                radial-gradient(rgba(0, 40, 10, 0.35), #000000 90%);
+            background-size: 100% 3px, 100% 100%;
+            color: #00FF41;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 13.5px;
+            line-height: 1.45;
+            padding: 16px 20px;
+            border-radius: 10px;
+            border: 1px solid #00FF41;
+            animation: matrix_pulse 3s infinite ease-in-out;
+            min-height: 180px;
+            height: auto;
+            white-space: pre-wrap;
+            position: relative;
+            text-shadow: 0 0 6px rgba(0, 255, 65, 0.65);
+        }
+        .matrix-header {
+            color: #88FF99;
+            font-family: 'Consolas', monospace;
+            font-size: 11.5px;
+            letter-spacing: 2px;
+            border-bottom: 1px dashed rgba(0, 255, 65, 0.4);
+            padding-bottom: 6px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .matrix-katakana {
+            color: rgba(0, 255, 65, 0.22);
+            font-size: 11px;
+            letter-spacing: 3px;
+            user-select: none;
+        }
+        .matrix-cursor {
+            display: inline-block;
+            width: 9px;
+            height: 15px;
+            background-color: #00FF41;
+            vertical-align: middle;
+            animation: blink_mtx 0.8s infinite;
+        }
+        @keyframes blink_mtx { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     </style>
 """, unsafe_allow_html=True)
 
@@ -131,8 +184,43 @@ opciones_menu = [
     "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🚚 Rutas", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
 ]   
 
-# El parámetro vertical_alignment="center" alinea todo a la misma altura
-col_logo, col_menu, col_aseg, col_btn_ref, col_btn = st.columns([1.2, 5.5, 1.5, 0.4, 1.2], vertical_alignment="center")
+# --- FUNCIÓN DE LA VENTANA EMERGENTE (POP-UP) ---
+@st.dialog("🖥️ Monitor de Bots y Estatus Crítico", width="large")
+def abrir_popup_monitor():
+    import html
+    t_crit, t_wa, t_mtx = st.tabs([
+        "🚨 1. Estatus Crítico (Hoy y Vencidos)", 
+        "📱 2. Mensajes WhatsApp", 
+        "🖥️ 3. Consola Matrix"
+    ])
+    
+    with t_crit:
+        st.caption("Copia cualquier número de siniestro de aquí, cierra la ventana con 'ESC' o la 'X' y pégalo en el filtro de tu pestaña actual:")
+        texto_criticos = st.session_state.get('temp_criticos_alerts', "Realiza una extracción de GNP Inpart o Multiasistencia en el Cuartel General para ver el radar aquí.")
+        st.text_area("Criticos Output PopUp", value=texto_criticos, height=280, label_visibility="collapsed")
+        
+    with t_wa:
+        st.caption("Bloque de nuevas asignaciones para pegar en WhatsApp Web:")
+        texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
+        st.text_area("WhatsApp Output PopUp", value=texto_wa, height=280, label_visibility="collapsed")
+        
+    with t_mtx:
+        log_txt = st.session_state.get('temp_bot_log', '')
+        contenido_limpio = html.escape(log_txt) if log_txt else "Esperando orden de ejecución en el Cuartel General..."
+        html_box = f"""
+        <div class="matrix-terminal" style="max-height: 350px; overflow-y: auto;">
+            <div class="matrix-header">
+                <span>PMR // MATRIX_CORE_TERMINAL v2.6</span>
+                <span class="matrix-katakana">ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄ010110</span>
+                <span>⚡ BITÁCORA GUARDADA</span>
+            </div>
+            <div>{contenido_limpio}</div>
+        </div>
+        """
+        st.markdown(html_box, unsafe_allow_html=True)
+
+# El parámetro vertical_alignment="center" alinea todo a la misma altura (Agregamos col_btn_pop)
+col_logo, col_menu, col_aseg, col_btn_ref, col_btn_pop, col_btn = st.columns([1.2, 5.1, 1.5, 0.4, 0.4, 1.2], vertical_alignment="center")
 
 with col_logo:
     try: 
@@ -155,6 +243,10 @@ with col_btn_ref:
     if st.button("🔄", help="Forzar recarga de datos desde Google Sheets"):
         st.cache_data.clear()
         st.rerun()
+
+with col_btn_pop:
+    if st.button("🖥️", help="Abrir Pop-up con Estatus Crítico y Consola Matrix"):
+        abrir_popup_monitor()
 
 with col_btn:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)

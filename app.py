@@ -184,43 +184,8 @@ opciones_menu = [
     "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🚚 Rutas", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
 ]   
 
-# --- FUNCIÓN DE LA VENTANA EMERGENTE (POP-UP) ---
-@st.dialog("🖥️ Monitor de Bots y Estatus Crítico", width="large")
-def abrir_popup_monitor():
-    import html
-    t_crit, t_wa, t_mtx = st.tabs([
-        "🚨 1. Estatus Crítico (Hoy y Vencidos)", 
-        "📱 2. Mensajes WhatsApp", 
-        "🖥️ 3. Consola Matrix"
-    ])
-    
-    with t_crit:
-        st.caption("Copia cualquier número de siniestro de aquí, cierra la ventana con 'ESC' o la 'X' y pégalo en el filtro de tu pestaña actual:")
-        texto_criticos = st.session_state.get('temp_criticos_alerts', "Realiza una extracción de GNP Inpart o Multiasistencia en el Cuartel General para ver el radar aquí.")
-        st.text_area("Criticos Output PopUp", value=texto_criticos, height=280, label_visibility="collapsed")
-        
-    with t_wa:
-        st.caption("Bloque de nuevas asignaciones para pegar en WhatsApp Web:")
-        texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
-        st.text_area("WhatsApp Output PopUp", value=texto_wa, height=280, label_visibility="collapsed")
-        
-    with t_mtx:
-        log_txt = st.session_state.get('temp_bot_log', '')
-        contenido_limpio = html.escape(log_txt) if log_txt else "Esperando orden de ejecución en el Cuartel General..."
-        html_box = f"""
-        <div class="matrix-terminal" style="max-height: 350px; overflow-y: auto;">
-            <div class="matrix-header">
-                <span>PMR // MATRIX_CORE_TERMINAL v2.6</span>
-                <span class="matrix-katakana">ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄ010110</span>
-                <span>⚡ BITÁCORA GUARDADA</span>
-            </div>
-            <div>{contenido_limpio}</div>
-        </div>
-        """
-        st.markdown(html_box, unsafe_allow_html=True)
-
-# El parámetro vertical_alignment="center" alinea todo a la misma altura (Agregamos col_btn_pop)
-col_logo, col_menu, col_aseg, col_btn_ref, col_btn_pop, col_btn = st.columns([1.2, 5.1, 1.5, 0.4, 0.4, 1.2], vertical_alignment="center")
+# El parámetro vertical_alignment="center" alinea todo a la misma altura
+col_logo, col_menu, col_aseg, col_btn_ref, col_btn = st.columns([1.2, 5.5, 1.5, 0.4, 1.2], vertical_alignment="center")
 
 with col_logo:
     try: 
@@ -243,10 +208,6 @@ with col_btn_ref:
     if st.button("🔄", help="Forzar recarga de datos desde Google Sheets"):
         st.cache_data.clear()
         st.rerun()
-
-with col_btn_pop:
-    if st.button("🖥️", help="Abrir Pop-up con Estatus Crítico y Consola Matrix"):
-        abrir_popup_monitor()
 
 with col_btn:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)

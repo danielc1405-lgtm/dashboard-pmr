@@ -184,40 +184,172 @@ opciones_menu = [
     "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🚚 Rutas", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
 ]   
 
-# --- FUNCIÓN DE LA VENTANA EMERGENTE (POP-UP) ---
-@st.dialog("🖥️ Monitor de Bots y Estatus Crítico", width="large")
+# --- FUNCIÓN DE LA VENTANA EMERGENTE (POP-UP CON LANZADOR DE BOTS) ---
+@st.dialog("🖥️ Centro de Bots y Monitor Flotante PMR", width="large")
 def abrir_popup_monitor():
     import html
-    t_crit, t_wa, t_mtx = st.tabs([
-        "🚨 1. Estatus Crítico (Hoy y Vencidos)", 
-        "📱 2. Mensajes WhatsApp", 
-        "🖥️ 3. Consola Matrix"
-    ])
-    
-    with t_crit:
-        st.caption("Copia cualquier número de siniestro de aquí, cierra la ventana con 'ESC' o la 'X' y pégalo en el filtro de tu pestaña actual:")
-        texto_criticos = st.session_state.get('temp_criticos_alerts', "Realiza una extracción de GNP Inpart o Multiasistencia en el Cuartel General para ver el radar aquí.")
-        st.text_area("Criticos Output PopUp", value=texto_criticos, height=280, label_visibility="collapsed")
-        
-    with t_wa:
-        st.caption("Bloque de nuevas asignaciones para pegar en WhatsApp Web:")
-        texto_wa = st.session_state.get('temp_wa_alerts', "Realiza una extracción primero para ver los mensajes aquí.")
-        st.text_area("WhatsApp Output PopUp", value=texto_wa, height=280, label_visibility="collapsed")
-        
-    with t_mtx:
-        log_txt = st.session_state.get('temp_bot_log', '')
-        contenido_limpio = html.escape(log_txt) if log_txt else "Esperando orden de ejecución en el Cuartel General..."
+    import subprocess
+    import sys
+
+    # Dividimos la parte superior: Lanzador a la izquierda y Estatus/WhatsApp a la derecha
+    col_lanzador, col_resultados = st.columns([1.1, 1.9], gap="medium")
+
+    with col_lanzador:
+        with st.form("form_lanzador_bots_popup"):
+            st.markdown("**1. Panel de Ejecución**")
+            st.caption("Selecciona el robot a correr:")
+            bot_sel_pop = st.selectbox(
+                "Robot:",
+                ["GNP Inpart", "Multiasistencia", "Paquetexpress (Rastreo)"],
+                label_visibility="collapsed"
+            )
+            modo_ext_pop = st.radio(
+                "Modo de Ejecución:",
+                ["Oculto (Rápido)", "Visual (Ver Chrome)"],
+                horizontal=True
+            )
+            btn_iniciar_pop = st.form_submit_button("🚀 Iniciar Robot", type="primary", use_container_width=True)
+
+        if st.button("🧹 Limpiar Bandeja y Consola", use_container_width=True, key="btn_limpiar_popup"):
+            st.session_state.pop('temp_wa_alerts', None)
+            st.session_state.pop('temp_criticos_alerts', None)
+            st.session_state.pop('temp_bot_log', None)
+            st.session_state.pop('temp_bot_status', None)
+            st.session_state.pop('temp_bot_resumen', None)
+
+        spinner_pop = st.empty()
+
+    # Contenedor para la Consola Matrix (abajo de las columnas para que ocupe todo el ancho)
+    st.markdown("**🖥️ Consola Matrix en Tiempo Real**")
+    contenedor_matrix_pop = st.empty()
+
+    def pintar_matrix_pop(log_txt, activo=False):
+        estado_mtx = "🟢 EJECUTANDO EN VIVO..." if activo else "⚡ SISTEMA EN ESPERA / COMPLETADO"
+        cursor_html = '<span class="matrix-cursor"></span>' if activo else ''
+        contenido_limpio = html.escape(log_txt) if log_txt else "Esperando orden de ejecución..."
         html_box = f"""
-        <div class="matrix-terminal" style="max-height: 350px; overflow-y: auto;">
+        <div class="matrix-terminal" style="max-height: 260px; overflow-y: auto;">
             <div class="matrix-header">
                 <span>PMR // MATRIX_CORE_TERMINAL v2.6</span>
                 <span class="matrix-katakana">ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄ010110</span>
-                <span>⚡ BITÁCORA GUARDADA</span>
+                <span>{estado_mtx}</span>
             </div>
-            <div>{contenido_limpio}</div>
+            <div>{contenido_limpio}{cursor_html}</div>
         </div>
         """
-        st.markdown(html_box, unsafe_allow_html=True)
+        contenedor_matrix_pop.markdown(html_box, unsafe_allow_html=True)
+
+    # --- SI PRESIONAS "INICIAR ROBOT" DENTRO DEL POP-UP ---
+    if btn_iniciar_pop:
+        if bot_sel_pop == "GNP Inpart":
+            archivo_ejecutar = "gnp_inpart.py"
+        elif bot_sel_pop == "Multiasistencia":
+            archivo_ejecutar = "sincronizador_multiasistencia.py"
+        else:
+            archivo_ejecutar = "motor_rastreo.py"
+
+        arg_modo = "--oculto" if "Oculto" in modo_ext_pop else "--visual"
+
+        with spinner_pop:
+            with st.spinner(f"Corriendo {bot_sel_pop} en vivo..."):
+                try:
+                    with open("credentials.json", "w", encoding="utf-8") as f:
+                        f.write(st.secrets["google_credentials"])
+
+                    pintar_matrix_pop(f"[SISTEMA] Despertando a {bot_sel_pop}...\n", activo=True)
+                    subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+
+                    cmd = [sys.executable, "-u", archivo_ejecutar]
+                    if bot_sel_pop != "Paquetexpress (Rastreo)":
+                        cmd.append(arg_modo)
+
+                    env_bot = os.environ.copy()
+                    env_bot["PYTHONIOENCODING"] = "utf-8"
+                    env_bot["PYTHONUNBUFFERED"] = "1"
+
+                    proceso = subprocess.Popen(
+                        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, bufsize=1, env=env_bot, encoding="utf-8", errors="replace"
+                    )
+
+                    lineas_acumuladas = []
+                    for linea_rt in iter(proceso.stdout.readline, ''):
+                        if not linea_rt:
+                            break
+                        lineas_acumuladas.append(linea_rt)
+                        pintar_matrix_pop("".join(lineas_acumuladas), activo=True)
+
+                    proceso.stdout.close()
+                    returncode = proceso.wait()
+                    salida_completa = "".join(lineas_acumuladas).strip()
+
+                    # Resumen
+                    if bot_sel_pop == "Paquetexpress (Rastreo)":
+                        guias_rev = len(re.findall(r"Buscando gu[íi]a:", salida_completa))
+                        st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_sel_pop}):** {guias_rev} guías consultadas."
+                    else:
+                        revisados = "0"
+                        m_multi = re.search(r"Quedan\s+(\d+)\s+siniestros", salida_completa)
+                        m_gnp = re.search(r"Total le[íi]dos[^:]*:\s*(\d+)", salida_completa)
+                        if m_multi: revisados = m_multi.group(1)
+                        elif m_gnp: revisados = m_gnp.group(1)
+                        st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_sel_pop}):** {revisados} pedidos revisados."
+
+                    # Extraer WhatsApp
+                    if "REPORTES LISTOS PARA COPIAR" in salida_completa:
+                        parte_wa = re.split(r"REPORTES LISTOS PARA COPIAR(?: A WHATSAPP)?", salida_completa)[1]
+                        for corte in ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "!!!!!"]:
+                            if corte in parte_wa:
+                                parte_wa = parte_wa.split(corte)[0]
+                        st.session_state['temp_wa_alerts'] = re.sub(r'^[=\s]+', '', parte_wa).strip()
+                    elif bot_sel_pop != "Paquetexpress (Rastreo)":
+                        st.session_state['temp_wa_alerts'] = "No hubo asignaciones nuevas en esta corrida."
+
+                    # Extraer Estatus Crítico
+                    marcadores_alerta = ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "REVISIÓN DE ESTATUS CRÍTICO"]
+                    idx_inicio_crit = -1
+                    for m_al in marcadores_alerta:
+                        pos = salida_completa.find(m_al)
+                        if pos != -1 and (idx_inicio_crit == -1 or pos < idx_inicio_crit):
+                            idx_inicio_crit = pos
+
+                    if idx_inicio_crit != -1:
+                        bloque_crit = salida_completa[idx_inicio_crit:]
+                        lineas_crit = [l for l in bloque_crit.splitlines() if set(l.strip()) != {'!'} and "REVISIÓN DE ESTATUS CRÍTICO" not in l]
+                        st.session_state['temp_criticos_alerts'] = "\n".join(lineas_crit).strip()
+                    elif bot_sel_pop != "Paquetexpress (Rastreo)":
+                        st.session_state['temp_criticos_alerts'] = "✅ Sin alertas críticas ni partidas vencidas."
+
+                    # Guardar log limpio
+                    salida_tecnica = salida_completa[:idx_inicio_crit] if idx_inicio_crit != -1 else salida_completa
+                    if "REPORTES LISTOS PARA COPIAR" in salida_tecnica:
+                        salida_tecnica = re.split(r"=+\s*\n\s*📱?\s*REPORTES LISTOS PARA COPIAR", salida_tecnica)[0]
+
+                    st.session_state['temp_bot_log'] = salida_tecnica.strip()
+                    st.session_state['temp_bot_status'] = f"✅ {bot_sel_pop} finalizado." if returncode == 0 else f"⚠️ {bot_sel_pop} terminó con advertencias."
+                    st.cache_data.clear()
+
+                except Exception as e:
+                    st.error(f"Error al lanzar el bot: {e}")
+                finally:
+                    if os.path.exists("credentials.json"):
+                        os.remove("credentials.json")
+
+    # Pintamos la consola Matrix con el estado final (o previo si solo abriste la ventana)
+    pintar_matrix_pop(st.session_state.get('temp_bot_log', ''), activo=False)
+
+    # Llenamos la columna derecha con las pestañas de Estatus Crítico y WhatsApp actualizadas
+    with col_resultados:
+        t_crit, t_wa = st.tabs(["🚨 Estatus Crítico (Hoy y Vencidos)", "📱 Mensajes WhatsApp"])
+        with t_crit:
+            texto_criticos = st.session_state.get('temp_criticos_alerts', "Corre GNP Inpart o Multiasistencia para ver el radar aquí.")
+            st.text_area("Criticos Output PopUp", value=texto_criticos, height=195, label_visibility="collapsed")
+        with t_wa:
+            texto_wa = st.session_state.get('temp_wa_alerts', "Corre un robot primero para ver los mensajes aquí.")
+            st.text_area("WhatsApp Output PopUp", value=texto_wa, height=195, label_visibility="collapsed")
+
+    if st.session_state.get('temp_bot_resumen'):
+        st.caption(f"{st.session_state.get('temp_bot_status', '')} | {st.session_state.get('temp_bot_resumen', '')}")
 
 # El parámetro vertical_alignment="center" alinea todo a la misma altura (6 columnas ahora)
 col_logo, col_menu, col_aseg, col_btn_ref, col_btn_pop, col_btn = st.columns([1.2, 5.0, 1.4, 0.4, 0.4, 1.2], vertical_alignment="center")

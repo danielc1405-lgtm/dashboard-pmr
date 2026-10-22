@@ -2322,13 +2322,12 @@ elif vista_actual == "🏢 Directorio":
             if not modo_consulta and permiso_edicion:
                 st.caption("💡 Edita cualquier celda directamente (Condición de Pago, Días Crédito, Teléfono, etc.) y presiona **Guardar Cambios en Proveedores**.")
                 opciones_cond_dir = ["", "Pago Anticipado", "Anticipo", "Contra Entrega", "Crédito", "Pago en Plataforma"]
-                opciones_tiempo_dir = ["", "Inmediata", "1 a 2 días", "3 a 5 días", "Más de 5 días", "Bajo Pedido"]
                 
                 cfg_prov_ed = {
                     'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
                     'Sucursal': st.column_config.TextColumn("Sucursal", width="small"),
                     'Marcas Especialidad': st.column_config.TextColumn("Especialidad", width="medium"),
-                    'Tiempo de Entrega': st.column_config.SelectboxColumn("Tiempo Entrega", options=opciones_tiempo_dir, width="small"),
+                    'Tiempo de Entrega': st.column_config.NumberColumn("ETA (Días)", min_value=0, step=1, width="small"),
                     'Días Crédito': st.column_config.NumberColumn("Días Crédito", min_value=0, step=1, width="small"),
                     'Condición Pago': st.column_config.SelectboxColumn("Condición Pago", options=opciones_cond_dir, width="medium"),
                     'Teléfono': st.column_config.TextColumn("Teléfono", width="small"),
@@ -2390,7 +2389,7 @@ elif vista_actual == "🏢 Directorio":
                         nueva_dir_p = st.text_input("Dirección Completa")
                         
                         col5, col6, col7 = st.columns(3)
-                        nuevo_tiempo = col5.selectbox("Tiempo Promedio de Entrega", ["Inmediata", "1 a 2 días", "3 a 5 días", "Más de 5 días", "Bajo Pedido"])
+                        nuevo_tiempo = col5.number_input("Tiempo de Entrega (Días)", min_value=0, value=0, step=1)
                         nueva_cond_pago = col6.selectbox("Condición de Pago", ["Contra Entrega", "Pago Anticipado", "Anticipo", "Crédito", "Pago en Plataforma"])
                         nuevos_dias_c = col7.number_input("Días Crédito", min_value=0, value=0, step=1)
                         

@@ -222,7 +222,7 @@ if not df_historico.empty:
         # Rescatamos del histórico los reembolsos o recolecciones que sigan activos
         c_est_h = next((c for c in df_historico.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
         if c_est_h:
-            df_hist_activos = df_historico[df_historico[c_est_h].astype(str).str.upper().str.contains("PROCESO DE REEMBOLSO|RECOLECC", na=False)].copy()
+            df_hist_activos = df_historico[df_historico[c_est_h].astype(str).str.upper().str.contains("PROCESO DE REEMBOLSO|RECOLECC|ENTREGADO|PAGO A TALLER", na=False)].copy()
             if not df_hist_activos.empty:
                 df_completo = pd.concat([df_completo, df_hist_activos], ignore_index=True)
 
@@ -824,8 +824,8 @@ elif vista_actual == "🚚 Operación del Día":
             
             if "TRANSITO (RECOLECC" in est:
                 return "EN TRANSITO (RECOLECCIÓN)"
-            est_cerrados = ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "PAGO A TALLER"]
-            if est in est_cerrados:
+            est_cerrados = ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN", "PÉRDIDA TOTAL", "PAGO DE DAÑOS"]
+            if est in est_cerrados or est == "PAGO A TALLER":
                 return est
             if "delivery" in rastreo or "entregado" in rastreo:
                 return "ENTREGADO"
@@ -835,7 +835,7 @@ elif vista_actual == "🚚 Operación del Día":
 
         df_op_dia[col_estatus] = df_op_dia.apply(clasificar_estatus_logistico, axis=1)
 
-        estatus_validos = ["ENTREGADO", "EN TRANSITO", "EN TRANSITO (RECOLECCIÓN)", "EN PROCESAMIENTO", "EN PROCESO DE RECOLECCIÓN", "EN PROCESO DE REEMBOLSO"]
+        estatus_validos = ["ENTREGADO", "PAGO A TALLER", "EN TRANSITO", "EN TRANSITO (RECOLECCIÓN)", "EN PROCESAMIENTO", "EN PROCESO DE RECOLECCIÓN", "EN PROCESO DE REEMBOLSO"]
         df_mon = df_op_dia[df_op_dia[col_estatus].astype(str).str.upper().isin(estatus_validos)].copy()
             
         if not df_mon.empty:
@@ -897,9 +897,12 @@ elif vista_actual == "🚚 Operación del Día":
                     st.dataframe(df_recol_transito[cols_ver_recol].rename(columns=rename_recol), use_container_width=True, hide_index=True)
             # ==========================================================
 
-            # 1. ENTREGADO (CON FECHA ENVÍO + FECHA ENTREGA + QUIÉN RECIBIÓ + CASILLA RECIBIDO) Y 2. EN TRÁNSITO
+            # 1. ENTREGADO + PAGO A TALLER (CON FECHA ENVÍO + FECHA ENTREGA + QUIÉN RECIBIÓ + CASILLA RECIBIDO) Y 2. EN TRÁNSITO
             for est in ["ENTREGADO", "EN TRANSITO"]:
-                df_est = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == est].copy()
+                if est == "ENTREGADO":
+                    df_est = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper().isin(["ENTREGADO", "PAGO A TALLER"])].copy()
+                else:
+                    df_est = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == est].copy()
                 if not df_est.empty:
                     if c_env_disp and c_env_disp in df_est.columns:
                         df_est[c_env_disp] = df_est[c_env_disp].apply(estandarizar_fechas_mx)
@@ -907,9 +910,9 @@ elif vista_actual == "🚚 Operación del Día":
                         df_est[c_rec_disp] = df_est[c_rec_disp].apply(estandarizar_fechas_mx)
                         
                     if est == "ENTREGADO":
-                        titulo = f"📥 Entregados a Taller (Pedir Recepción en Portal) | {len(df_est)} Partida(s)"
-                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, c_env_disp, c_rec_disp, c_quien_rec, col_comentarios]
-                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería', col_guia: 'Guía', c_env_disp: '📤 F. Envío', c_rec_disp: '📅 F. Entrega', c_quien_rec: '👤 Recibió / Detalle', col_comentarios: 'Observaciones'}
+                        titulo = f"📥 Por Recibir en Portal (Entregados en CDR / Pago a Taller) | {len(df_est)} Partida(s)"
+                        cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_estatus, col_paqueteria, col_guia, c_env_disp, c_rec_disp, c_quien_rec, col_comentarios]
+                        rename_dict = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_estatus: 'Estatus', col_paqueteria: 'Paquetería', col_guia: 'Guía', c_env_disp: '📤 F. Envío', c_rec_disp: '📅 F. Entrega', c_quien_rec: '👤 Recibió / Detalle', col_comentarios: 'Observaciones'}
                     elif est == "EN TRANSITO":
                         titulo = f"🚚 En Tránsito / Paquetería | {len(df_est)} Partida(s)"
                         cols_ver = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, col_estatus_envio, c_env_disp, col_comentarios]

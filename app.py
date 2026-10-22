@@ -1490,9 +1490,7 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_por_confirmar.empty:
             for taller, df_taller in df_por_confirmar.groupby(col_taller):
                 n_sin_t = df_taller['Agrupador_Visual'].nunique()
-                siniestros_txt = ", ".join(df_taller['Agrupador_Visual'].astype(str).unique()[:4])
-                if n_sin_t > 4: siniestros_txt += "..."
-                with st.expander(f"🏢 {taller} — 🚗 {n_sin_t} Pedido(s): [{siniestros_txt}] | 📦 {len(df_taller)} Pieza(s)", expanded=False):
+                with st.expander(f"🏢 {taller} — 🚗 {n_sin_t} Pedido(s) | 📦 {len(df_taller)} Pieza(s)", expanded=False):
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion: 
@@ -1583,9 +1581,7 @@ elif vista_actual == "⚙️ Panel Operativo":
             
             for taller, df_taller in df_asignados.groupby(col_taller):
                 n_sin_t = df_taller['Agrupador_Visual'].nunique()
-                siniestros_txt = ", ".join(df_taller['Agrupador_Visual'].astype(str).unique()[:4])
-                if n_sin_t > 4: siniestros_txt += "..."
-                with st.expander(f"🏢 {taller} — 🚗 {n_sin_t} Pedido(s): [{siniestros_txt}] | 📦 {len(df_taller)} Pieza(s)", expanded=False):
+                with st.expander(f"🏢 {taller} — 🚗 {n_sin_t} Pedido(s) | 📦 {len(df_taller)} Pieza(s)", expanded=False):
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
                         st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion:
@@ -1793,10 +1789,10 @@ elif vista_actual == "🛒 Compras":
 
             df_cap = pd.DataFrame()
             df_cap['Siniestro'] = df_por_comprar[c_id_c].astype(str).str.strip().values if c_id_c else ""
+            df_cap['Taller'] = df_por_comprar[c_taller_c].astype(str).str.strip().values if c_taller_c else ""
             df_cap['Auto'] = df_por_comprar.apply(armar_auto_limpio, axis=1).values
             df_cap['Año'] = df_por_comprar[c_ano_c].astype(str).str.replace('.0', '', regex=False).str.strip().values if c_ano_c else ""
             df_cap['VIN / Serie'] = df_por_comprar[c_vin_c].astype(str).str.strip().str.upper().values if c_vin_c else ""
-            df_cap['Taller'] = df_por_comprar[c_taller_c].astype(str).str.strip().values if c_taller_c else ""
             df_cap['Pieza'] = df_por_comprar[c_desc_c].astype(str).str.strip().values if c_desc_c else ""
             df_cap['_Aseguradora'] = df_por_comprar[c_aseg_c].astype(str).str.strip().str.upper().values if c_aseg_c else "MULTI"
             
@@ -1814,16 +1810,11 @@ elif vista_actual == "🛒 Compras":
 
                 config_pend = {
                     'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"),
+                    'Taller': st.column_config.TextColumn("Taller", disabled=True, width="medium"),
                     'Auto': st.column_config.TextColumn("Auto", disabled=True, width="medium"),
                     'Año': st.column_config.TextColumn("Año", disabled=True, width="small"),
                     'VIN / Serie': st.column_config.TextColumn("VIN / Serie", disabled=True, width="medium"),
-                    'Taller': st.column_config.TextColumn("Taller", disabled=True, width="medium"),
                     'Pieza': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
-                    'Precio Aut.': st.column_config.NumberColumn("Precio Aut.", format="$ %.2f", disabled=True, width="small"),
-                    'Proveedor': st.column_config.SelectboxColumn("🏪 Proveedor", options=lista_opciones_prov, width="medium"),
-                    'Costo Compra': st.column_config.NumberColumn("💲 Costo Compra", format="$ %.2f", min_value=0.0, step=0.01, width="small"),
-                    'Cancelar': st.column_config.CheckboxColumn("🚫 Can", default=False, width="small"),
-                    'Observaciones': st.column_config.TextColumn("📝 Obs.", width="medium")
                 }
                 df_cap_edit = st.data_editor(
                     df_cap.drop(columns=['_Aseguradora']),
@@ -2085,16 +2076,16 @@ elif vista_actual == "🛒 Compras":
                         return v_str
                     
                     df_c['Vehículo_Corto'] = df_c.get('Vehículo', pd.Series([""]*len(df_c))).apply(formato_auto_corto)
-                    cols_mostrar = ['Siniestro', 'Vehículo_Corto', 'Taller', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Recibido_Bool', 'Cancelar Compra', 'Alerta Financiera', 'Observaciones']
+                    cols_mostrar = ['Siniestro', 'Taller', 'Vehículo_Corto', 'Descripción Pieza', 'Proveedor', 'Costo Compra', 'ETA (Días)', 'Llegada Est.', 'Condición Pago', 'Días Crédito', 'Estatus Pago', 'Recibido_Bool', 'Cancelar Compra', 'Alerta Financiera', 'Observaciones']
                     df_disp = df_c[[c for c in cols_mostrar if c in df_c.columns]].copy()
                     df_disp.rename(columns={'Vehículo_Corto': 'Auto', 'Taller': 'CDR', 'Descripción Pieza': 'Pieza', 'Costo Compra': 'Costo', 'ETA (Días)': 'ETA', 'Recibido_Bool': 'Recibido', 'Estatus Pago': 'Pago', 'Condición Pago': 'Cond. Pago', 'Días Crédito': 'Días Cr.'}, inplace=True)
-                    
+                
                     if not modo_consulta and permiso_edicion:
                         opciones_pago = ["", "Pago Anticipado", "Anticipo", "Contra Entrega", "Crédito", "Pago en Plataforma"]
                         config_c = {
                             'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"), 
-                            'Auto': st.column_config.TextColumn("Auto", disabled=True, width="medium"),
                             'CDR': st.column_config.TextColumn("CDR", disabled=True, width="medium"), 
+                            'Auto': st.column_config.TextColumn("Auto", disabled=True, width="medium"),
                             'Pieza': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
                             'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"), 
                             'Costo': st.column_config.NumberColumn("Costo", format="$ %.2f", width="small"),

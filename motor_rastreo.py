@@ -135,7 +135,7 @@ def ejecutar_laboratorio():
                 requiere_rastreo = (fila_estatus in ["EN TRANSITO", "EN PROCESAMIENTO"]) or (fila_estatus == "ENTREGADO" and fecha_invalida)
                 
                 if requiere_rastreo and fila_paqueteria == "PAQUETEXPRESS" and fila_guia:
-                    taller_str = str(fila[idx_taller]).strip()[:18] if (idx_taller is not None and len(fila) > idx_taller) else "CDR"
+                    taller_str = str(fila[idx_taller]).strip() if (idx_taller is not None and len(fila) > idx_taller) else "CDR"
                     filas_pendientes.append((i + 2, fila_guia, fila_estatus, fecha_invalida, taller_str))
 
             total_f = len(filas_pendientes)
@@ -152,11 +152,11 @@ def ejecutar_laboratorio():
                     time.sleep(1.2)
                 
                 if nuevo_estatus_envio == "Pendiente de actualización":
-                    print(f"  ⏳ [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str:<18} | Guía {fila_guia} ➔ Sin avance aún en portal (En sitio)")
+                    print(f"  ⏳ [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str} | Guía {fila_guia} ➔ Sin avance aún en portal (En sitio)")
                 else:
                     icono = "📦" if "ENTREGADO" in nuevo_estatus_envio.upper() else "🚚"
                     txt_fecha = f" | Fecha: {fecha_recibido_extraida}" if fecha_recibido_extraida else ""
-                    print(f"  {icono} [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str:<18} | Guía {fila_guia} ➔ {nuevo_estatus_envio}{txt_fecha}")
+                    print(f"  {icono} [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str} | Guía {fila_guia} ➔ {nuevo_estatus_envio}{txt_fecha}")
                     
                     celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_estatus_envio+1, value=nuevo_estatus_envio))
                     

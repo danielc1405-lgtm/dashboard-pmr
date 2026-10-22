@@ -897,7 +897,7 @@ elif vista_actual == "🚚 Operación del Día":
                     st.dataframe(df_recol_transito[cols_ver_recol].rename(columns=rename_recol), use_container_width=True, hide_index=True)
             # ==========================================================
 
-            # 1. ENTREGADO (CON FECHA ENVÍO + FECHA ENTREGA + QUIÉN RECIBIÓ) Y 2. EN TRÁNSITO
+            # 1. ENTREGADO (CON FECHA ENVÍO + FECHA ENTREGA + QUIÉN RECIBIÓ + CASILLA RECIBIDO) Y 2. EN TRÁNSITO
             for est in ["ENTREGADO", "EN TRANSITO"]:
                 df_est = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == est].copy()
                 if not df_est.empty:
@@ -930,12 +930,33 @@ elif vista_actual == "🚚 Operación del Día":
                                 if g in ['', 'nan', 'none', 'NAN', 'None']:
                                     return "🚚 Ruta Local / Sin Guía" if es_local_cdr else "⏳ Pendiente de Guía (Foráneo)"
                                 if api in ["falta información", "falta informacion", "", "nan", "none"]:
-                                    fecha_envio_dt = parse_dt_safe_op(str(r.get('F. Envío', '')))
+                                    fecha_envio_dt = parse_dt_safe_op(str(r.get('📤 F. Envío', r.get('F. Envío', ''))))
                                     if pd.notna(fecha_envio_dt) and (hoy_dt - fecha_envio_dt).days > 3: return "⚠️ API no responde"
                                     return "Recién documentado (En sitio)"
                                 return r.get('Rastreo API', '')
                             df_vista['Rastreo API'] = df_vista.apply(format_rastreo, axis=1)
-                        st.dataframe(df_vista, use_container_width=True, hide_index=True)
+                        
+                        if est == "ENTREGADO" and not modo_consulta and permiso_edicion:
+                            df_vista['Marcar Recibido'] = False
+                            cols_ed_op = [c for c in df_vista.columns if c not in ['Marcar Recibido', 'Observaciones']]
+                            ed_ent_op = st.data_editor(
+                                df_vista,
+                                column_config={
+                                    "Marcar Recibido": st.column_config.CheckboxColumn("🏁 Recibido", default=False, width="small"),
+                                    "Observaciones": st.column_config.TextColumn("📝 Observaciones", width="medium")
+                                },
+                                disabled=cols_ed_op,
+                                use_container_width=True,
+                                hide_index=True,
+                                key="ed_entregados_op_dia"
+                            )
+                            ed_ent_op[col_id] = df_est[col_id].values
+                            ed_ent_op[col_desc] = df_est[col_desc].values
+                            if col_comentarios and 'Observaciones' in ed_ent_op.columns:
+                                ed_ent_op[col_comentarios] = ed_ent_op['Observaciones'].values
+                            df_editado_cobro = ed_ent_op.copy()
+                        else:
+                            st.dataframe(df_vista, use_container_width=True, hide_index=True)
 
             # 3. EN PROCESAMIENTO SEPARADO EN: COMPRAS POR LLEGAR (CON PROVEEDOR) Y PIEZAS POR COMPRAR (SIN PROVEEDOR)
             df_en_proc_op = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == "EN PROCESAMIENTO"].copy()
@@ -3203,8 +3224,8 @@ elif vista_actual == "🛠️ Cuartel General":
                 border-radius: 10px;
                 border: 1px solid #00FF41;
                 animation: matrix_pulse 3s infinite ease-in-out;
-                height: 310px;
-                overflow-y: auto;
+                min-height: 180px;
+                height: auto;
                 white-space: pre-wrap;
                 position: relative;
                 text-shadow: 0 0 6px rgba(0, 255, 65, 0.65);
@@ -3351,9 +3372,9 @@ elif vista_actual == "🛠️ Cuartel General":
                             if not linea_rt:
                                 break
                             lineas_acumuladas.append(linea_rt)
-                            # Mostramos las últimas 22 líneas en vivo para que siempre veas el avance actual
-                            vista_reciente = "".join(lineas_acumuladas[-22:])
-                            render_matrix_terminal(vista_reciente, activo=True)
+                            # Mostramos todo el progreso acumulado para que la terminal crezca conforme avanza
+                            vista_completa_rt = "".join(lineas_acumuladas)
+                            render_matrix_terminal(vista_completa_rt, activo=True)
                             
                         proceso.stdout.close()
                         returncode = proceso.wait()

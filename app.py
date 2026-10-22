@@ -352,7 +352,7 @@ if 'pdfs_list' in st.session_state and st.session_state['pdfs_list']:
     st.markdown("---")
 
 df_editado_conf = pd.DataFrame(); df_editado_venc = pd.DataFrame(); df_editado_atrasadas = pd.DataFrame()
-df_editado_cobro = pd.DataFrame(); df_editado_fact = pd.DataFrame(); df_editado = pd.DataFrame(); df_editado_reemb = pd.DataFrame()
+df_editado_cobro = pd.DataFrame(); df_editado_fact = pd.DataFrame(); df_editado = pd.DataFrame(); df_editado_reemb = pd.DataFrame(); df_editado_transito_op = pd.DataFrame()    
 
 lista_proveedores = [""]
 if not df_proveedores.empty:
@@ -813,20 +813,39 @@ elif vista_actual == "🚚 Operación del Día":
         if c_t_cat and c_e_cat:
             dict_est_taller_op = dict(zip(df_catalogo[c_t_cat].astype(str).str.strip().str.upper(), df_catalogo[c_e_cat].astype(str).str.strip().str.upper()))
 
+    # --- PUENTE AUTOMÁTICO: SI EL CHOFER COMPLETA UNA ENTREGA EN BD_RUTAS -> PASA A ENTREGADO EN BD_UNIFICADA ---
+    llaves_entregadas_chofer = {}
+    if not df_rutas.empty and {'TIPO_OPERACION', 'ESTATUS', 'SINIESTRO', 'PIEZA'}.issubset(df_rutas.columns):
+        df_r_ent_comp = df_rutas[
+            (df_rutas['TIPO_OPERACION'].astype(str).str.strip().str.upper() == 'ENTREGA') &
+            (df_rutas['ESTATUS'].astype(str).str.strip().str.upper() == 'COMPLETADO')
+        ]
+        for _, r_ch in df_r_ent_comp.iterrows():
+            k_ch = gen_llave_op_dia(r_ch.get('SINIESTRO', ''), r_ch.get('PIEZA', ''))
+            f_ch = str(r_ch.get('FECHA', '')).split()[0].strip()
+            llaves_entregadas_chofer[k_ch] = estandarizar_fechas_mx(f_ch) if f_ch else hoy_str
+
     df_op_dia = df_completo.copy() if not df_completo.empty else pd.DataFrame()
     
     if not df_op_dia.empty and col_estatus:
-        # Interceptor logístico ampliado para detectar Entregados, En Tránsito (Ida) y En Tránsito (Recolección)
+        c_rec_ sync_col = next((c for c in df_op_dia.columns if "FECHA REC" in str(c).upper() or "FECHA ENT" in str(c).upper()), None)
+        llaves_por_sincronizar_chofer = {}
+
         def clasificar_estatus_logistico(row):
             est = str(row.get(col_estatus, '')).strip().upper()
             rastreo = str(row.get(col_estatus_envio, '')).strip().lower() if col_estatus_envio else ''
             guia_val = str(row.get(col_guia, '')).strip() if col_guia else ''
+            k_row = gen_llave_op_dia(row.get(col_id, ''), row.get(col_desc, ''))
             
             if "TRANSITO (RECOLECC" in est:
                 return "EN TRANSITO (RECOLECCIÓN)"
             est_cerrados = ["RECIBIDO", "FACTURADO", "CANCELADO", "REEMBOLSADO", "EN PROCESO DE REEMBOLSO", "EN PROCESO DE CAMBIO", "EN PROCESO DE RECOLECCIÓN", "PÉRDIDA TOTAL", "PAGO DE DAÑOS"]
             if est in est_cerrados or est == "PAGO A TALLER":
                 return est
+            # Si el chofer ya marcó COMPLETADO en BD_RUTAS y en BD_UNIFICADA seguía EN TRANSITO:
+            if k_row in llaves_entregadas_chofer and est in ["EN TRANSITO", "EN PROCESAMIENTO"]:
+                llaves_por_sincronizar_chofer[k_row] = llaves_entregadas_chofer[k_row]
+                return "ENTREGADO"
             if "delivery" in rastreo or "entregado" in rastreo:
                 return "ENTREGADO"
             if est != "ENTREGADO" and guia_val not in ['', 'nan', 'None', 'NAN']:
@@ -834,6 +853,35 @@ elif vista_actual == "🚚 Operación del Día":
             return est
 
         df_op_dia[col_estatus] = df_op_dia.apply(clasificar_estatus_logistico, axis=1)
+
+        # Si detectamos entregas recién completadas por el chofer, actualizamos BD_UNIFICADA en segundo plano
+        if llaves_por_sincronizar_chofer:
+            try:
+                ws_u_ch = doc.worksheet("BD_UNIFICADA")
+                datos_u_ch = ws_u_ch.get_all_values()
+                if datos_u_ch:
+                    h_u_ch = [str(h).strip().upper() for h in datos_u_ch[0]]
+                    idx_id_ch = next((i for i, h in enumerate(h_u_ch) if "SINIESTRO" in h), -1)
+                    idx_de_ch = next((i for i, h in enumerate(h_u_ch) if "DESCRIPCI" in h or "REFACCI" in h), -1)
+                    idx_es_ch = next((i for i, h in enumerate(h_u_ch) if h in ["ESTATUS", "STATUS"]), -1)
+                    idx_ev_ch = next((i for i, h in enumerate(h_u_ch) if "ESTATUS ENV" in h or "RASTREO" in h), -1)
+                    idx_fr_ch = next((i for i, h in enumerate(h_u_ch) if "FECHA REC" in h or "FECHA ENT" in h), -1)
+                    celdas_ch = []
+                    if idx_id_ch >= 0 and idx_de_ch >= 0 and idx_es_ch >= 0:
+                        for row_i, r_val in enumerate(datos_u_ch[1:], start=2):
+                            if len(r_val) > max(idx_id_ch, idx_de_ch, idx_es_ch):
+                                k_u_ch = gen_llave_op_dia(r_val[idx_id_ch], r_val[idx_de_ch])
+                                if k_u_ch in llaves_por_sincronizar_chofer and str(r_val[idx_es_ch]).strip().upper() != "ENTREGADO":
+                                    celdas_ch.append(gspread.Cell(row=row_i, col=idx_es_ch + 1, value="ENTREGADO"))
+                                    if idx_ev_ch >= 0 and not str(r_val[idx_ev_ch]).strip():
+                                        celdas_ch.append(gspread.Cell(row=row_i, col=idx_ev_ch + 1, value="Entregado (Ruta Local)"))
+                                    if idx_fr_ch >= 0 and not str(r_val[idx_fr_ch]).strip():
+                                        celdas_ch.append(gspread.Cell(row=row_i, col=idx_fr_ch + 1, value=llaves_por_sincronizar_chofer[k_u_ch]))
+                        if celdas_ch:
+                            ws_u_ch.update_cells(celdas_ch, value_input_option='USER_ENTERED')
+                            st.cache_data.clear()
+            except Exception:
+                pass
 
         estatus_validos = ["ENTREGADO", "PAGO A TALLER", "EN TRANSITO", "EN TRANSITO (RECOLECCIÓN)", "EN PROCESAMIENTO", "EN PROCESO DE RECOLECCIÓN", "EN PROCESO DE REEMBOLSO"]
         df_mon = df_op_dia[df_op_dia[col_estatus].astype(str).str.upper().isin(estatus_validos)].copy()
@@ -885,9 +933,7 @@ elif vista_actual == "🚚 Operación del Día":
             df_reembolsos_op = df_mon[df_mon[col_estatus].astype(str).str.upper() == "EN PROCESO DE REEMBOLSO"].copy()
             df_mon_normal = df_mon[df_mon[col_estatus].astype(str).str.upper() != "EN PROCESO DE REEMBOLSO"].copy()
 
-            # ==========================================================
-            # 📥 INSERTA AQUÍ EXACTAMENTE EL BLOQUE DE DEVOLUCIONES:
-            # ==========================================================
+            # DEVOLUCIONES / RECOLECCIONES EN TRÁNSITO
             df_recol_transito = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper() == "EN TRANSITO (RECOLECCIÓN)"].copy()
             if not df_recol_transito.empty:
                 titulo_recol = f"↩️ Devoluciones / Recolecciones en Tránsito (Hacia Base) | {len(df_recol_transito)} Partida(s)"
@@ -895,9 +941,8 @@ elif vista_actual == "🚚 Operación del Día":
                 rename_recol = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería Guía', col_guia: 'Guía Devolución', col_estatus_envio: 'Rastreo API', col_comentarios: 'Observaciones'}
                 with st.expander(titulo_recol, expanded=True):
                     st.dataframe(df_recol_transito[cols_ver_recol].rename(columns=rename_recol), use_container_width=True, hide_index=True)
-            # ==========================================================
 
-            # 1. ENTREGADO + PAGO A TALLER (CON FECHA ENVÍO + FECHA ENTREGA + QUIÉN RECIBIÓ + CASILLA RECIBIDO) Y 2. EN TRÁNSITO
+            # 1. ENTREGADO + PAGO A TALLER Y 2. EN TRÁNSITO (AMBOS CON CONTROL DIRECTO)
             for est in ["ENTREGADO", "EN TRANSITO"]:
                 if est == "ENTREGADO":
                     df_est = df_mon_normal[df_mon_normal[col_estatus].astype(str).str.upper().isin(["ENTREGADO", "PAGO A TALLER"])].copy()
@@ -958,6 +1003,33 @@ elif vista_actual == "🚚 Operación del Día":
                             if col_comentarios and 'Observaciones' in ed_ent_op.columns:
                                 ed_ent_op[col_comentarios] = ed_ent_op['Observaciones'].values
                             df_editado_cobro = ed_ent_op.copy()
+                        elif est == "EN TRANSITO" and not modo_consulta and permiso_edicion:
+                            df_vista['Marcar Entregado'] = False
+                            df_vista['Marcar Recibido'] = False
+                            cols_ed_tr = [c for c in df_vista.columns if c not in ['Marcar Entregado', 'Marcar Recibido', 'Paquetería', 'Guía', 'Observaciones']]
+                            ed_tran_op = st.data_editor(
+                                df_vista,
+                                column_config={
+                                    "Paquetería": st.column_config.SelectboxColumn("Paquetería", options=["", "PAQUETEXPRESS", "FEDEX", "DHL", "ESTAFETA", "AFIMEX"], width="small"),
+                                    "Guía": st.column_config.TextColumn("Guía", width="small"),
+                                    "Marcar Entregado": st.column_config.CheckboxColumn("🚚 Entregado", default=False, width="small"),
+                                    "Marcar Recibido": st.column_config.CheckboxColumn("🏁 Recibido", default=False, width="small"),
+                                    "Observaciones": st.column_config.TextColumn("📝 Observaciones", width="medium")
+                                },
+                                disabled=cols_ed_tr,
+                                use_container_width=True,
+                                hide_index=True,
+                                key="ed_transito_op_dia"
+                            )
+                            ed_tran_op[col_id] = df_est[col_id].values
+                            ed_tran_op[col_desc] = df_est[col_desc].values
+                            if col_paqueteria and 'Paquetería' in ed_tran_op.columns:
+                                ed_tran_op[col_paqueteria] = ed_tran_op['Paquetería'].values
+                            if col_guia and 'Guía' in ed_tran_op.columns:
+                                ed_tran_op[col_guia] = ed_tran_op['Guía'].values
+                            if col_comentarios and 'Observaciones' in ed_tran_op.columns:
+                                ed_tran_op[col_comentarios] = ed_tran_op['Observaciones'].values
+                            df_editado_transito_op = ed_tran_op.copy()
                         else:
                             st.dataframe(df_vista, use_container_width=True, hide_index=True)
 
@@ -3701,6 +3773,33 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+
+        if 'df_editado_transito_op' in locals() and not df_editado_transito_op.empty:
+            for _, row in df_editado_transito_op.iterrows():
+                k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
+                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
+                
+                if row.get('Marcar Recibido') and cambios_a_guardar.get(k, {}).get('estatus') != "CANCELADO":
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = "RECIBIDO"
+                    cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
+                    cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
+                elif row.get('Marcar Entregado') and cambios_a_guardar.get(k, {}).get('estatus') != "CANCELADO":
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = "ENTREGADO"
+                    cambios_a_guardar[k]['fecha_recibido'] = fecha_hoy_sistema
+                    if not orig.get('guia'):
+                        cambios_a_guardar[k]['estatus_envio'] = "Entregado (Ruta Local)"
+                    cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
+                    
+                comentario_actual = str(row.get(col_comentarios, '')).strip()
+                paq_actual = str(row.get(col_paqueteria, '')).strip() if col_paqueteria else ''
+                guia_actual = str(row.get(col_guia, '')).strip() if col_guia else ''
+                
+                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+                if col_paqueteria and paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
+                if col_guia and guia_actual != orig['guia']:
+                    cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                    if guia_actual not in ['', 'nan', 'None', 'NAN']:
+                        cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
         if not df_editado_fact.empty:
             for _, row in df_editado_fact.iterrows():

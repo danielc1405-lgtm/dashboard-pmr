@@ -1152,7 +1152,14 @@ elif vista_actual == "🚚 Operación del Día":
             
             c_env_disp = next((c for c in df_mon.columns if "FECHA ENV" in str(c).upper()), None)
             c_rec_disp = next((c for c in df_mon.columns if "FECHA REC" in str(c).upper() or "FECHA ENT" in str(c).upper()), None)
-            c_quien_rec = next((c for c in df_mon.columns if any(k in str(c).upper() for k in ["RECEPTOR", "QUIEN REC", "QUIÉN REC", "FIRMA", "RECIBIO", "RECIBIÓ"])), col_estatus_envio)
+            c_col_recibio_w = next((c for c in df_mon.columns if str(c).strip().upper() in ["RECIBIO", "RECIBIÓ", "QUIEN RECIBIO", "QUIÉN RECIBIÓ"]), None)
+            def obtener_quien_recibio(r):
+                val_w = str(r.get(c_col_recibio_w, '')).strip() if c_col_recibio_w else ''
+                if val_w not in ['', 'nan', 'None', 'NAN']: return val_w
+                val_env = str(r.get(col_estatus_envio, '')).strip() if col_estatus_envio else ''
+                return val_env if val_env not in ['nan', 'None', 'NAN'] else ''
+            df_mon['_Quien_Recibio_Real'] = df_mon.apply(obtener_quien_recibio, axis=1)
+            c_quien_rec = '_Quien_Recibio_Real'
             
             df_reembolsos_op = df_mon[df_mon[col_estatus].astype(str).str.upper() == "EN PROCESO DE REEMBOLSO"].copy()
             df_mon_normal = df_mon[df_mon[col_estatus].astype(str).str.upper() != "EN PROCESO DE REEMBOLSO"].copy()

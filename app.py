@@ -1157,7 +1157,11 @@ elif vista_actual == "🚚 Operación del Día":
                 val_w = str(r.get(c_col_recibio_w, '')).strip() if c_col_recibio_w else ''
                 if val_w not in ['', 'nan', 'None', 'NAN']: return val_w
                 val_env = str(r.get(col_estatus_envio, '')).strip() if col_estatus_envio else ''
-                return val_env if val_env not in ['nan', 'None', 'NAN'] else ''
+                if val_env in ['', 'nan', 'None', 'NAN']: return ''
+                m_paren = re.search(r'\((.*?)\)', val_env)
+                if m_paren: return m_paren.group(1).strip().title()
+                limpio = re.sub(r'(?i)^entregado(\s+a\s+domicilio)?[\s:,-]*', '', val_env).strip()
+                return limpio.title() if limpio else ''
             df_mon['_Quien_Recibio_Real'] = df_mon.apply(obtener_quien_recibio, axis=1)
             c_quien_rec = '_Quien_Recibio_Real'
             

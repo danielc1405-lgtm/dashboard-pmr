@@ -757,13 +757,13 @@ if vista_actual == "📊 Analítico":
         df_fin['F_Asig_D'] = safe_apply_date(df_fin, col_asignacion)
         
         def clean_money(val):
-            try: return float(str(val).replace('\$', '').replace(',', '').strip())
+            try: return float(str(val).replace('$', '').replace('\\', '').replace(',', '').strip())
             except: return 0.0
         df_fin['Monto'] = df_fin[col_precio].apply(clean_money)
         
         def cat_financiera(e):
             e_upper = str(e).upper().strip()
-            if "FACTURADO" in e_upper or "RECIBIDO" in e_upper or "ENTREGADO" in e_upper: return "✅ Concretado"
+            if "FACTURADO" in e_upper or "RECIBIDO" in e_upper or "ENTREGADO" in e_upper or "PAGO A TALLER" in e_upper: return "✅ Concretado"
             if "PÉRDIDA TOTAL" in e_upper or "PERDIDA TOTAL" in e_upper: return "💥 PT"
             if "PAGO DE DAÑOS" in e_upper or "PAGO DE DANOS" in e_upper: return "💸 PDD"
             if "CANCELADO" in e_upper: return "🚫 Cancelado"
@@ -791,7 +791,7 @@ if vista_actual == "📊 Analítico":
             
             cols_dinero = ['📥 Asignado', '⚙️ En Proceso', '✅ Concretado', '💸 PDD', '💥 PT', '🚫 Cancelado', '📈 Acumulado Concretado']
             for c in cols_dinero:
-                pivot_fin[c] = pivot_fin[c].apply(lambda x: f"\${x:,.2f}")
+                pivot_fin[c] = pivot_fin[c].apply(lambda x: f"${x:,.2f}")
                 
             pivot_fin = pivot_fin.sort_values('Mes_Sort', ascending=False)
             cols_mostrar = ['Mes_Str'] + cols_dinero

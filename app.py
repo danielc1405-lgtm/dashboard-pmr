@@ -19,7 +19,7 @@ from google.oauth2.service_account import Credentials
 warnings.filterwarnings("ignore")
 
 # ESTA LÍNEA DEBE SER SIEMPRE LA NÚMERO 1 DE STREAMLIT
-st.set_page_config(page_title="Dashboard PMR - Operación", page_icon="📦", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="PMR Hub AI", page_icon="📦", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
@@ -141,8 +141,17 @@ def init_connection():
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
 
-if not st.session_state['autenticado']:
-    st.markdown("<h1 style='text-align: center; color: #FF4B4B;'>🛡️ Acceso al Sistema PMR</h1>", unsafe_allow_html=True)
+iif not st.session_state['autenticado']:
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    col_logo1, col_logo2, col_logo3 = st.columns([1.5, 1, 1.5])
+    with col_logo2:
+        import os
+        if os.path.exists("logo.png"):
+            st.image("logo.png", use_container_width=True)
+            
+    st.markdown("<h1 style='text-align: center; color: #FF4B4B;'>🧠 PMR Hub AI</h1>", unsafe_allow_html=True)
+    
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         with st.form("login_form"):

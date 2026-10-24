@@ -141,7 +141,7 @@ def init_connection():
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
 
-iif not st.session_state['autenticado']:
+if not st.session_state['autenticado']:
     st.markdown("<br>", unsafe_allow_html=True)
     
     col_logo1, col_logo2, col_logo3 = st.columns([1.5, 1, 1.5])

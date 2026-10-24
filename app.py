@@ -144,13 +144,13 @@ if 'autenticado' not in st.session_state:
 if not st.session_state['autenticado']:
     st.markdown("<br>", unsafe_allow_html=True)
     
-    col_logo1, col_logo2, col_logo3 = st.columns([1.5, 1, 1.5])
+    col_logo1, col_logo2, col_logo3 = st.columns([2.5, 1, 2.5])
     with col_logo2:
         import os
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
             
-    st.markdown("<h1 style='text-align: center; color: #FF4B4B;'>🧠 PMR Hub AI</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: white; font-size: 3.5rem; margin-top: -10px;'>PMR Hub AI</h1>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1,2,1])
     with col2:

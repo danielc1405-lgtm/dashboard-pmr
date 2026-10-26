@@ -1250,6 +1250,31 @@ elif vista_actual == "🚚 Operación del Día":
             df_mon['_Quien_Recibio_Real'] = df_mon.apply(obtener_quien_recibio, axis=1)
             c_quien_rec = '_Quien_Recibio_Real'
             
+            # --- FILTROS GLOBALES OPERACIÓN DEL DÍA ---
+            df_mon['Filtro_Siniestro'] = df_mon[col_id].astype(str).str.strip() + " | " + df_mon['Vehiculo_Info']
+
+            st.markdown("#### 🎛️ Filtros de Búsqueda (Logística)")
+            f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 1.5, 1.5])
+            
+            with f_col1:
+                aseg_sel_od = st.multiselect("🛡️ Aseguradora:", sorted(list(df_mon['Aseguradora'].dropna().unique())), placeholder="Todas...")
+            with f_col2:
+                df_m1 = df_mon[df_mon['Aseguradora'].isin(aseg_sel_od)] if aseg_sel_od else df_mon
+                taller_sel_od = st.multiselect("🏢 Taller:", sorted(list(df_m1[col_taller].dropna().astype(str).unique())), placeholder="Todos...")
+            with f_col3:
+                df_m2 = df_m1[df_m1[col_taller].astype(str).isin(taller_sel_od)] if taller_sel_od else df_m1
+                sin_sel_od = st.multiselect("🚗 Siniestro - Auto:", sorted(list(df_m2['Filtro_Siniestro'].dropna().unique())), placeholder="Todos...")
+            with f_col4:
+                df_m3 = df_m2[df_m2['Filtro_Siniestro'].isin(sin_sel_od)] if sin_sel_od else df_m2
+                pza_sel_od = st.multiselect("⚙️ Refacción:", sorted(list(df_m3[col_desc].dropna().astype(str).unique())), placeholder="Todas...")
+
+            # Aplicar filtros a la base principal de OD
+            if aseg_sel_od: df_mon = df_mon[df_mon['Aseguradora'].isin(aseg_sel_od)]
+            if taller_sel_od: df_mon = df_mon[df_mon[col_taller].astype(str).isin(taller_sel_od)]
+            if sin_sel_od: df_mon = df_mon[df_mon['Filtro_Siniestro'].isin(sin_sel_od)]
+            if pza_sel_od: df_mon = df_mon[df_mon[col_desc].astype(str).isin(pza_sel_od)]
+            # -------------------------------------------
+            
             df_reembolsos_op = df_mon[df_mon[col_estatus].astype(str).str.upper() == "EN PROCESO DE REEMBOLSO"].copy()
             df_mon_normal = df_mon[df_mon[col_estatus].astype(str).str.upper() != "EN PROCESO DE REEMBOLSO"].copy()
 
@@ -1851,6 +1876,37 @@ elif vista_actual == "🛒 Compras":
             )
             df_por_comprar = df_en_proc[~df_en_proc['_llave_compra'].isin(llaves_ya_compradas)].copy()
 
+    # --- FILTROS GLOBALES DE COMPRAS ---
+    c_tall_c = buscar_columna_compras(df_por_comprar, ["TALLER", "CDR"], ["TALLER"]) if not df_por_comprar.empty else None
+    c_id_c = buscar_columna_compras(df_por_comprar, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"]) if not df_por_comprar.empty else None
+    c_desc_c = buscar_columna_compras(df_por_comprar, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"]) if not df_por_comprar.empty else None
+
+    st.markdown("#### 🎛️ Filtros de Búsqueda (Compras)")
+    opciones_taller = set(); opciones_sin = set(); opciones_pza = set(); opciones_prov = set()
+    
+    if not df_por_comprar.empty:
+        if c_tall_c: opciones_taller.update(df_por_comprar[c_tall_c].dropna().astype(str).tolist())
+        if c_id_c: opciones_sin.update(df_por_comprar[c_id_c].dropna().astype(str).tolist())
+        if c_desc_c: opciones_pza.update(df_por_comprar[c_desc_c].dropna().astype(str).tolist())
+        
+    if not df_compras.empty:
+        opciones_taller.update(df_compras['Taller'].dropna().astype(str).tolist())
+        opciones_sin.update(df_compras['Siniestro'].dropna().astype(str).tolist())
+        opciones_pza.update(df_compras['Descripción Pieza'].dropna().astype(str).tolist())
+        opciones_prov.update(df_compras['Proveedor'].dropna().astype(str).tolist())
+        
+    f_c1, f_c2, f_c3, f_c4 = st.columns([1, 1, 1.5, 1])
+    with f_c1: f_tall_comp = st.multiselect("🏢 Taller:", sorted(list(opciones_taller)), placeholder="Todos...")
+    with f_c2: f_sin_comp = st.multiselect("🚗 Siniestro:", sorted(list(opciones_sin)), placeholder="Todos...")
+    with f_c3: f_pza_comp = st.multiselect("⚙️ Refacción:", sorted(list(opciones_pza)), placeholder="Todas...")
+    with f_c4: f_prov_comp = st.multiselect("🏭 Proveedor (Llegadas):", sorted(list(opciones_prov)), placeholder="Todos...")
+
+    # Aplicar filtros a Pestaña 1 (Pendientes)
+    if not df_por_comprar.empty:
+        if f_tall_comp and c_tall_c: df_por_comprar = df_por_comprar[df_por_comprar[c_tall_c].astype(str).isin(f_tall_comp)]
+        if f_sin_comp and c_id_c: df_por_comprar = df_por_comprar[df_por_comprar[c_id_c].astype(str).isin(f_sin_comp)]
+        if f_pza_comp and c_desc_c: df_por_comprar = df_por_comprar[df_por_comprar[c_desc_c].astype(str).isin(f_pza_comp)]
+
     c_id_cnt_c = buscar_columna_compras(df_por_comprar, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"]) if not df_por_comprar.empty else None
     n_sin_por_comp = df_por_comprar[c_id_cnt_c].nunique() if (not df_por_comprar.empty and c_id_cnt_c) else len(df_por_comprar)
     
@@ -2067,14 +2123,11 @@ elif vista_actual == "🛒 Compras":
     with tab_comp_lleg:
         if not df_compras.empty:
             df_c = df_compras.copy()
-            c1, c2, c3 = st.columns(3)
-            with c1: f_sin = st.multiselect("🔍 Buscar Siniestro/Pieza:", options=sorted(list(set(df_c['Siniestro'].astype(str).tolist() + df_c['Descripción Pieza'].astype(str).tolist()))))
-            with c2: f_tall = st.multiselect("🏢 Filtrar por Taller (CDR):", options=sorted(list(df_c['Taller'].dropna().astype(str).unique())))
-            with c3: f_prov = st.multiselect("🏢 Filtrar por Proveedor:", options=sorted(list(df_c['Proveedor'].dropna().astype(str).unique())))
-            
-            if f_sin: df_c = df_c[df_c['Siniestro'].astype(str).isin(f_sin) | df_c['Descripción Pieza'].astype(str).isin(f_sin)]
-            if f_tall: df_c = df_c[df_c['Taller'].astype(str).isin(f_tall)]
-            if f_prov: df_c = df_c[df_c['Proveedor'].astype(str).isin(f_prov)]
+            # Aplicar los filtros globales a Pestaña 2 (Próximas Llegadas)
+            if f_tall_comp: df_c = df_c[df_c['Taller'].astype(str).isin(f_tall_comp)]
+            if f_sin_comp: df_c = df_c[df_c['Siniestro'].astype(str).isin(f_sin_comp)]
+            if f_pza_comp: df_c = df_c[df_c['Descripción Pieza'].astype(str).isin(f_pza_comp)]
+            if f_prov_comp: df_c = df_c[df_c['Proveedor'].astype(str).isin(f_prov_comp)]
             
             st.markdown("#### 📦 Próximas Llegadas (Línea de Tiempo)")
             if not df_c.empty:

@@ -193,172 +193,248 @@ opciones_menu = [
     "📦 Inventario", "📝 Remisiones", "🧾 Facturación", "🚚 Rutas", "Precios Promedio", "🔍 Consultas", "🛠️ Cuartel General"
 ]   
 
-# --- FUNCIÓN DE LA VENTANA EMERGENTE (POP-UP CON LANZADOR DE BOTS) ---
-@st.dialog("🖥️ Centro de Bots y Monitor Flotante PMR", width="large")
+# --- FUNCIÓN DE LA VENTANA EMERGENTE (POP-UP CON LANZADOR DE BOTS Y REPORTE) ---
+@st.dialog("🖥️ Cuartel General Flotante PMR", width="large")
 def abrir_popup_monitor():
     import html
     import subprocess
     import sys
 
-    # Dividimos la parte superior: Lanzador a la izquierda y Estatus/WhatsApp a la derecha
-    col_lanzador, col_resultados = st.columns([1.1, 1.9], gap="medium")
+    tab_bots, tab_reporte = st.tabs(["🤖 Monitor y Lanzador de Bots", "📋 Reporte Operativo (Imprimible)"])
 
-    with col_lanzador:
-        with st.form("form_lanzador_bots_popup"):
-            st.markdown("**1. Panel de Ejecución**")
-            st.caption("Selecciona el robot a correr:")
-            bot_sel_pop = st.selectbox(
-                "Robot:",
-                ["GNP Inpart", "Multiasistencia", "Paquetexpress (Rastreo)"],
-                label_visibility="collapsed"
-            )
-            modo_ext_pop = st.radio(
-                "Modo de Ejecución:",
-                ["Oculto (Rápido)", "Visual (Ver Chrome)"],
-                horizontal=True
-            )
-            btn_iniciar_pop = st.form_submit_button("🚀 Iniciar Robot", type="primary", use_container_width=True)
+    with tab_bots:
+        # Dividimos la parte superior: Lanzador a la izquierda y Estatus/WhatsApp a la derecha
+        col_lanzador, col_resultados = st.columns([1.1, 1.9], gap="medium")
 
-        if st.button("🧹 Limpiar Bandeja y Consola", use_container_width=True, key="btn_limpiar_popup"):
-            st.session_state.pop('temp_wa_alerts', None)
-            st.session_state.pop('temp_criticos_alerts', None)
-            st.session_state.pop('temp_bot_log', None)
-            st.session_state.pop('temp_bot_status', None)
-            st.session_state.pop('temp_bot_resumen', None)
+        with col_lanzador:
+            with st.form("form_lanzador_bots_popup"):
+                st.markdown("**1. Panel de Ejecución**")
+                st.caption("Selecciona el robot a correr:")
+                bot_sel_pop = st.selectbox(
+                    "Robot:",
+                    ["GNP Inpart", "Multiasistencia", "Paquetexpress (Rastreo)"],
+                    label_visibility="collapsed"
+                )
+                modo_ext_pop = st.radio(
+                    "Modo de Ejecución:",
+                    ["Oculto (Rápido)", "Visual (Ver Chrome)"],
+                    horizontal=True
+                )
+                btn_iniciar_pop = st.form_submit_button("🚀 Iniciar Robot", type="primary", use_container_width=True)
 
-        spinner_pop = st.empty()
+            if st.button("🧹 Limpiar Bandeja y Consola", use_container_width=True, key="btn_limpiar_popup"):
+                st.session_state.pop('temp_wa_alerts', None)
+                st.session_state.pop('temp_criticos_alerts', None)
+                st.session_state.pop('temp_bot_log', None)
+                st.session_state.pop('temp_bot_status', None)
+                st.session_state.pop('temp_bot_resumen', None)
 
-    # Contenedor para la Consola Matrix (abajo de las columnas para que ocupe todo el ancho)
-    st.markdown("**🖥️ Consola Matrix en Tiempo Real**")
-    contenedor_matrix_pop = st.empty()
+            spinner_pop = st.empty()
 
-    def pintar_matrix_pop(log_txt, activo=False):
-        estado_mtx = "🟢 EJECUTANDO EN VIVO..." if activo else "⚡ SISTEMA EN ESPERA / COMPLETADO"
-        cursor_html = '<span class="matrix-cursor"></span>' if activo else ''
-        contenido_limpio = html.escape(log_txt) if log_txt else "Esperando orden de ejecución..."
-        html_box = f"""
-        <div class="matrix-terminal" style="max-height: 260px; overflow-y: auto;">
-            <div class="matrix-header">
-                <span>PMR // MATRIX_CORE_TERMINAL v2.6</span>
-                <span class="matrix-katakana">ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄ010110</span>
-                <span>{estado_mtx}</span>
+        # Contenedor para la Consola Matrix (abajo de las columnas para que ocupe todo el ancho)
+        st.markdown("**🖥️ Consola Matrix en Tiempo Real**")
+        contenedor_matrix_pop = st.empty()
+
+        def pintar_matrix_pop(log_txt, activo=False):
+            estado_mtx = "🟢 EJECUTANDO EN VIVO..." if activo else "⚡ SISTEMA EN ESPERA / COMPLETADO"
+            cursor_html = '<span class="matrix-cursor"></span>' if activo else ''
+            contenido_limpio = html.escape(log_txt) if log_txt else "Esperando orden de ejecución..."
+            html_box = f"""
+            <div class="matrix-terminal" style="max-height: 260px; overflow-y: auto;">
+                <div class="matrix-header">
+                    <span>PMR // MATRIX_CORE_TERMINAL v2.6</span>
+                    <span class="matrix-katakana">ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄ010110</span>
+                    <span>{estado_mtx}</span>
+                </div>
+                <div>{contenido_limpio}{cursor_html}</div>
             </div>
-            <div>{contenido_limpio}{cursor_html}</div>
-        </div>
-        """
-        contenedor_matrix_pop.markdown(html_box, unsafe_allow_html=True)
+            """
+            contenedor_matrix_pop.markdown(html_box, unsafe_allow_html=True)
 
-    # --- SI PRESIONAS "INICIAR ROBOT" DENTRO DEL POP-UP ---
-    if btn_iniciar_pop:
-        if bot_sel_pop == "GNP Inpart":
-            archivo_ejecutar = "gnp_inpart.py"
-        elif bot_sel_pop == "Multiasistencia":
-            archivo_ejecutar = "sincronizador_multiasistencia.py"
-        else:
-            archivo_ejecutar = "motor_rastreo.py"
+        # --- SI PRESIONAS "INICIAR ROBOT" DENTRO DEL POP-UP ---
+        if btn_iniciar_pop:
+            if bot_sel_pop == "GNP Inpart": archivo_ejecutar = "gnp_inpart.py"
+            elif bot_sel_pop == "Multiasistencia": archivo_ejecutar = "sincronizador_multiasistencia.py"
+            else: archivo_ejecutar = "motor_rastreo.py"
 
-        arg_modo = "--oculto" if "Oculto" in modo_ext_pop else "--visual"
+            arg_modo = "--oculto" if "Oculto" in modo_ext_pop else "--visual"
 
-        with spinner_pop:
-            with st.spinner(f"Corriendo {bot_sel_pop} en vivo..."):
+            with spinner_pop:
+                with st.spinner(f"Corriendo {bot_sel_pop} en vivo..."):
+                    try:
+                        with open("credentials.json", "w", encoding="utf-8") as f:
+                            f.write(st.secrets["google_credentials"])
+
+                        pintar_matrix_pop(f"[SISTEMA] Despertando a {bot_sel_pop}...\n", activo=True)
+                        subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+
+                        cmd = [sys.executable, "-u", archivo_ejecutar]
+                        if bot_sel_pop != "Paquetexpress (Rastreo)": cmd.append(arg_modo)
+
+                        env_bot = os.environ.copy()
+                        env_bot["PYTHONIOENCODING"] = "utf-8"
+                        env_bot["PYTHONUNBUFFERED"] = "1"
+
+                        proceso = subprocess.Popen(
+                            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, bufsize=1, env=env_bot, encoding="utf-8", errors="replace"
+                        )
+
+                        lineas_acumuladas = []
+                        for linea_rt in iter(proceso.stdout.readline, ''):
+                            if not linea_rt: break
+                            lineas_acumuladas.append(linea_rt)
+                            pintar_matrix_pop("".join(lineas_acumuladas), activo=True)
+
+                        proceso.stdout.close()
+                        returncode = proceso.wait()
+                        salida_completa = "".join(lineas_acumuladas).strip()
+
+                        # Resumen
+                        if bot_sel_pop == "Paquetexpress (Rastreo)":
+                            guias_rev = len(re.findall(r"Buscando gu[íi]a:", salida_completa))
+                            st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_sel_pop}):** {guias_rev} guías consultadas."
+                        else:
+                            revisados = "0"
+                            m_multi = re.search(r"Quedan\s+(\d+)\s+siniestros", salida_completa)
+                            m_gnp = re.search(r"Total le[íi]dos[^:]*:\s*(\d+)", salida_completa)
+                            if m_multi: revisados = m_multi.group(1)
+                            elif m_gnp: revisados = m_gnp.group(1)
+                            st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_sel_pop}):** {revisados} pedidos revisados."
+
+                        # Extraer WhatsApp
+                        if "REPORTES LISTOS PARA COPIAR" in salida_completa:
+                            parte_wa = re.split(r"REPORTES LISTOS PARA COPIAR(?: A WHATSAPP)?", salida_completa)[1]
+                            for corte in ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "!!!!!"]:
+                                if corte in parte_wa: parte_wa = parte_wa.split(corte)[0]
+                            st.session_state['temp_wa_alerts'] = re.sub(r'^[=\s]+', '', parte_wa).strip()
+                        elif bot_sel_pop != "Paquetexpress (Rastreo)":
+                            st.session_state['temp_wa_alerts'] = "No hubo asignaciones nuevas en esta corrida."
+
+                        # Extraer Estatus Crítico
+                        marcadores_alerta = ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "REVISIÓN DE ESTATUS CRÍTICO"]
+                        idx_inicio_crit = -1
+                        for m_al in marcadores_alerta:
+                            pos = salida_completa.find(m_al)
+                            if pos != -1 and (idx_inicio_crit == -1 or pos < idx_inicio_crit): idx_inicio_crit = pos
+
+                        if idx_inicio_crit != -1:
+                            bloque_crit = salida_completa[idx_inicio_crit:]
+                            lineas_crit = [l for l in bloque_crit.splitlines() if set(l.strip()) != {'!'} and "REVISIÓN DE ESTATUS CRÍTICO" not in l]
+                            st.session_state['temp_criticos_alerts'] = "\n".join(lineas_crit).strip()
+                        elif bot_sel_pop != "Paquetexpress (Rastreo)":
+                            st.session_state['temp_criticos_alerts'] = "✅ Sin alertas críticas ni partidas vencidas."
+
+                        # Guardar log limpio
+                        salida_tecnica = salida_completa[:idx_inicio_crit] if idx_inicio_crit != -1 else salida_completa
+                        if "REPORTES LISTOS PARA COPIAR" in salida_tecnica:
+                            salida_tecnica = re.split(r"=+\s*\n\s*📱?\s*REPORTES LISTOS PARA COPIAR", salida_tecnica)[0]
+
+                        st.session_state['temp_bot_log'] = salida_tecnica.strip()
+                        st.session_state['temp_bot_status'] = f"✅ {bot_sel_pop} finalizado." if returncode == 0 else f"⚠️ {bot_sel_pop} terminó con advertencias."
+                        st.cache_data.clear()
+
+                    except Exception as e: st.error(f"Error al lanzar el bot: {e}")
+                    finally:
+                        if os.path.exists("credentials.json"): os.remove("credentials.json")
+
+        pintar_matrix_pop(st.session_state.get('temp_bot_log', ''), activo=False)
+
+        with col_resultados:
+            t_crit, t_wa = st.tabs(["🚨 Estatus Crítico (Hoy y Vencidos)", "📱 Mensajes WhatsApp"])
+            with t_crit:
+                texto_criticos = st.session_state.get('temp_criticos_alerts', "Corre GNP Inpart o Multiasistencia para ver el radar aquí.")
+                st.text_area("Criticos Output PopUp", value=texto_criticos, height=195, label_visibility="collapsed")
+            with t_wa:
+                texto_wa = st.session_state.get('temp_wa_alerts', "Corre un robot primero para ver los mensajes aquí.")
+                st.text_area("WhatsApp Output PopUp", value=texto_wa, height=195, label_visibility="collapsed")
+
+        if st.session_state.get('temp_bot_resumen'):
+            st.caption(f"{st.session_state.get('temp_bot_status', '')} | {st.session_state.get('temp_bot_resumen', '')}")
+
+    with tab_reporte:
+        st.markdown("### 📋 Reporte Consolidado: Pedidos en Proceso")
+        st.caption("Generación en tiempo real. Descarga el archivo para impresión física y revisión de piso.")
+        
+        with st.spinner("Extrayendo datos de la base viva..."):
+            def fetch_seguro(hoja):
                 try:
-                    with open("credentials.json", "w", encoding="utf-8") as f:
-                        f.write(st.secrets["google_credentials"])
+                    doc = init_connection()
+                    datos = doc.worksheet(hoja).get_all_values()
+                    if not datos: return pd.DataFrame()
+                    return pd.DataFrame(datos[1:], columns=[str(h).strip() for h in datos[0]])
+                except: return pd.DataFrame()
+                
+            df_rep_u = fetch_seguro("BD_UNIFICADA")
+            df_rep_c = fetch_seguro("BD_COMPRAS")
+            
+            if not df_rep_u.empty:
+                def get_c(df, nombres): return next((c for c in df.columns if any(n in str(c).upper() for n in nombres)), None)
+                
+                c_id = get_c(df_rep_u, ["SINIESTRO", "PEDIDO"])
+                c_cdr = get_c(df_rep_u, ["TALLER", "CDR"])
+                c_marca = get_c(df_rep_u, ["MARCA"])
+                c_modelo = get_c(df_rep_u, ["MODELO"])
+                c_ano = get_c(df_rep_u, ["AÑO", "ANO"])
+                c_pieza = get_c(df_rep_u, ["DESCRIPCI", "REFACCI"])
+                c_guia = get_c(df_rep_u, ["GUIA", "GUÍA"])
+                c_rastreo = get_c(df_rep_u, ["ESTATUS ENV", "RASTREO"])
+                c_venc = get_c(df_rep_u, ["VENCIMIENTO", "PROMESA"])
+                c_est = get_c(df_rep_u, ["ESTATUS", "STATUS"])
+                c_aseg = get_c(df_rep_u, ["ASEGURADORA"])
 
-                    pintar_matrix_pop(f"[SISTEMA] Despertando a {bot_sel_pop}...\n", activo=True)
-                    subprocess.run([sys.executable, '-m', 'playwright', 'install', 'chromium'], check=False)
+                # Excluir partidas cerradas
+                estatus_excluir = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "ENTREGADO", "PAGO A TALLER", "PERDIDA TOTAL"]
+                df_rep = df_rep_u[~df_rep_u[c_est].astype(str).str.upper().isin(estatus_excluir)].copy()
 
-                    cmd = [sys.executable, "-u", archivo_ejecutar]
-                    if bot_sel_pop != "Paquetexpress (Rastreo)":
-                        cmd.append(arg_modo)
+                # Mapa de proveedores
+                dict_prov_rep = {}
+                if not df_rep_c.empty:
+                    cc_sin = get_c(df_rep_c, ["SINIESTRO", "PEDIDO"])
+                    cc_pz = get_c(df_rep_c, ["DESCRIPCI", "REFACCI", "PIEZA"])
+                    cc_pr = get_c(df_rep_c, ["PROVEEDOR"])
+                    if cc_sin and cc_pz and cc_pr:
+                        for _, rc in df_rep_c.iterrows():
+                            s_v = str(rc.get(cc_sin, '')).strip().upper()
+                            if s_v.endswith('.0'): s_v = s_v[:-2]
+                            p_v = ' '.join(str(rc.get(cc_pz, '')).strip().upper().split())
+                            dict_prov_rep[f"{s_v}_{p_v}"] = str(rc.get(cc_pr, '')).strip()
 
-                    env_bot = os.environ.copy()
-                    env_bot["PYTHONIOENCODING"] = "utf-8"
-                    env_bot["PYTHONUNBUFFERED"] = "1"
+                def map_prv(row):
+                    sv = str(row.get(c_id, '')).strip().upper()
+                    if sv.endswith('.0'): sv = sv[:-2]
+                    pv = ' '.join(str(row.get(c_pieza, '')).strip().upper().split())
+                    return dict_prov_rep.get(f"{sv}_{pv}", "")
 
-                    proceso = subprocess.Popen(
-                        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        text=True, bufsize=1, env=env_bot, encoding="utf-8", errors="replace"
-                    )
+                df_rep['PROVEEDOR'] = df_rep.apply(map_prv, axis=1)
+                df_rep['COMPAÑÍA'] = df_rep[c_aseg].astype(str).str.upper().apply(lambda x: "MULTI" if "MULTI" in x else ("GNP" if "GNP" in x else "OTRA")) if c_aseg else "MULTI"
 
-                    lineas_acumuladas = []
-                    for linea_rt in iter(proceso.stdout.readline, ''):
-                        if not linea_rt:
-                            break
-                        lineas_acumuladas.append(linea_rt)
-                        pintar_matrix_pop("".join(lineas_acumuladas), activo=True)
+                rename_rep = {
+                    c_id: 'SINIESTRO/PEDIDO', c_cdr: 'CDR', c_marca: 'MARCA', c_modelo: 'MODELO',
+                    c_ano: 'AÑO', c_pieza: 'PIEZA', c_guia: 'GUÍA', c_rastreo: 'ESTATUS GUÍA',
+                    c_venc: 'FECHA VENCIMIENTO', c_est: 'ESTATUS'
+                }
+                df_rep.rename(columns=rename_rep, inplace=True)
 
-                    proceso.stdout.close()
-                    returncode = proceso.wait()
-                    salida_completa = "".join(lineas_acumuladas).strip()
+                columnas_solicitadas = ['COMPAÑÍA', 'ESTATUS', 'SINIESTRO/PEDIDO', 'CDR', 'MARCA', 'MODELO', 'AÑO', 'PIEZA', 'PROVEEDOR', 'GUÍA', 'ESTATUS GUÍA', 'FECHA VENCIMIENTO']
+                for col in columnas_solicitadas:
+                    if col not in df_rep.columns: df_rep[col] = ""
 
-                    # Resumen
-                    if bot_sel_pop == "Paquetexpress (Rastreo)":
-                        guias_rev = len(re.findall(r"Buscando gu[íi]a:", salida_completa))
-                        st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_sel_pop}):** {guias_rev} guías consultadas."
-                    else:
-                        revisados = "0"
-                        m_multi = re.search(r"Quedan\s+(\d+)\s+siniestros", salida_completa)
-                        m_gnp = re.search(r"Total le[íi]dos[^:]*:\s*(\d+)", salida_completa)
-                        if m_multi: revisados = m_multi.group(1)
-                        elif m_gnp: revisados = m_gnp.group(1)
-                        st.session_state['temp_bot_resumen'] = f"📊 **Resumen ({bot_sel_pop}):** {revisados} pedidos revisados."
-
-                    # Extraer WhatsApp
-                    if "REPORTES LISTOS PARA COPIAR" in salida_completa:
-                        parte_wa = re.split(r"REPORTES LISTOS PARA COPIAR(?: A WHATSAPP)?", salida_completa)[1]
-                        for corte in ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "!!!!!"]:
-                            if corte in parte_wa:
-                                parte_wa = parte_wa.split(corte)[0]
-                        st.session_state['temp_wa_alerts'] = re.sub(r'^[=\s]+', '', parte_wa).strip()
-                    elif bot_sel_pop != "Paquetexpress (Rastreo)":
-                        st.session_state['temp_wa_alerts'] = "No hubo asignaciones nuevas en esta corrida."
-
-                    # Extraer Estatus Crítico
-                    marcadores_alerta = ["🔄 PIEZAS REACTIVADAS", "🟠 CAMBIOS DE PRECIO", "🟡 ALERTAS DE PRECIO", "REVISIÓN DE ESTATUS CRÍTICO"]
-                    idx_inicio_crit = -1
-                    for m_al in marcadores_alerta:
-                        pos = salida_completa.find(m_al)
-                        if pos != -1 and (idx_inicio_crit == -1 or pos < idx_inicio_crit):
-                            idx_inicio_crit = pos
-
-                    if idx_inicio_crit != -1:
-                        bloque_crit = salida_completa[idx_inicio_crit:]
-                        lineas_crit = [l for l in bloque_crit.splitlines() if set(l.strip()) != {'!'} and "REVISIÓN DE ESTATUS CRÍTICO" not in l]
-                        st.session_state['temp_criticos_alerts'] = "\n".join(lineas_crit).strip()
-                    elif bot_sel_pop != "Paquetexpress (Rastreo)":
-                        st.session_state['temp_criticos_alerts'] = "✅ Sin alertas críticas ni partidas vencidas."
-
-                    # Guardar log limpio
-                    salida_tecnica = salida_completa[:idx_inicio_crit] if idx_inicio_crit != -1 else salida_completa
-                    if "REPORTES LISTOS PARA COPIAR" in salida_tecnica:
-                        salida_tecnica = re.split(r"=+\s*\n\s*📱?\s*REPORTES LISTOS PARA COPIAR", salida_tecnica)[0]
-
-                    st.session_state['temp_bot_log'] = salida_tecnica.strip()
-                    st.session_state['temp_bot_status'] = f"✅ {bot_sel_pop} finalizado." if returncode == 0 else f"⚠️ {bot_sel_pop} terminó con advertencias."
-                    st.cache_data.clear()
-
-                except Exception as e:
-                    st.error(f"Error al lanzar el bot: {e}")
-                finally:
-                    if os.path.exists("credentials.json"):
-                        os.remove("credentials.json")
-
-    # Pintamos la consola Matrix con el estado final (o previo si solo abriste la ventana)
-    pintar_matrix_pop(st.session_state.get('temp_bot_log', ''), activo=False)
-
-    # Llenamos la columna derecha con las pestañas de Estatus Crítico y WhatsApp actualizadas
-    with col_resultados:
-        t_crit, t_wa = st.tabs(["🚨 Estatus Crítico (Hoy y Vencidos)", "📱 Mensajes WhatsApp"])
-        with t_crit:
-            texto_criticos = st.session_state.get('temp_criticos_alerts', "Corre GNP Inpart o Multiasistencia para ver el radar aquí.")
-            st.text_area("Criticos Output PopUp", value=texto_criticos, height=195, label_visibility="collapsed")
-        with t_wa:
-            texto_wa = st.session_state.get('temp_wa_alerts', "Corre un robot primero para ver los mensajes aquí.")
-            st.text_area("WhatsApp Output PopUp", value=texto_wa, height=195, label_visibility="collapsed")
-
-    if st.session_state.get('temp_bot_resumen'):
-        st.caption(f"{st.session_state.get('temp_bot_status', '')} | {st.session_state.get('temp_bot_resumen', '')}")
+                df_rep = df_rep[columnas_solicitadas].sort_values(by=['COMPAÑÍA', 'ESTATUS'])
+                
+                st.dataframe(df_rep, use_container_width=True, hide_index=True)
+                
+                csv_data = df_rep.to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="🖨️ Descargar Listado CSV para Imprimir",
+                    data=csv_data,
+                    file_name=f"Reporte_PMR_En_Proceso_{datetime.datetime.now().strftime('%d%m%Y_%H%M')}.csv",
+                    mime="text/csv",
+                    type="primary",
+                    use_container_width=True
+                )
+            else:
+                st.warning("No hay datos en la base principal para generar el reporte.")
 
 # El parámetro vertical_alignment="center" alinea todo a la misma altura (6 columnas ahora)
 col_logo, col_menu, col_aseg, col_btn_ref, col_btn_pop, col_btn = st.columns([1.2, 5.0, 1.4, 0.4, 0.4, 1.2], vertical_alignment="center")
@@ -2341,7 +2417,7 @@ elif vista_actual == "🏢 Directorio":
                 mask = df_prov_filtrado.apply(lambda row: row.astype(str).str.contains(busqueda_prov, case=False, na=False).any(), axis=1)
                 df_prov_filtrado = df_prov_filtrado[mask].copy()
 
-            cols_prov = ['Proveedor', 'Sucursal', 'Marcas Especialidad', 'Tiempo de Entrega', 'Días Crédito', 'Condición Pago', 'Teléfono', 'Dirección']
+            cols_prov = ['Proveedor', 'Sucursal', 'Contacto', 'Marcas Especialidad', 'Tiempo de Entrega', 'Días Crédito', 'Condición Pago', 'Teléfono', 'Dirección']
             cols_vista_prov = [c for c in cols_prov if c in df_prov_filtrado.columns]
 
             if not modo_consulta and permiso_edicion:
@@ -2351,6 +2427,7 @@ elif vista_actual == "🏢 Directorio":
                 cfg_prov_ed = {
                     'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
                     'Sucursal': st.column_config.TextColumn("Sucursal", width="small"),
+                    'Contacto': st.column_config.TextColumn("Contacto", width="medium"),
                     'Marcas Especialidad': st.column_config.TextColumn("Especialidad", width="medium"),
                     'Tiempo de Entrega': st.column_config.NumberColumn("ETA (Días)", min_value=0, step=1, width="small"),
                     'Días Crédito': st.column_config.NumberColumn("Días Crédito", min_value=0, step=1, width="small"),
@@ -2407,9 +2484,10 @@ elif vista_actual == "🏢 Directorio":
                         nuevo_prov = col1.text_input("Nombre del Proveedor *")
                         nueva_sucursal = col2.text_input("Sucursal / Referencia")
                         
-                        col3, col4 = st.columns(2)
+                        col3, col4, col4_1 = st.columns([1.5, 1.5, 1])
                         nuevas_marcas = col3.text_input("Marcas de Especialidad", placeholder="Ej. Nissan, Honda, Colisión")
-                        nuevo_tel_p = col4.text_input("Teléfono o Contacto")
+                        nuevo_contacto_p = col4.text_input("Nombre del Contacto")
+                        nuevo_tel_p = col4_1.text_input("Teléfono")
                         
                         nueva_dir_p = st.text_input("Dirección Completa")
                         
@@ -2431,6 +2509,7 @@ elif vista_actual == "🏢 Directorio":
                                         
                                         i_prv = safe_idx('Proveedor')
                                         i_suc = safe_idx('Sucursal')
+                                        i_contacto = safe_idx('Contacto')
                                         i_mar = safe_idx('Marcas Especialidad')
                                         i_tel = safe_idx('Teléfono')
                                         i_dir = safe_idx('Dirección')
@@ -2440,12 +2519,10 @@ elif vista_actual == "🏢 Directorio":
                                         
                                         if i_prv >= 0: fila_nueva[i_prv] = nuevo_prov.upper()
                                         if i_suc >= 0: fila_nueva[i_suc] = nueva_sucursal.upper()
+                                        if i_contacto >= 0: fila_nueva[i_contacto] = nuevo_contacto_p.title()
                                         if i_mar >= 0: fila_nueva[i_mar] = nuevas_marcas.upper()
                                         if i_tel >= 0: fila_nueva[i_tel] = str(nuevo_tel_p)
                                         if i_dir >= 0: fila_nueva[i_dir] = nueva_dir_p.upper()
-                                        if i_tie >= 0: fila_nueva[i_tie] = nuevo_tiempo
-                                        if i_con >= 0: fila_nueva[i_con] = nueva_cond_pago
-                                        if i_dia >= 0: fila_nueva[i_dia] = str(nuevos_dias_c)
                                         
                                         ws_prov.append_row(fila_nueva[:len(headers)] if headers else fila_nueva, value_input_option='USER_ENTERED')
                                         st.success("✅ ¡Proveedor guardado exitosamente!")

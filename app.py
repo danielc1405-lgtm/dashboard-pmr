@@ -2428,11 +2428,11 @@ elif vista_actual == "🏢 Directorio":
                     'Proveedor': st.column_config.TextColumn("Proveedor", width="medium"),
                     'Sucursal': st.column_config.TextColumn("Sucursal", width="small"),
                     'Contacto': st.column_config.TextColumn("Contacto", width="medium"),
+                    'Teléfono': st.column_config.TextColumn("Teléfono", width="small"),
                     'Marcas Especialidad': st.column_config.TextColumn("Especialidad", width="medium"),
                     'Tiempo de Entrega': st.column_config.NumberColumn("ETA (Días)", min_value=0, step=1, width="small"),
                     'Días Crédito': st.column_config.NumberColumn("Días Crédito", min_value=0, step=1, width="small"),
                     'Condición Pago': st.column_config.SelectboxColumn("Condición Pago", options=opciones_cond_dir, width="medium"),
-                    'Teléfono': st.column_config.TextColumn("Teléfono", width="small"),
                     'Dirección': st.column_config.TextColumn("Dirección", width="large")
                 }
                 

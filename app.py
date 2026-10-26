@@ -2417,7 +2417,7 @@ elif vista_actual == "🏢 Directorio":
                 mask = df_prov_filtrado.apply(lambda row: row.astype(str).str.contains(busqueda_prov, case=False, na=False).any(), axis=1)
                 df_prov_filtrado = df_prov_filtrado[mask].copy()
 
-            cols_prov = ['Proveedor', 'Sucursal', 'Contacto', 'Marcas Especialidad', 'Tiempo de Entrega', 'Días Crédito', 'Condición Pago', 'Teléfono', 'Dirección']
+            cols_prov = ['Proveedor', 'Sucursal', 'Contacto', 'Teléfono', 'Marcas Especialidad', 'Tiempo de Entrega', 'Días Crédito', 'Condición Pago',  'Dirección']
             cols_vista_prov = [c for c in cols_prov if c in df_prov_filtrado.columns]
 
             if not modo_consulta and permiso_edicion:

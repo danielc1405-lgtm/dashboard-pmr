@@ -4329,38 +4329,38 @@ elif vista_actual == "🛠️ Cuartel General":
                             st.error(f"Error al guardar: {e}")
                 else:
                     st.warning("⚠️ El monto debe ser mayor a $0.00.")
-import pandas as pd
+                import pandas as pd
 
-# 1. Asegúrate de tener tu DataFrame cargado desde la hoja "GASTOS_EMPLEADOS"
-# df_gastos = cargar_datos_google_sheets("GASTOS_EMPLEADOS") 
+                # 1. Asegúrate de tener tu DataFrame cargado desde la hoja "GASTOS_EMPLEADOS"
+                # df_gastos = cargar_datos_google_sheets("GASTOS_EMPLEADOS") 
 
-st.markdown("### 📋 Resumen de Deudas Activas a PMR")
+                st.markdown("### 📋 Resumen de Deudas Activas a PMR")
 
-# 2. Filtrar solo los préstamos que siguen sin pagarse 
-# (Ajusta 'Estado' y 'Activo' por las palabras exactas que uses en tu base)
-df_activos = df_gastos[df_gastos['Estado'] == 'Activo'] 
+                # 2. Filtrar solo los préstamos que siguen sin pagarse 
+                # (Ajusta 'Estado' y 'Activo' por las palabras exactas que uses en tu base)
+                df_activos = df_gastos[df_gastos['Estado'] == 'Activo'] 
 
-# 3. Obtener la lista única de empleados que deben dinero
-empleados_con_deuda = df_activos['Empleado'].unique()
+                # 3. Obtener la lista única de empleados que deben dinero
+                empleados_con_deuda = df_activos['Empleado'].unique()
 
-if len(empleados_con_deuda) == 0:
-    st.info("No hay préstamos activos a favor de PMR en este momento.")
-else:
-    for empleado in empleados_con_deuda:
-        # Aislar los datos exclusivamente de este empleado
-        df_empleado = df_activos[df_activos['Empleado'] == empleado]
+                if len(empleados_con_deuda) == 0:
+                    st.info("No hay préstamos activos a favor de PMR en este momento.")
+                else:
+                    for empleado in empleados_con_deuda:
+                        # Aislar los datos exclusivamente de este empleado
+                        df_empleado = df_activos[df_activos['Empleado'] == empleado]
         
-        # Calcular el total adeudado asegurando que la columna sea numérica
-        total_deuda = pd.to_numeric(df_empleado['Monto'], errors='coerce').sum()
+                        # Calcular el total adeudado asegurando que la columna sea numérica
+                        total_deuda = pd.to_numeric(df_empleado['Monto'], errors='coerce').sum()
         
-        # Crear el desplegable cerrado por defecto para cada empleado
-        with st.expander(f"👤 {empleado} | Total adeudado: ${total_deuda:,.2f}"):
+                        # Crear el desplegable cerrado por defecto para cada empleado
+                        with st.expander(f"👤 {empleado} | Total adeudado: ${total_deuda:,.2f}"):
             
-            # Definir las columnas de la tabla interna (ajusta según tus encabezados)
-            df_mostrar = df_empleado[['Fecha', 'Concepto', 'Monto']] 
+                            # Definir las columnas de la tabla interna (ajusta según tus encabezados)
+                            df_mostrar = df_empleado[['Fecha', 'Concepto', 'Monto']] 
             
-            # Insertar la tabla dentro del expander
-            st.dataframe(df_mostrar, hide_index=True, use_container_width=True)
+                            # Insertar la tabla dentro del expander
+                            st.dataframe(df_mostrar, hide_index=True, use_container_width=True)
 
 # ==============================================================================
 # === [BLOQUE 10: MOTOR DE GUARDADO Y SINCRONIZACIÓN] ===

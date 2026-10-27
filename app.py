@@ -3212,10 +3212,15 @@ elif vista_actual == "🚚 Rutas":
     # TAB 1: ENTREGAS (SOLO NUEVO LEÓN Y SIN PAQUETERÍA)
     # ---------------------------------------------------------
     with tab_entregas:
-        st.caption("Muestra únicamente piezas con remisión generada (**EN TRÁNSITO**), sin guía de paquetería y cuyo taller pertenece a **Nuevo León**.")
-        # Unificamos ambas aseguradoras para que el despachador vea todas las entregas locales juntas
+        st.caption("Muestra piezas con remisión (o listas localmente) para enviar, sin guía de paquetería y cuyo taller pertenece a **Nuevo León**.")
         df_base_ent = df_completo.copy() if not df_completo.empty else pd.DataFrame()
-        df_ent = df_base_ent[df_base_ent[col_estatus].astype(str).str.upper() == "EN TRANSITO"].copy() if not df_base_ent.empty and col_estatus else pd.DataFrame()
+        
+        if not df_base_ent.empty and col_estatus:
+            # CORRECCIÓN: Volvemos a incluir EN PROCESAMIENTO para no perder los pedidos listos locales.
+            estatus_permitidos = ["EN TRANSITO", "EN PROCESAMIENTO"]
+            df_ent = df_base_ent[df_base_ent[col_estatus].astype(str).str.upper().isin(estatus_permitidos)].copy()
+        else:
+            df_ent = pd.DataFrame()
         
         if not df_ent.empty:
             # 1. Excluir las que ya tienen paquetería o número de guía
@@ -3260,7 +3265,7 @@ elif vista_actual == "🚚 Rutas":
                                 st.rerun()
                         else: st.warning("Selecciona al menos una pieza.")
         else:
-            st.success("No hay piezas 'En Tránsito' de Nuevo León pendientes de envío local a CDR.")
+            st.success("No hay piezas de Nuevo León pendientes de envío local a CDR.")
 
     # ---------------------------------------------------------
     # TAB 2: RECOLECCIONES

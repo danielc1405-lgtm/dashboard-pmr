@@ -4331,7 +4331,7 @@ elif vista_actual == "🛠️ Cuartel General":
                     st.warning("⚠️ El monto debe ser mayor a $0.00.")
 
         # --- RESUMEN DE DEUDAS ACTIVAS (AHORA SÍ ESTÁ FUERA DEL FORMULARIO Y DEL IF) ---
-        st.markdown("### 📋 Resumen de Deudas Activas a PMR")
+        st.markdown("### 📋 Resumen de Deudas PMR")
 
         try:
             doc_prestamos = init_connection()

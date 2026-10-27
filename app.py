@@ -4355,7 +4355,8 @@ elif vista_actual == "🛠️ Cuartel General":
                         total_deuda = df_empleado['Monto'].sum()
                 
                         with st.expander(f"👤 {empleado} | Total adeudado: ${total_deuda:,.2f}"):
-                            cols_disp = ['Fecha del Gasto', 'Proveedor / Negocio', 'Refacción / Descripción del gasto', 'Monto']
+                            # Los nombres deben coincidir EXACTAMENTE con los encabezados de tu Google Sheet
+                            cols_disp = ['Fecha', 'Proveedor', 'Refacción', 'Monto']
                             cols_a_mostrar = [c for c in cols_disp if c in df_empleado.columns]
                     
                             if not cols_a_mostrar:

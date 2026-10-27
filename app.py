@@ -4276,7 +4276,8 @@ elif vista_actual == "🛠️ Cuartel General":
                 else: st.info("¡Todo al día!")
             except gspread.exceptions.WorksheetNotFound: st.error("⚠️ Crea la pestaña **BD_NOTAS** en Google Sheets.")
             except Exception as e: st.error(f"⚠️ Error al cargar notas: {e}")
-# =========================================================================
+
+    # =========================================================================
     # PESTAÑA 3: MÓDULO DE PRÉSTAMOS A EMPLEADOS
     # =========================================================================
     with tab_prestamos:
@@ -4329,38 +4330,51 @@ elif vista_actual == "🛠️ Cuartel General":
                             st.error(f"Error al guardar: {e}")
                 else:
                     st.warning("⚠️ El monto debe ser mayor a $0.00.")
-                import pandas as pd
 
-                # 1. Asegúrate de tener tu DataFrame cargado desde la hoja "GASTOS_EMPLEADOS"
-                # df_gastos = cargar_datos_google_sheets("GASTOS_EMPLEADOS") 
-
+        # --- RESUMEN DE DEUDAS ACTIVAS (FUERA DEL FORMULARIO, SIEMPRE VISIBLE) ---
                 st.markdown("### 📋 Resumen de Deudas Activas a PMR")
 
-                # 2. Filtrar solo los préstamos que siguen sin pagarse 
-                # (Ajusta 'Estado' y 'Activo' por las palabras exactas que uses en tu base)
-                df_activos = df_gastos[df_gastos['Estado'] == 'Activo'] 
-
-                # 3. Obtener la lista única de empleados que deben dinero
-                empleados_con_deuda = df_activos['Empleado'].unique()
-
-                if len(empleados_con_deuda) == 0:
-                    st.info("No hay préstamos activos a favor de PMR en este momento.")
-                else:
-                    for empleado in empleados_con_deuda:
-                        # Aislar los datos exclusivamente de este empleado
-                        df_empleado = df_activos[df_activos['Empleado'] == empleado]
-        
-                        # Calcular el total adeudado asegurando que la columna sea numérica
-                        total_deuda = pd.to_numeric(df_empleado['Monto'], errors='coerce').sum()
-        
-                        # Crear el desplegable cerrado por defecto para cada empleado
-                        with st.expander(f"👤 {empleado} | Total adeudado: ${total_deuda:,.2f}"):
+                try:
+                    doc_prestamos = init_connection()
+                    ws_gastos_resumen = doc_prestamos.worksheet("GASTOS_EMPLEADOS")
+                    datos_gastos = ws_gastos_resumen.get_all_values()
             
-                            # Definir las columnas de la tabla interna (ajusta según tus encabezados)
-                            df_mostrar = df_empleado[['Fecha', 'Concepto', 'Monto']] 
-            
-                            # Insertar la tabla dentro del expander
-                            st.dataframe(df_mostrar, hide_index=True, use_container_width=True)
+                    if len(datos_gastos) > 1:
+                        df_gastos = pd.DataFrame(datos_gastos[1:], columns=datos_gastos[0])
+                
+                        # Filtrar solo los préstamos pendientes (usando el estatus exacto que guardas arriba)
+                        if 'Estado' in df_gastos.columns:
+                            df_activos = df_gastos[df_gastos['Estado'].astype(str).str.upper() == 'PENDIENTE REEMBOLSO'].copy() 
+                        else:
+                            df_activos = pd.DataFrame() # Resguardo por si la columna no existe aún
+                
+                        if not df_activos.empty:
+                            empleados_con_deuda = df_activos['Empleado'].unique()
+                    
+                            for empleado in empleados_con_deuda:
+                                df_empleado = df_activos[df_activos['Empleado'] == empleado].copy()
+                        
+                                # Asegurar que el monto sea numérico para poder sumarlo
+                                df_empleado['Monto'] = pd.to_numeric(df_empleado['Monto'], errors='coerce').fillna(0)
+                                total_deuda = df_empleado['Monto'].sum()
+                        
+                                with st.expander(f"👤 {empleado} | Total adeudado: ${total_deuda:,.2f}"):
+                                    # Ajustado para usar los nombres de columnas reales que insertas en tu form
+                                    cols_disp = ['Fecha del Gasto', 'Proveedor / Negocio', 'Refacción / Descripción del gasto', 'Monto']
+                                    cols_a_mostrar = [c for c in cols_disp if c in df_empleado.columns]
+                            
+                                    if not cols_a_mostrar:
+                                        cols_a_mostrar = df_empleado.columns.tolist() # Fallback si cambiaste los nombres
+                                
+                                    st.dataframe(df_empleado[cols_a_mostrar], hide_index=True, use_container_width=True)
+                        else:
+                            st.info("No hay préstamos activos a favor de PMR en este momento.")
+                    else:
+                        st.info("La base de gastos está vacía.")
+                
+                except Exception as e:
+                    st.error(f"No se pudo cargar el resumen de gastos: {e}")
+
 
 # ==============================================================================
 # === [BLOQUE 10: MOTOR DE GUARDADO Y SINCRONIZACIÓN] ===

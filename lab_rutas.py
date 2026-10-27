@@ -201,6 +201,7 @@ else:
         elif parada['tipo'] == 'recoleccion': icono = "↩️"
         elif parada['tipo'] == 'compra': icono = "🛒"
         elif parada['tipo'] == 'cotizacion': icono = "🔍"
+        elif parada['tipo'] == 'pago': icono = "💵"
         else: icono = "🔵"
             
         titulo_tarjeta = f"{icono} #{i+1} - {parada['lugar']}"
@@ -236,6 +237,11 @@ else:
                 st.markdown(f"**🔎 Piezas a Cotizar ({len(parada['piezas'])}):**")
                 for p in parada['piezas']: st.markdown(f"- {p['desc']}")
 
+            elif parada['tipo'] == 'pago':
+                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}<br>🏷️ <b>Serie (VIN):</b> {parada.get("serie", "S/D")}</div>', unsafe_allow_html=True)
+                st.markdown(f"**💵 Pago a Proveedor ({len(parada['piezas'])} pza):**")
+                for p in parada['piezas']: st.markdown(f"- {p['desc']}")
+
             st.markdown("<br>", unsafe_allow_html=True)
             
             # --- CHECK-IN RÁPIDO Y DIRECTO ---
@@ -250,6 +256,8 @@ else:
                     texto_btn = f"{icono} Entregado"
                 elif parada['tipo'] in ['compra', 'recoleccion']: 
                     texto_btn = f"{icono} Recolectado"
+                elif parada['tipo'] == 'pago': 
+                    texto_btn = f"{icono} Pago Realizado"
                 else: 
                     texto_btn = f"{icono} Visita Lista"
                 

@@ -3916,7 +3916,7 @@ elif vista_actual == "🛠️ Cuartel General":
     st.markdown("### 🛠️ Cuartel General PMR (Sala de Máquinas)")
     
     # --- SUB-PESTAÑAS ESTILO DIRECTORIO (100% ANCHO PARA CADA MÓDULO) ---
-    tab_bots, tab_mant = st.tabs(["🤖 Centro de Bots y Alertas", "💾 Mantenimiento y Pendientes"])
+    tab_bots, tab_mant, tab_prestamos = st.tabs(["🤖 Centro de Bots y Alertas", "💾 Mantenimiento y Pendientes", "💸 Préstamos a Empleados"])
 
     # =========================================================================
     # PESTAÑA 1: CENTRO DE BOTS Y ALERTAS (PANTALLA COMPLETA)
@@ -4276,6 +4276,59 @@ elif vista_actual == "🛠️ Cuartel General":
                 else: st.info("¡Todo al día!")
             except gspread.exceptions.WorksheetNotFound: st.error("⚠️ Crea la pestaña **BD_NOTAS** en Google Sheets.")
             except Exception as e: st.error(f"⚠️ Error al cargar notas: {e}")
+# =========================================================================
+    # PESTAÑA 3: MÓDULO DE PRÉSTAMOS A EMPLEADOS
+    # =========================================================================
+    with tab_prestamos:
+        st.markdown("#### 💸 Registro de Préstamos / Gastos de Empleados a favor de PMR")
+        st.caption("Registra los pagos de refacciones o servicios que los empleados hacen de su bolsa (Efectivo, TDC, etc.) para su posterior reembolso.")
+        
+        with st.form("form_prestamos_empleados", clear_on_submit=True):
+            c1, c2, c3 = st.columns(3)
+            emp_p = c1.selectbox("Empleado", ["Daniel", "Dionicio", "Diana", "Marco", "Otro"])
+            met_p = c2.selectbox("Método de Pago", ["Efectivo", "TDC", "Tarjeta Débito", "Transferencia"])
+            fec_p = c3.date_input("Fecha del Gasto")
+            
+            c4, c5 = st.columns([2, 1])
+            
+            # Cargar proveedores de forma segura para esta vista
+            lista_provs = ["OTRO (Escribir libremente)"]
+            df_prov_temp = cargar_catalogos()[1] # Extraemos BD_PROVEEDORES
+            if not df_prov_temp.empty and 'Proveedor' in df_prov_temp.columns:
+                provs_bd = [p for p in df_prov_temp['Proveedor'].dropna().unique().tolist() if str(p).strip() != ""]
+                lista_provs.extend(sorted(provs_bd))
+            
+            prov_sel = c4.selectbox("Proveedor / Negocio", lista_provs)
+            prov_libre = c4.text_input("Si elegiste 'OTRO', especifica el proveedor o concepto aquí:")
+            
+            monto_p = c5.number_input("Monto Pagado ($)", min_value=0.0, step=100.0, format="%.2f")
+            
+            c6, c7 = st.columns(2)
+            sin_p = c6.text_input("Siniestro (Opcional, ej. SIN x)")
+            ref_p = c7.text_input("Refacción / Descripción del gasto")
+            
+            btn_prestamo = st.form_submit_button("💾 Guardar Registro", type="primary")
+            
+            if btn_prestamo:
+                if monto_p > 0:
+                    prov_final = prov_libre if prov_sel == "OTRO (Escribir libremente)" else prov_sel
+                    if not prov_final: prov_final = "S/D"
+                    
+                    nueva_fila = [
+                        fec_p.strftime("%Y-%m-%d"), emp_p, met_p, prov_final, monto_p, sin_p, ref_p, "PENDIENTE REEMBOLSO"
+                    ]
+                    try:
+                        doc_prestamo = init_connection()
+                        ws_gastos = doc_prestamo.worksheet("GASTOS_EMPLEADOS")
+                        ws_gastos.append_row(nueva_fila)
+                        st.success(f"✅ Gasto de {emp_p} por ${monto_p:,.2f} en {prov_final} registrado correctamente.")
+                    except Exception as e:
+                        if "WorksheetNotFound" in str(e):
+                            st.error("❌ No existe la pestaña 'GASTOS_EMPLEADOS' en tu Google Sheet. Por favor créala primero.")
+                        else:
+                            st.error(f"Error al guardar: {e}")
+                else:
+                    st.warning("⚠️ El monto debe ser mayor a $0.00.")
 
 # ==============================================================================
 # === [BLOQUE 10: MOTOR DE GUARDADO Y SINCRONIZACIÓN] ===

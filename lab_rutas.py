@@ -124,7 +124,8 @@ def cargar_rutas_nube():
             hoy_str_r = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
             col_fecha = next((c for c in df.columns if 'FECHA' in c), None)
 
-            df_pendientes = df[(df[col_estatus].astype(str).str.upper() == 'PENDIENTE') & (df[col_fecha].astype(str).str.contains(hoy_str_r, na=False))].copy()
+            # Arrastrar todas las rutas PENDIENTES, sin importar su fecha original de creación
+            df_pendientes = df[df[col_estatus].astype(str).str.upper() == 'PENDIENTE'].copy()
             if col_fecha:
                 df_completadas = df[(df[col_estatus].astype(str).str.upper() == 'COMPLETADO') & (df[col_fecha].astype(str).str.contains(hoy_str_r, na=False))].copy()
             else:
@@ -234,7 +235,7 @@ else:
                 st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}<br>🏷️ <b>Serie (VIN):</b> {parada.get("serie", "S/D")}</div>', unsafe_allow_html=True)
                 st.markdown(f"**🔎 Piezas a Cotizar ({len(parada['piezas'])}):**")
                 for p in parada['piezas']: st.markdown(f"- {p['desc']}")
-                
+
             st.markdown("<br>", unsafe_allow_html=True)
             
             # --- CHECK-IN RÁPIDO Y DIRECTO ---
@@ -244,9 +245,13 @@ else:
                 st.link_button("🧭 Navegar", f"https://www.google.com/maps/search/?api=1&query={query_str}", use_container_width=True)
             with col2:
                 # --- AQUÍ APLICAMOS LOS ICONOS DINÁMICOS AL BOTÓN ---
-                if parada['tipo'] == 'entrega': texto_btn = f"{icono} Entregado"
-                elif parada['tipo'] in ['compra', 'recoleccion']: texto_btn = f"{icono} Recolectado"
-                else: texto_btn = f"{icono} Visita Lista"
+                
+                if parada['tipo'] == 'entrega': 
+                    texto_btn = f"{icono} Entregado"
+                elif parada['tipo'] in ['compra', 'recoleccion']: 
+                    texto_btn = f"{icono} Recolectado"
+                else: 
+                    texto_btn = f"{icono} Visita Lista"
                 
                 if st.button(texto_btn, key=f"save_{parada['id']}", type="primary", use_container_width=True):
                     with st.spinner("Registrando operación..."):

@@ -4292,9 +4292,8 @@ elif vista_actual == "🛠️ Cuartel General":
             
             c4, c5 = st.columns([2, 1])
             
-            # Cargar proveedores de forma segura para esta vista
             lista_provs = ["OTRO (Escribir libremente)"]
-            df_prov_temp = cargar_catalogos()[1] # Extraemos BD_PROVEEDORES
+            df_prov_temp = cargar_catalogos()[1]
             if not df_prov_temp.empty and 'Proveedor' in df_prov_temp.columns:
                 provs_bd = [p for p in df_prov_temp['Proveedor'].dropna().unique().tolist() if str(p).strip() != ""]
                 lista_provs.extend(sorted(provs_bd))
@@ -4331,49 +4330,45 @@ elif vista_actual == "🛠️ Cuartel General":
                 else:
                     st.warning("⚠️ El monto debe ser mayor a $0.00.")
 
-        # --- RESUMEN DE DEUDAS ACTIVAS (FUERA DEL FORMULARIO, SIEMPRE VISIBLE) ---
-                st.markdown("### 📋 Resumen de Deudas Activas a PMR")
+        # --- RESUMEN DE DEUDAS ACTIVAS (AHORA SÍ ESTÁ FUERA DEL FORMULARIO Y DEL IF) ---
+        st.markdown("### 📋 Resumen de Deudas Activas a PMR")
 
-                try:
-                    doc_prestamos = init_connection()
-                    ws_gastos_resumen = doc_prestamos.worksheet("GASTOS_EMPLEADOS")
-                    datos_gastos = ws_gastos_resumen.get_all_values()
+        try:
+            doc_prestamos = init_connection()
+            ws_gastos_resumen = doc_prestamos.worksheet("GASTOS_EMPLEADOS")
+            datos_gastos = ws_gastos_resumen.get_all_values()
+    
+            if len(datos_gastos) > 1:
+                df_gastos = pd.DataFrame(datos_gastos[1:], columns=datos_gastos[0])
+        
+                if 'Estado' in df_gastos.columns:
+                    df_activos = df_gastos[df_gastos['Estado'].astype(str).str.upper() == 'PENDIENTE REEMBOLSO'].copy() 
+                else:
+                    df_activos = pd.DataFrame() 
+        
+                if not df_activos.empty:
+                    empleados_con_deuda = df_activos['Empleado'].unique()
             
-                    if len(datos_gastos) > 1:
-                        df_gastos = pd.DataFrame(datos_gastos[1:], columns=datos_gastos[0])
+                    for empleado in empleados_con_deuda:
+                        df_empleado = df_activos[df_activos['Empleado'] == empleado].copy()
+                        df_empleado['Monto'] = pd.to_numeric(df_empleado['Monto'], errors='coerce').fillna(0)
+                        total_deuda = df_empleado['Monto'].sum()
                 
-                        # Filtrar solo los préstamos pendientes (usando el estatus exacto que guardas arriba)
-                        if 'Estado' in df_gastos.columns:
-                            df_activos = df_gastos[df_gastos['Estado'].astype(str).str.upper() == 'PENDIENTE REEMBOLSO'].copy() 
-                        else:
-                            df_activos = pd.DataFrame() # Resguardo por si la columna no existe aún
-                
-                        if not df_activos.empty:
-                            empleados_con_deuda = df_activos['Empleado'].unique()
+                        with st.expander(f"👤 {empleado} | Total adeudado: ${total_deuda:,.2f}"):
+                            cols_disp = ['Fecha del Gasto', 'Proveedor / Negocio', 'Refacción / Descripción del gasto', 'Monto']
+                            cols_a_mostrar = [c for c in cols_disp if c in df_empleado.columns]
                     
-                            for empleado in empleados_con_deuda:
-                                df_empleado = df_activos[df_activos['Empleado'] == empleado].copy()
+                            if not cols_a_mostrar:
+                                cols_a_mostrar = df_empleado.columns.tolist() 
                         
-                                # Asegurar que el monto sea numérico para poder sumarlo
-                                df_empleado['Monto'] = pd.to_numeric(df_empleado['Monto'], errors='coerce').fillna(0)
-                                total_deuda = df_empleado['Monto'].sum()
-                        
-                                with st.expander(f"👤 {empleado} | Total adeudado: ${total_deuda:,.2f}"):
-                                    # Ajustado para usar los nombres de columnas reales que insertas en tu form
-                                    cols_disp = ['Fecha del Gasto', 'Proveedor / Negocio', 'Refacción / Descripción del gasto', 'Monto']
-                                    cols_a_mostrar = [c for c in cols_disp if c in df_empleado.columns]
-                            
-                                    if not cols_a_mostrar:
-                                        cols_a_mostrar = df_empleado.columns.tolist() # Fallback si cambiaste los nombres
-                                
-                                    st.dataframe(df_empleado[cols_a_mostrar], hide_index=True, use_container_width=True)
-                        else:
-                            st.info("No hay préstamos activos a favor de PMR en este momento.")
-                    else:
-                        st.info("La base de gastos está vacía.")
-                
-                except Exception as e:
-                    st.error(f"No se pudo cargar el resumen de gastos: {e}")
+                            st.dataframe(df_empleado[cols_a_mostrar], hide_index=True, use_container_width=True)
+                else:
+                    st.info("No hay préstamos activos a favor de PMR en este momento.")
+            else:
+                st.info("La base de gastos está vacía.")
+        
+        except Exception as e:
+            st.error(f"No se pudo cargar el resumen de gastos: {e}")
 
 
 # ==============================================================================

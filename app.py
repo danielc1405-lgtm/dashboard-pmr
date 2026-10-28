@@ -3329,7 +3329,7 @@ elif vista_actual == "🚚 Rutas":
     # TAB 3: COMPRAS (COTIZAR, PAGAR Y RECOLECTAR EN BASE)
     # ---------------------------------------------------------
     with tab_compras:
-        st.caption("Lista de piezas activas en **📦 Próximas Llegadas**. Selecciona la acción requerida (Cotizar, Pagar o Recoger) y envíala al operador en un solo clic.")
+        st.caption("Lista de piezas activas en **📦 Próximas Llegadas**. Selecciona la acción requerida (Cotizar, Pagar, Recoger o Directo CDR).")
         if not df_compras.empty and not df_completo.empty:
             def gen_llave_rutas(id_val, desc_val):
                 id_str = str(id_val).strip().upper()
@@ -3338,8 +3338,13 @@ elif vista_actual == "🚚 Rutas":
 
             df_c_todas_pend = df_compras.copy()
             df_c_todas_pend['_GS_Row_Comp'] = df_c_todas_pend.index + 2
+            
+            # Filtros para mantener limpio el panel del chofer
             df_c_todas_pend['Recibido_Bool'] = df_c_todas_pend['Recibido'].astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
-            df_c_todas_pend = df_c_todas_pend[df_c_todas_pend['Recibido_Bool'] == False].copy()
+            df_c_todas_pend['Omitir_Ruta'] = df_c_todas_pend['Recibido'].astype(str).str.strip().str.upper().str.contains('DIRECTO')
+            
+            # Nos quedamos solo con lo que NO está recibido y NO va directo a CDR
+            df_c_todas_pend = df_c_todas_pend[(df_c_todas_pend['Recibido_Bool'] == False) & (df_c_todas_pend['Omitir_Ruta'] == False)].copy()
             
             total_en_prox_llegadas = len(df_c_todas_pend)
             excluidas_ebay = len(df_c_todas_pend[df_c_todas_pend['Proveedor'].astype(str).str.strip().str.upper().isin(['EBAY', 'INVENTARIO'])])
@@ -3381,6 +3386,7 @@ elif vista_actual == "🚚 Rutas":
                     df_comp_rutas['Cotizar'] = False
                     df_comp_rutas['Pagar'] = False
                     df_comp_rutas['Recoger'] = False
+                    df_comp_rutas['Directo'] = False
                     df_comp_rutas['Siniestro_Col'] = df_comp_rutas['Siniestro'].astype(str).str.strip()
                     df_comp_rutas['Vehiculo_Info'] = df_comp_rutas.get('Vehículo', pd.Series(["S/D"]*len(df_comp_rutas))).astype(str).str.strip()
                     df_comp_rutas['Pieza_Col'] = df_comp_rutas['Descripción Pieza'].astype(str).str.strip()
@@ -3388,13 +3394,14 @@ elif vista_actual == "🚚 Rutas":
                     st.markdown("#### 🏪 Gestión Global con Proveedores")
                     for prov, df_prov in df_comp_rutas.groupby('Proveedor'):
                         with st.expander(f"🛒 {prov} | {len(df_prov)} pieza(s) gestionables", expanded=False):
-                            cols_ver = ['Cotizar', 'Pagar', 'Recoger', 'Siniestro_Col', 'Vehiculo_Info', 'Pieza_Col', 'Costo Compra', 'Condición Pago', 'Estatus_Real']
+                            cols_ver = ['Cotizar', 'Pagar', 'Recoger', 'Directo', 'Siniestro_Col', 'Vehiculo_Info', 'Pieza_Col', 'Costo Compra', 'Condición Pago', 'Estatus_Real']
                             cols_ver = [c for c in cols_ver if c in df_prov.columns]
                             
                             cfg_comp = {
                                 "Cotizar": st.column_config.CheckboxColumn("🔍 Cotizar", default=False),
                                 "Pagar": st.column_config.CheckboxColumn("💵 Pagar", default=False),
                                 "Recoger": st.column_config.CheckboxColumn("📦 Recoger", default=False),
+                                "Directo": st.column_config.CheckboxColumn("🚚 Directo CDR", default=False, help="Oculta la pieza de las rutas marcándola como 'DIRECTO CDR' en la base, sin darla por recibida aún."),
                                 "Siniestro_Col": st.column_config.TextColumn("Siniestro", disabled=True),
                                 "Vehiculo_Info": st.column_config.TextColumn("Vehículo", disabled=True),
                                 "Pieza_Col": st.column_config.TextColumn("Pieza", disabled=True),
@@ -3405,8 +3412,8 @@ elif vista_actual == "🚚 Rutas":
                             ed_comp = st.data_editor(df_prov[cols_ver], column_config=cfg_comp, hide_index=True, use_container_width=True, key=f"gest_{prov}")
                             notas_comp = st.text_input("📝 Instrucciones para el Operador:", placeholder="Ej. Pagar en efectivo y traer factura...", key=f"notas_gest_{prov}")
                             
-                            if st.button(f"➕ Enviar Selección a Ruta para {prov}", type="primary", key=f"btn_gest_{prov}"):
-                                seleccionados = ed_comp[(ed_comp['Cotizar'] == True) | (ed_comp['Pagar'] == True) | (ed_comp['Recoger'] == True)]
+                            if st.button(f"➕ Procesar Selección para {prov}", type="primary", key=f"btn_gest_{prov}"):
+                                seleccionados = ed_comp[(ed_comp['Cotizar'] == True) | (ed_comp['Pagar'] == True) | (ed_comp['Recoger'] == True) | (ed_comp['Directo'] == True)]
                                 
                                 if not seleccionados.empty:
                                     df_envio = df_prov.loc[seleccionados.index].copy()
@@ -3417,10 +3424,12 @@ elif vista_actual == "🚚 Rutas":
                                     
                                     exito = False
                                     try:
+                                        # 1. COTIZAR
                                         df_cot = df_envio[seleccionados['Cotizar'] == True]
                                         if not df_cot.empty:
                                             if despachar_a_bd_rutas(df_cot, "cotizacion", f"[COTIZAR] {notas_comp}"): exito = True
                                         
+                                        # 2. PAGAR
                                         df_pag = df_envio[seleccionados['Pagar'] == True]
                                         if not df_pag.empty:
                                             if despachar_a_bd_rutas(df_pag, "pago", f"[PAGAR] {notas_comp}"):
@@ -3432,6 +3441,7 @@ elif vista_actual == "🚚 Rutas":
                                                     celdas_pago = [gspread.Cell(row=int(r_env['_GS_Row_Comp']), col=col_idx_pago, value="Pagado") for _, r_env in df_pag.iterrows()]
                                                     if celdas_pago: ws_c_upd.update_cells(celdas_pago, value_input_option='USER_ENTERED')
                                         
+                                        # 3. RECOGER (Manda a ruta y marca Recibido = SI)
                                         df_rec = df_envio[seleccionados['Recoger'] == True]
                                         if not df_rec.empty:
                                             if despachar_a_bd_rutas(df_rec, "compra", f"[RECOGER] {notas_comp}"):
@@ -3442,16 +3452,27 @@ elif vista_actual == "🚚 Rutas":
                                                     col_idx_rec = headers_c_upd.index("RECIBIDO") + 1
                                                     celdas_rec = [gspread.Cell(row=int(r_env['_GS_Row_Comp']), col=col_idx_rec, value="SI") for _, r_env in df_rec.iterrows()]
                                                     if celdas_rec: ws_c_upd.update_cells(celdas_rec, value_input_option='USER_ENTERED')
+
+                                        # 4. DIRECTO A CDR (Escribe "DIRECTO CDR" en vez de "SI" y NO manda a ruta)
+                                        df_dir = df_envio[seleccionados['Directo'] == True]
+                                        if not df_dir.empty:
+                                            exito = True
+                                            ws_c_upd = doc.worksheet("BD_COMPRAS")
+                                            headers_c_upd = [str(h).strip().upper() for h in ws_c_upd.row_values(1)]
+                                            if "RECIBIDO" in headers_c_upd:
+                                                col_idx_rec = headers_c_upd.index("RECIBIDO") + 1
+                                                celdas_rec = [gspread.Cell(row=int(r_env['_GS_Row_Comp']), col=col_idx_rec, value="DIRECTO CDR") for _, r_env in df_dir.iterrows()]
+                                                if celdas_rec: ws_c_upd.update_cells(celdas_rec, value_input_option='USER_ENTERED')
                                         
                                         if exito:
                                             st.cache_data.clear()
-                                            st.success(f"✅ ¡Rutas enviadas al operador para {prov}!")
+                                            st.success(f"✅ ¡Operación procesada para {prov}!")
                                             time.sleep(1)
                                             st.rerun()
                                     except Exception as e_bd:
-                                        st.warning(f"Se enviaron algunas rutas pero hubo un error de sincronización: {e_bd}")
+                                        st.warning(f"Hubo un error de sincronización: {e_bd}")
                                 else:
-                                    st.warning("⚠️ Selecciona al menos una pieza y marca una acción (Cotizar, Pagar o Recoger).")
+                                    st.warning("⚠️ Selecciona al menos una pieza y marca una acción.")
                 else:
                     st.info("No hay rutas activas pendientes en Próximas Llegadas.")
             else:

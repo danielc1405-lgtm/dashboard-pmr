@@ -3326,10 +3326,10 @@ elif vista_actual == "🚚 Rutas":
             st.success("No hay recolecciones con estatus 'EN PROCESO DE RECOLECCIÓN'.")
 
     # ---------------------------------------------------------
-    # TAB 3: COMPRAS (PAGOS Y RECOLECCIONES)
+    # TAB 3: COMPRAS (COTIZAR, PAGAR Y RECOLECTAR EN BASE)
     # ---------------------------------------------------------
     with tab_compras:
-        st.caption("Lista de compras activas en **📦 Próximas Llegadas**. En esta sección puedes enviar al operador a **Pagar Anticipos** y a **Recolectar** piezas listas.")
+        st.caption("Lista de piezas activas en **📦 Próximas Llegadas**. Selecciona la acción requerida (Cotizar, Pagar o Recoger) y envíala al operador en un solo clic.")
         if not df_compras.empty and not df_completo.empty:
             def gen_llave_rutas(id_val, desc_val):
                 id_str = str(id_val).strip().upper()
@@ -3372,139 +3372,99 @@ elif vista_actual == "🚚 Rutas":
                 estatus_excluidos = ["ENTREGADO", "RECIBIDO", "FACTURADO", "CANCELADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS"]
                 df_comp_rutas = df_c_pend[~df_c_pend['Estatus_Real'].isin(estatus_excluidos)].copy()
 
-                # --- RESUMEN VISUAL DE CONTEO ---
                 kc1, kc2, kc3 = st.columns(3)
                 kc1.metric("📦 Total en Próximas Llegadas", total_en_prox_llegadas)
-                kc2.metric("🚚 Rutas Pendientes", f"{len(df_comp_rutas)} pza(s)")
+                kc2.metric("🚚 Pendientes en Proveedores", f"{len(df_comp_rutas)} pza(s)")
                 kc3.metric("🌐 Excluidas (eBay / Inv.)", excluidas_ebay)
 
                 if not df_comp_rutas.empty:
-                    df_comp_rutas['Enviar Hoy'] = False
+                    df_comp_rutas['Cotizar'] = False
+                    df_comp_rutas['Pagar'] = False
+                    df_comp_rutas['Recoger'] = False
                     df_comp_rutas['Siniestro_Col'] = df_comp_rutas['Siniestro'].astype(str).str.strip()
                     df_comp_rutas['Vehiculo_Info'] = df_comp_rutas.get('Vehículo', pd.Series(["S/D"]*len(df_comp_rutas))).astype(str).str.strip()
                     df_comp_rutas['Pieza_Col'] = df_comp_rutas['Descripción Pieza'].astype(str).str.strip()
                     
-                    # [NUEVA LÓGICA] Separar en pagos y recolecciones
-                    cond_pago_ant = df_comp_rutas['Condición Pago'].astype(str).str.upper().isin(['PAGO ANTICIPADO', 'ANTICIPO'])
-                    cond_no_pagado = df_comp_rutas['Estatus Pago'].astype(str).str.upper() != 'PAGADO'
-                    
-                    df_para_pagar = df_comp_rutas[cond_pago_ant & cond_no_pagado].copy()
-                    df_para_recoger = df_comp_rutas[~(cond_pago_ant & cond_no_pagado)].copy()
-                    
-                    st.markdown("#### 💵 1. Vueltas para Pagar Anticipos")
-                    if not df_para_pagar.empty:
-                        for prov, df_prov in df_para_pagar.groupby('Proveedor'):
-                            with st.expander(f"💳 {prov} | {len(df_prov)} pieza(s) pendientes de pago", expanded=False):
-                                cols_ver = ['Enviar Hoy', 'Siniestro_Col', 'Vehiculo_Info', 'Pieza_Col', 'Costo Compra', 'Condición Pago']
-                                cfg_pag = {
-                                    "Enviar Hoy": st.column_config.CheckboxColumn("💵 Ir a Pagar", default=False),
-                                    "Siniestro_Col": st.column_config.TextColumn("Siniestro", disabled=True),
-                                    "Vehiculo_Info": st.column_config.TextColumn("Vehículo", disabled=True),
-                                    "Pieza_Col": st.column_config.TextColumn("Pieza", disabled=True),
-                                    "Costo Compra": st.column_config.TextColumn("Costo a Pagar", disabled=True),
-                                    "Condición Pago": st.column_config.TextColumn("Condición", disabled=True)
-                                }
-                                ed_pag = st.data_editor(df_prov[cols_ver], column_config=cfg_pag, hide_index=True, use_container_width=True, key=f"pag_{prov}")
-                                notas_pag = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Llevar cheque / Pedir recibo", key=f"notas_pag_{prov}")
+                    st.markdown("#### 🏪 Gestión Global con Proveedores")
+                    for prov, df_prov in df_comp_rutas.groupby('Proveedor'):
+                        with st.expander(f"🛒 {prov} | {len(df_prov)} pieza(s) gestionables", expanded=False):
+                            cols_ver = ['Cotizar', 'Pagar', 'Recoger', 'Siniestro_Col', 'Vehiculo_Info', 'Pieza_Col', 'Costo Compra', 'Condición Pago', 'Estatus_Real']
+                            cols_ver = [c for c in cols_ver if c in df_prov.columns]
+                            
+                            cfg_comp = {
+                                "Cotizar": st.column_config.CheckboxColumn("🔍 Cotizar", default=False),
+                                "Pagar": st.column_config.CheckboxColumn("💵 Pagar", default=False),
+                                "Recoger": st.column_config.CheckboxColumn("📦 Recoger", default=False),
+                                "Siniestro_Col": st.column_config.TextColumn("Siniestro", disabled=True),
+                                "Vehiculo_Info": st.column_config.TextColumn("Vehículo", disabled=True),
+                                "Pieza_Col": st.column_config.TextColumn("Pieza", disabled=True),
+                                "Costo Compra": st.column_config.TextColumn("Costo", disabled=True),
+                                "Condición Pago": st.column_config.TextColumn("Condición", disabled=True),
+                                "Estatus_Real": st.column_config.TextColumn("Estatus", disabled=True)
+                            }
+                            ed_comp = st.data_editor(df_prov[cols_ver], column_config=cfg_comp, hide_index=True, use_container_width=True, key=f"gest_{prov}")
+                            notas_comp = st.text_input("📝 Instrucciones para el Operador:", placeholder="Ej. Pagar en efectivo y traer factura...", key=f"notas_gest_{prov}")
+                            
+                            if st.button(f"➕ Enviar Selección a Ruta para {prov}", type="primary", key=f"btn_gest_{prov}"):
+                                seleccionados = ed_comp[(ed_comp['Cotizar'] == True) | (ed_comp['Pagar'] == True) | (ed_comp['Recoger'] == True)]
                                 
-                                if st.button(f"➕ Enviar a {prov} a Pagar", type="primary", key=f"btn_pag_{prov}"):
-                                    seleccionados = ed_pag[ed_pag['Enviar Hoy'] == True]
-                                    if not seleccionados.empty:
-                                        df_envio = df_prov.loc[seleccionados.index].copy()
-                                        df_envio['Proveedor'] = prov
-                                        if col_id: df_envio[col_id] = df_envio['Siniestro_Col']
-                                        if col_desc: df_envio[col_desc] = df_envio['Pieza_Col']
-                                        if col_vin: df_envio[col_vin] = df_envio['VIN_Real']
+                                if not seleccionados.empty:
+                                    df_envio = df_prov.loc[seleccionados.index].copy()
+                                    df_envio['Proveedor'] = prov
+                                    if col_id: df_envio[col_id] = df_envio['Siniestro_Col']
+                                    if col_desc: df_envio[col_desc] = df_envio['Pieza_Col']
+                                    if col_vin: df_envio[col_vin] = df_envio['VIN_Real']
+                                    
+                                    exito = False
+                                    try:
+                                        df_cot = df_envio[seleccionados['Cotizar'] == True]
+                                        if not df_cot.empty:
+                                            if despachar_a_bd_rutas(df_cot, "cotizacion", f"[COTIZAR] {notas_comp}"): exito = True
                                         
-                                        # Despachar como "pago"
-                                        if despachar_a_bd_rutas(df_envio, "pago", notas_pag):
-                                            try:
+                                        df_pag = df_envio[seleccionados['Pagar'] == True]
+                                        if not df_pag.empty:
+                                            if despachar_a_bd_rutas(df_pag, "pago", f"[PAGAR] {notas_comp}"):
+                                                exito = True
                                                 ws_c_upd = doc.worksheet("BD_COMPRAS")
                                                 headers_c_upd = [str(h).strip().upper() for h in ws_c_upd.row_values(1)]
                                                 if "ESTATUS PAGO" in headers_c_upd:
                                                     col_idx_pago = headers_c_upd.index("ESTATUS PAGO") + 1
-                                                    celdas_pago = [
-                                                        gspread.Cell(row=int(r_env['_GS_Row_Comp']), col=col_idx_pago, value="Pagado")
-                                                        for _, r_env in df_envio.iterrows()
-                                                    ]
-                                                    if celdas_pago:
-                                                        ws_c_upd.update_cells(celdas_pago, value_input_option='USER_ENTERED')
-                                            except Exception as e_pago:
-                                                st.warning(f"Error al marcar como Pagado en BD_COMPRAS: {e_pago}")
-
-                                            st.cache_data.clear()
-                                            st.success(f"✅ ¡Visita de pago a {prov} asignada al operador!")
-                                            time.sleep(1)
-                                            st.rerun()
-                                    else:
-                                        st.warning("Selecciona al menos una pieza marcando la casilla '💵 Ir a Pagar'.")
-                    else:
-                        st.success("✅ No hay pagos anticipados pendientes en este momento.")
-
-                    st.markdown("#### 📦 2. Vueltas para Recolectar (Listas para traer)")
-                    if not df_para_recoger.empty:
-                        for prov, df_prov in df_para_recoger.groupby('Proveedor'):
-                            with st.expander(f"🛒 {prov} | {len(df_prov)} pieza(s) listas", expanded=False):
-                                cols_ver = ['Enviar Hoy', 'Siniestro_Col', 'Vehiculo_Info', 'Taller', 'Pieza_Col', 'Costo Compra', 'Estatus_Real']
-                                cols_ver = [c for c in cols_ver if c in df_prov.columns]
-                                cfg_comp = {
-                                    "Enviar Hoy": st.column_config.CheckboxColumn("🚚 Recoger Hoy", default=False),
-                                    "Siniestro_Col": st.column_config.TextColumn("Siniestro", disabled=True),
-                                    "Vehiculo_Info": st.column_config.TextColumn("Vehículo", disabled=True),
-                                    "Taller": st.column_config.TextColumn("Destino (CDR)", disabled=True),
-                                    "Pieza_Col": st.column_config.TextColumn("Pieza a recoger", disabled=True),
-                                    "Costo Compra": st.column_config.TextColumn("Costo", disabled=True),
-                                    "Estatus_Real": st.column_config.TextColumn("Estatus", disabled=True)
-                                }
-                                ed_comp = st.data_editor(df_prov[cols_ver], column_config=cfg_comp, hide_index=True, use_container_width=True, key=f"comp_{prov}")
-                                
-                                notas_comp = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Pagar en efectivo al llegar (Contra Entrega)", key=f"notas_comp_{prov}")
-                                
-                                if st.button(f"➕ Enviar al Operador a {prov} y Marcar Recibido", type="primary", key=f"btn_comp_{prov}"):
-                                    seleccionados = ed_comp[ed_comp['Enviar Hoy'] == True]
-                                    if not seleccionados.empty:
-                                        df_envio = df_prov.loc[seleccionados.index].copy()
-                                        df_envio['Proveedor'] = prov
-                                        if col_id: df_envio[col_id] = df_envio['Siniestro_Col']
-                                        if col_desc: df_envio[col_desc] = df_envio['Pieza_Col']
-                                        if col_vin: df_envio[col_vin] = df_envio['VIN_Real']
+                                                    celdas_pago = [gspread.Cell(row=int(r_env['_GS_Row_Comp']), col=col_idx_pago, value="Pagado") for _, r_env in df_pag.iterrows()]
+                                                    if celdas_pago: ws_c_upd.update_cells(celdas_pago, value_input_option='USER_ENTERED')
                                         
-                                        if despachar_a_bd_rutas(df_envio, "compra", notas_comp):
-                                            try:
+                                        df_rec = df_envio[seleccionados['Recoger'] == True]
+                                        if not df_rec.empty:
+                                            if despachar_a_bd_rutas(df_rec, "compra", f"[RECOGER] {notas_comp}"):
+                                                exito = True
                                                 ws_c_upd = doc.worksheet("BD_COMPRAS")
                                                 headers_c_upd = [str(h).strip().upper() for h in ws_c_upd.row_values(1)]
                                                 if "RECIBIDO" in headers_c_upd:
                                                     col_idx_rec = headers_c_upd.index("RECIBIDO") + 1
-                                                    celdas_rec = [
-                                                        gspread.Cell(row=int(r_env['_GS_Row_Comp']), col=col_idx_rec, value="SI")
-                                                        for _, r_env in df_envio.iterrows()
-                                                    ]
-                                                    if celdas_rec:
-                                                        ws_c_upd.update_cells(celdas_rec, value_input_option='USER_ENTERED')
-                                            except Exception as e_rec:
-                                                st.warning(f"Se envió a ruta, pero hubo un detalle al marcar Recibido en BD_COMPRAS: {e_rec}")
-
+                                                    celdas_rec = [gspread.Cell(row=int(r_env['_GS_Row_Comp']), col=col_idx_rec, value="SI") for _, r_env in df_rec.iterrows()]
+                                                    if celdas_rec: ws_c_upd.update_cells(celdas_rec, value_input_option='USER_ENTERED')
+                                        
+                                        if exito:
                                             st.cache_data.clear()
-                                            st.success(f"✅ ¡Visita a {prov} asignada al operador y marcada como Recibida en Compras!")
+                                            st.success(f"✅ ¡Rutas enviadas al operador para {prov}!")
                                             time.sleep(1)
                                             st.rerun()
-                                    else:
-                                        st.warning("Selecciona al menos una pieza marcando la casilla '🚚 Recoger Hoy'.")
-                    else:
-                        st.success("✅ No hay piezas listas para recolección en este momento.")
+                                    except Exception as e_bd:
+                                        st.warning(f"Se enviaron algunas rutas pero hubo un error de sincronización: {e_bd}")
+                                else:
+                                    st.warning("⚠️ Selecciona al menos una pieza y marca una acción (Cotizar, Pagar o Recoger).")
                 else:
                     st.info("No hay rutas activas pendientes en Próximas Llegadas.")
             else:
-                st.info("No hay compras activas pendientes de recepción en Próximas Llegadas.")
+                st.info("No hay compras activas pendientes de recepción.")
         else:
             st.info("Falta información de compras para cruzar datos.")
 
     # ---------------------------------------------------------
-    # TAB 4: COTIZACIONES EVENTUALES
+    # TAB 4: PROVEEDORES EVENTUALES Y COTIZACIONES FUERA DE BASE
     # ---------------------------------------------------------
     with tab_cotizaciones:
-        st.markdown("### 🔎 Asignar Cotización / Visita Especial")
-        st.caption("Usa esta pestaña para enviar al operador a revisar o comprar piezas eventuales.")
+        st.markdown("### 🔎 Vueltas a Proveedores Eventuales (Fuera de Base)")
+        st.caption("Usa esta pestaña exclusivamente para enviar al operador a lugares nuevos, yonkes o agencias que **no están** en tu catálogo principal de compras.")
         
         lista_provs_cot = []
         dict_dir_cot = {}
@@ -3545,8 +3505,8 @@ elif vista_actual == "🚚 Rutas":
                 if prov_eventual == "-- ESCRIBIR NUEVO --":
                     st.markdown("##### 🏢 Datos del Nuevo Proveedor (Se registrará en `BD_PROVEEDORES`)")
                     cp1, cp2, cp3 = st.columns([2, 1.5, 1.5])
-                    nuevo_prov = cp1.text_input("Nombre del Proveedor * (Ej. GOVI)").strip().upper()
-                    nueva_suc_cot = cp2.text_input("Sucursal / Zona (Ej. STO DOMINGO)").strip().upper()
+                    nuevo_prov = cp1.text_input("Nombre del Proveedor * (Ej. YONKE EL TIO)").strip().upper()
+                    nueva_suc_cot = cp2.text_input("Sucursal / Zona (Ej. ESCOBEDO)").strip().upper()
                     nuevo_tel_cot = cp3.text_input("Teléfono / Contacto").strip()
 
                     cp4, cp5 = st.columns([2.5, 1.5])
@@ -3565,10 +3525,7 @@ elif vista_actual == "🚚 Rutas":
                 st.markdown("##### ⚙️ Piezas a buscar / comprar")
                 st.caption("Puedes capturar solo el **# Parte**, solo la **Descripción**, o ambos. Usa el signo **`+`** abajo de la tabla para agregar más renglones.")
                 
-                df_piezas_base = pd.DataFrame([
-                    {"No. Parte": "", "Descripción de la Pieza": ""},
-                    {"No. Parte": "", "Descripción de la Pieza": ""}
-                ])
+                df_piezas_base = pd.DataFrame([{"No. Parte": "", "Descripción de la Pieza": ""}, {"No. Parte": "", "Descripción de la Pieza": ""}])
                 ed_piezas_cot = st.data_editor(
                     df_piezas_base,
                     num_rows="dynamic",
@@ -3581,9 +3538,9 @@ elif vista_actual == "🚚 Rutas":
                     key="ed_tabla_piezas_cot"
                 )
                 
-                notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Preguntar por  X / Pedir factura")
+                notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Checar condiciones, comprar si vale menos de $500")
                 
-                btn_cot = st.form_submit_button("➕ Enviar Cotización a la Ruta", type="primary")
+                btn_cot = st.form_submit_button("➕ Enviar Vuelta a la Ruta", type="primary")
                 
                 if btn_cot:
                     if prov_eventual == "-- ESCRIBIR NUEVO --":
@@ -3598,12 +3555,9 @@ elif vista_actual == "🚚 Rutas":
                         if np_val == "NAN": np_val = ""
                         if ds_val == "NAN": ds_val = ""
                         
-                        if np_val and ds_val:
-                            piezas_lista.append(f"[{np_val}] {ds_val}")
-                        elif np_val:
-                            piezas_lista.append(f"NP: {np_val}")
-                        elif ds_val:
-                            piezas_lista.append(ds_val)
+                        if np_val and ds_val: piezas_lista.append(f"[{np_val}] {ds_val}")
+                        elif np_val: piezas_lista.append(f"NP: {np_val}")
+                        elif ds_val: piezas_lista.append(ds_val)
 
                     if not nombre_final or len(piezas_lista) == 0:
                         st.error("⚠️ El Lugar y al menos 1 Pieza (No. Parte o Descripción) son obligatorios.")
@@ -3616,18 +3570,12 @@ elif vista_actual == "🚚 Rutas":
                                 
                                 def safe_idx_p(name):
                                     for idx_h, h_val in enumerate(headers_p):
-                                        if h_val.upper() == name.upper():
-                                            return idx_h
+                                        if h_val.upper() == name.upper(): return idx_h
                                     return -1
 
-                                i_prv = safe_idx_p('Proveedor')
-                                i_suc = safe_idx_p('Sucursal')
-                                i_mar = safe_idx_p('Marcas Especialidad')
-                                i_tel = safe_idx_p('Teléfono')
-                                i_dir = safe_idx_p('Dirección')
-                                i_tie = safe_idx_p('Tiempo de Entrega')
-                                i_con = safe_idx_p('Condición Pago')
-                                i_dia = safe_idx_p('Días Crédito')
+                                i_prv = safe_idx_p('Proveedor'); i_suc = safe_idx_p('Sucursal'); i_mar = safe_idx_p('Marcas Especialidad')
+                                i_tel = safe_idx_p('Teléfono'); i_dir = safe_idx_p('Dirección'); i_tie = safe_idx_p('Tiempo de Entrega')
+                                i_con = safe_idx_p('Condición Pago'); i_dia = safe_idx_p('Días Crédito')
 
                                 if i_prv >= 0: fila_prov[i_prv] = nuevo_prov
                                 if i_suc >= 0: fila_prov[i_suc] = nueva_suc_cot
@@ -3645,7 +3593,7 @@ elif vista_actual == "🚚 Rutas":
                         
                         datos_cot = {
                             'Proveedor': [nombre_final] * len(piezas_lista),
-                            'Vehiculo_Info': ["Cotización / Compra Directa"] * len(piezas_lista),
+                            'Vehiculo_Info': ["Cotización / Vuelta Eventual"] * len(piezas_lista),
                             'Descrip.': piezas_lista,
                             'Direccion_Manual': [dir_eventual] * len(piezas_lista)
                         }
@@ -3653,8 +3601,7 @@ elif vista_actual == "🚚 Rutas":
                         if col_id: datos_cot[col_id] = ["N/A"] * len(piezas_lista)
                         
                         df_cot = pd.DataFrame(datos_cot)
-                        if col_desc and col_desc not in df_cot.columns:
-                            df_cot[col_desc] = piezas_lista
+                        if col_desc and col_desc not in df_cot.columns: df_cot[col_desc] = piezas_lista
                         
                         if despachar_a_bd_rutas(df_cot, "cotizacion", notas_eventual):
                             st.success(f"✅ ¡Enviado a ruta para {nombre_final} ({len(piezas_lista)} pieza(s))!")

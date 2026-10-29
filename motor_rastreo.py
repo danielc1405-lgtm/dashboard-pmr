@@ -111,13 +111,12 @@ def ejecutar_laboratorio():
             headers = [str(h).strip().upper() for h in datos[0]]
             
             try:
-                # Buscamos columnas de manera más específica
-                idx_guia = next(i for i, h in enumerate(headers) if "PAQUETERIA GUIA" in h or h == "GUIA" or h == "GUÍA")
-                # Nueva búsqueda para la columna de devolución
-                idx_guia_dev = next((i for i, h in enumerate(headers) if "DEVOLUCI" in h or "RETORNO" in h), None)
+                # Buscamos columnas de manera estricta y segura
+                idx_guia = next(i for i, h in enumerate(headers) if h in ["GUIA", "GUÍA", "NO. GUIA", "PAQUETERIA GUIA"])
+                idx_guia_dev = next((i for i, h in enumerate(headers) if h in ["GUIA DEVOLUCION", "GUÍA DEVOLUCIÓN", "GUIA RETORNO", "GUÍA RETORNO"]), None)
                 idx_paq = next(i for i, h in enumerate(headers) if "PAQUETER" in h and "GUIA" not in h)
-                idx_estatus = next(i for i, h in enumerate(headers) if "ESTATUS" in h and "ENV" not in h and "PAGO" not in h)
-                idx_estatus_envio = next(i for i, h in enumerate(headers) if "ESTATUS ENV" in h or "RASTREO" in h)
+                idx_estatus = next(i for i, h in enumerate(headers) if h in ["ESTATUS", "STATUS"])
+                idx_estatus_envio = next(i for i, h in enumerate(headers) if h in ["ESTATUS ENVIO", "ESTATUS ENVÍO", "RASTREO"])
                 idx_taller = next((i for i, h in enumerate(headers) if "TALLER" in h or "CDR" in h), None)
                 idx_fecha_recibido = next((i for i, h in enumerate(headers) if "FECHA REC" in h or "FECHA ENT" in h), None)
             except StopIteration:
@@ -141,7 +140,11 @@ def ejecutar_laboratorio():
                 es_devolucion = False
                 requiere_rastreo = False
                 
-                # 1. Si es un retorno, tomamos la guía de devolución
+                # Limpiamos las guías detectadas para evitar vacíos o nulos cruzados
+                guia_normal = guia_normal if guia_normal not in ["", "nan", "None", "NAN"] else ""
+                guia_devolucion = guia_devolucion if guia_devolucion not in ["", "nan", "None", "NAN"] else ""
+                
+                # 1. Si es un retorno, tomamos EXCLUSIVAMENTE la guía de devolución
                 if "RECOLECCI" in fila_estatus or "RETORNO" in fila_estatus:
                     if guia_devolucion:
                         guia_a_rastrear = guia_devolucion
@@ -155,7 +158,9 @@ def ejecutar_laboratorio():
                         es_devolucion = False
                         requiere_rastreo = True
                 
-                if requiere_rastreo and fila_paqueteria == "PAQUETEXPRESS" and guia_a_rastrear:
+                # Validación a prueba de espacios en el nombre de la paquetería
+                paqueteria_limpia = fila_paqueteria.replace(" ", "")
+                if requiere_rastreo and "PAQUETEXPRESS" in paqueteria_limpia and guia_a_rastrear:
                     taller_str = str(fila[idx_taller]).strip() if (idx_taller is not None and len(fila) > idx_taller) else "CDR"
                     filas_pendientes.append((i + 2, guia_a_rastrear, fila_estatus, fecha_invalida, taller_str, es_devolucion))
 

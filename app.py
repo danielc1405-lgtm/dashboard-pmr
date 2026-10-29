@@ -4308,6 +4308,7 @@ elif vista_actual == "🛠️ Cuartel General":
     
             if len(datos_gastos) > 1:
                 df_gastos = pd.DataFrame(datos_gastos[1:], columns=datos_gastos[0])
+                df_gastos['GS_Row'] = df_gastos.index + 2 # <--- Se agrega para ubicar la fila exacta en Sheets
         
                 if 'Estado' in df_gastos.columns:
                     df_activos = df_gastos[df_gastos['Estado'].astype(str).str.upper() == 'PENDIENTE REEMBOLSO'].copy() 
@@ -4323,14 +4324,45 @@ elif vista_actual == "🛠️ Cuartel General":
                         total_deuda = df_empleado['Monto'].sum()
                 
                         with st.expander(f"👤 {empleado} | Total adeudado: ${total_deuda:,.2f}"):
-                            # Los nombres deben coincidir EXACTAMENTE con los encabezados de tu Google Sheet
-                            cols_disp = ['Fecha', 'Proveedor', 'Refacción', 'Monto']
-                            cols_a_mostrar = [c for c in cols_disp if c in df_empleado.columns]
+                            # 1. Habilitar checkbox y editor
+                            df_empleado['Liquidar'] = False
+                            cols_disp = ['Liquidar', 'Fecha', 'Proveedor', 'Refacción', 'Monto']
+                            cols_a_mostrar = [c for c in cols_disp if c in df_empleado.columns or c == 'Liquidar']
                     
-                            if not cols_a_mostrar:
-                                cols_a_mostrar = df_empleado.columns.tolist() 
-                        
-                            st.dataframe(df_empleado[cols_a_mostrar], hide_index=True, use_container_width=True)
+                            df_ed_emp = st.data_editor(
+                                df_empleado[cols_a_mostrar],
+                                column_config={
+                                    "Liquidar": st.column_config.CheckboxColumn("✅ Pagar", default=False),
+                                    "Monto": st.column_config.NumberColumn("Monto", format="$ %.2f")
+                                },
+                                hide_index=True,
+                                use_container_width=True,
+                                disabled=[c for c in cols_a_mostrar if c != 'Liquidar'],
+                                key=f"ed_deuda_{empleado}"
+                            )
+                            
+                            # 2. Botón de ejecución
+                            if st.button(f"💵 Registrar Pago a {empleado}", key=f"btn_pagar_{empleado}"):
+                                seleccionados = df_ed_emp[df_ed_emp['Liquidar'] == True]
+                                if not seleccionados.empty:
+                                    with st.spinner("Actualizando pagos en la nube..."):
+                                        try:
+                                            idx_estado = datos_gastos[0].index('Estado') + 1
+                                            celdas_pago = []
+                                            
+                                            for idx_sel in seleccionados.index:
+                                                gs_row = int(df_empleado.loc[idx_sel, 'GS_Row'])
+                                                celdas_pago.append(gspread.Cell(row=gs_row, col=idx_estado, value="PAGADO"))
+                                            
+                                            if celdas_pago:
+                                                ws_gastos_resumen.update_cells(celdas_pago, value_input_option='USER_ENTERED')
+                                                st.success(f"✅ Se liquidaron {len(seleccionados)} adeudos de {empleado}.")
+                                                time.sleep(1)
+                                                st.rerun()
+                                        except Exception as e_pago:
+                                            st.error(f"Error al liquidar: {e_pago}")
+                                else:
+                                    st.warning("Selecciona al menos un registro de la tabla para liquidar.")
                 else:
                     st.info("No hay préstamos activos a favor de PMR en este momento.")
             else:

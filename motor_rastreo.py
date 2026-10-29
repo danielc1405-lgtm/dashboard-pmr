@@ -111,39 +111,60 @@ def ejecutar_laboratorio():
             headers = [str(h).strip().upper() for h in datos[0]]
             
             try:
-                idx_guia = headers.index(next(h for h in headers if "GUIA" in h or "GUÍA" in h))
-                idx_paq = headers.index(next(h for h in headers if "PAQUETERIA" in h or "PAQUETERÍA" in h))
-                idx_estatus = headers.index(next(h for h in headers if "ESTATUS" in h and "ENV" not in h and "PAGO" not in h))
-                idx_estatus_envio = headers.index(next(h for h in headers if "ESTATUS ENV" in h or "RASTREO" in h))
+                # Buscamos columnas de manera más específica
+                idx_guia = next(i for i, h in enumerate(headers) if "PAQUETERIA GUIA" in h or h == "GUIA" or h == "GUÍA")
+                # Nueva búsqueda para la columna de devolución
+                idx_guia_dev = next((i for i, h in enumerate(headers) if "DEVOLUCI" in h or "RETORNO" in h), None)
+                idx_paq = next(i for i, h in enumerate(headers) if "PAQUETER" in h and "GUIA" not in h)
+                idx_estatus = next(i for i, h in enumerate(headers) if "ESTATUS" in h and "ENV" not in h and "PAGO" not in h)
+                idx_estatus_envio = next(i for i, h in enumerate(headers) if "ESTATUS ENV" in h or "RASTREO" in h)
                 idx_taller = next((i for i, h in enumerate(headers) if "TALLER" in h or "CDR" in h), None)
                 idx_fecha_recibido = next((i for i, h in enumerate(headers) if "FECHA REC" in h or "FECHA ENT" in h), None)
             except StopIteration:
                 print(f"  [!] Faltan columnas clave en {ws.title}, saltando...")
                 continue
 
-            # Pre-filtrar las filas que requieren rastreo para mostrar un contador limpio [1/N]
             filas_pendientes = []
             for i, fila in enumerate(datos[1:]):
-                if len(fila) <= max(idx_paq, idx_guia, idx_estatus, idx_estatus_envio):
-                    continue
-                fila_estatus = str(fila[idx_estatus]).strip().upper()
-                fila_paqueteria = str(fila[idx_paq]).strip().upper()
-                fila_guia = str(fila[idx_guia]).strip()
+                # Asegurar que la fila tenga suficientes datos
+                fila_estatus = str(fila[idx_estatus]).strip().upper() if len(fila) > idx_estatus else ""
+                fila_paqueteria = str(fila[idx_paq]).strip().upper() if len(fila) > idx_paq else ""
+                
+                guia_normal = str(fila[idx_guia]).strip() if len(fila) > idx_guia else ""
+                guia_devolucion = str(fila[idx_guia_dev]).strip() if (idx_guia_dev is not None and len(fila) > idx_guia_dev) else ""
+                
                 valor_fecha_actual = str(fila[idx_fecha_recibido]).strip() if (idx_fecha_recibido is not None and len(fila) > idx_fecha_recibido) else ""
                 fecha_invalida = (not valor_fecha_actual) or ("HORAS" in valor_fecha_actual.upper()) or any(valor_fecha_actual.endswith(x) for x in ["/09", "/10", "/12"])
-                # Rastrea cualquier guía activa aunque su estatus siga diciendo EN PROCESAMIENTO
-                requiere_rastreo = (fila_estatus in ["EN TRANSITO", "EN PROCESAMIENTO"]) or (fila_estatus == "ENTREGADO" and fecha_invalida)
                 
-                if requiere_rastreo and fila_paqueteria == "PAQUETEXPRESS" and fila_guia:
+                # --- LÓGICA DE DECISIÓN DE GUÍA ---
+                guia_a_rastrear = ""
+                es_devolucion = False
+                requiere_rastreo = False
+                
+                # 1. Si es un retorno, tomamos la guía de devolución
+                if "RECOLECCI" in fila_estatus or "RETORNO" in fila_estatus:
+                    if guia_devolucion:
+                        guia_a_rastrear = guia_devolucion
+                        es_devolucion = True
+                        requiere_rastreo = True
+                
+                # 2. Si es envío normal de ida
+                elif (fila_estatus in ["EN TRANSITO", "EN PROCESAMIENTO"]) or (fila_estatus == "ENTREGADO" and fecha_invalida):
+                    if guia_normal:
+                        guia_a_rastrear = guia_normal
+                        es_devolucion = False
+                        requiere_rastreo = True
+                
+                if requiere_rastreo and fila_paqueteria == "PAQUETEXPRESS" and guia_a_rastrear:
                     taller_str = str(fila[idx_taller]).strip() if (idx_taller is not None and len(fila) > idx_taller) else "CDR"
-                    filas_pendientes.append((i + 2, fila_guia, fila_estatus, fecha_invalida, taller_str))
+                    filas_pendientes.append((i + 2, guia_a_rastrear, fila_estatus, fecha_invalida, taller_str, es_devolucion))
 
             total_f = len(filas_pendientes)
             print(f"-> Se detectaron {total_f} partida(s) activas con guía Paquetexpress.\n")
 
             celdas_a_actualizar = []
             
-            for idx_item, (num_fila, fila_guia, fila_estatus, fecha_invalida, taller_str) in enumerate(filas_pendientes, start=1):
+            for idx_item, (num_fila, fila_guia, fila_estatus, fecha_invalida, taller_str, es_devolucion) in enumerate(filas_pendientes, start=1):
                 if fila_guia in cache_guias:
                     nuevo_estatus_envio, fecha_recibido_extraida = cache_guias[fila_guia]
                 else:
@@ -152,16 +173,24 @@ def ejecutar_laboratorio():
                     time.sleep(1.2)
                 
                 if nuevo_estatus_envio == "Pendiente de actualización":
-                    print(f"  ⏳ [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str} | Guía {fila_guia} ➔ Sin avance aún en portal (En sitio)")
+                    print(f"  ⏳ [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str} | Guía {fila_guia} ➔ Sin avance (En sitio)")
                 else:
                     icono = "📦" if "ENTREGADO" in nuevo_estatus_envio.upper() else "🚚"
+                    tipo_viaje = "(Retorno)" if es_devolucion else "(Ida)"
                     txt_fecha = f" | Fecha: {fecha_recibido_extraida}" if fecha_recibido_extraida else ""
-                    print(f"  {icono} [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str} | Guía {fila_guia} ➔ {nuevo_estatus_envio}{txt_fecha}")
+                    print(f"  {icono} [{idx_item:02d}/{total_f:02d}] Fila {num_fila:<4} | {taller_str} | Guía {tipo_viaje} {fila_guia} ➔ {nuevo_estatus_envio}{txt_fecha}")
                     
+                    # Actualiza la columna de "Rastreo API"
                     celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_estatus_envio+1, value=nuevo_estatus_envio))
                     
-                    if "ENTREGADO" in nuevo_estatus_envio.upper() and fila_estatus in ["EN TRANSITO", "EN PROCESAMIENTO"]:
-                        celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_estatus+1, value="ENTREGADO"))
+                    # --- LÓGICA DE ESTATUS FINAL ---
+                    if "ENTREGADO" in nuevo_estatus_envio.upper():
+                        if es_devolucion:
+                            # Si era una recolección y ya se entregó, se marca como devuelto a la base
+                            celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_estatus+1, value="RECIBIDO EN BASE"))
+                        elif fila_estatus in ["EN TRANSITO", "EN PROCESAMIENTO"]:
+                            # Si era un envío de ida y ya se entregó al taller
+                            celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_estatus+1, value="ENTREGADO"))
                     
                     if idx_fecha_recibido is not None and fecha_recibido_extraida and fecha_invalida:
                         celdas_a_actualizar.append(gspread.Cell(row=num_fila, col=idx_fecha_recibido+1, value=fecha_recibido_extraida))

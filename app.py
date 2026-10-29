@@ -4504,6 +4504,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         if guia_actual not in ['', 'nan', 'None', 'NAN']:
                             cambios_bd_compras.setdefault(k, {})['recibido'] = 'SI'
 
+        # --- INICIO DEL BLOQUE A REEMPLAZAR 1 ---
         if 'df_editado_rec' in locals() and not df_editado_rec.empty:
             for _, row in df_editado_rec.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
@@ -4520,7 +4521,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 
                 # Si escribiste una Guía Retorno nueva o cambiaste la columna Guía o marcaste la casilla En Retorno:
                 if guia_retorno_nueva not in ['', 'nan', 'None', 'NAN']:
-                    cambios_a_guardar.setdefault(k, {})['guia'] = guia_retorno_nueva
+                    cambios_a_guardar.setdefault(k, {})['guia_retorno'] = guia_retorno_nueva # <-- CORRECCIÓN AQUÍ
                     cambios_a_guardar[k]['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
                     cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
                     cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
@@ -4532,6 +4533,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 elif en_retorno_chk and orig['estatus_db'] != 'EN TRANSITO (RECOLECCIÓN)':
                     cambios_a_guardar.setdefault(k, {})['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
                     cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
+# --- FIN DEL BLOQUE A REEMPLAZAR 1 ---
 
         if not df_editado_cobro.empty:
             for _, row in df_editado_cobro.iterrows():
@@ -4708,6 +4710,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         except:
                             datos_hist = []; headers_hist = []
 
+                        # --- INICIO DEL BLOQUE A REEMPLAZAR 2 ---
                         def mapear_columnas(headers):
                             if not headers: return {}
                             return {
@@ -4720,6 +4723,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                 'coment': headers.index(buscar_columna(headers, ["COMENTARIOS", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])) if buscar_columna(headers, ["COMENTARIOS", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"]) else -1,
                                 'paq': headers.index(buscar_columna(headers, ["PAQUETERIA", "PAQUETERÍA"], ["PAQUETER"])) if buscar_columna(headers, ["PAQUETERIA", "PAQUETERÍA"], ["PAQUETER"]) else -1,
                                 'guia': headers.index(buscar_columna(headers, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"])) if buscar_columna(headers, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"]) else -1,
+                                'guia_ret': headers.index(buscar_columna(headers, ["GUIA DEVOLUCION", "GUÍA DEVOLUCIÓN", "GUIA RETORNO", "GUÍA RETORNO"], ["GUIA DEV", "GUIA RET"])) if buscar_columna(headers, ["GUIA DEVOLUCION", "GUÍA DEVOLUCIÓN", "GUIA RETORNO", "GUÍA RETORNO"], ["GUIA DEV", "GUIA RET"]) else -1,
                                 'venc': headers.index(buscar_columna(headers, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"])) if buscar_columna(headers, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"]) else -1,
                                 'asig': headers.index(buscar_columna(headers, ["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"])) if buscar_columna(headers, ["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"]) else -1,
                                 'confi': headers.index(buscar_columna(headers, ["CONFIRMACION", "FECHA CONFIRMACION"], ["FECHA CONFI"])) if buscar_columna(headers, ["CONFIRMACION", "FECHA CONFIRMACION"], ["FECHA CONFI"]) else -1,
@@ -4727,6 +4731,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                 'recibido': headers.index(buscar_columna(headers, ["FECHA RECIBIDO"], ["FECHA REC"])) if buscar_columna(headers, ["FECHA RECIBIDO"], ["FECHA REC"]) else -1,
                                 'fact': headers.index(buscar_columna(headers, ["FECHA FACTURACION", "FECHA FACTURACIÓN"], ["FECHA FAC"])) if buscar_columna(headers, ["FECHA FACTURACION", "FECHA FACTURACIÓN"], ["FECHA FAC"]) else -1
                             }
+# --- FIN DEL BLOQUE A REEMPLAZAR 2 ---
 
                         mapa_uni = mapear_columnas(headers_uni)
                         mapa_hist = mapear_columnas(headers_hist)
@@ -4744,6 +4749,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                     folios_asignados_en_sesion[siniestro_id] = f"PMR - {max_folio_pmr:03d}"
                                 v['remision_num'] = folios_asignados_en_sesion[siniestro_id]
 
+                        # --- INICIO DEL BLOQUE A REEMPLAZAR 3 ---
                         def actualizar_datos_hoja(datos_hoja, mapa_hoja):
                             if not datos_hoja or not mapa_hoja or mapa_hoja['id'] == -1 or mapa_hoja['desc'] == -1: return False
                             cambio_realizado = False
@@ -4759,6 +4765,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                     if 'comentario' in c and mapa_hoja['coment'] >= 0: datos_hoja[i][mapa_hoja['coment']] = c['comentario']
                                     if 'paqueteria' in c and mapa_hoja['paq'] >= 0: datos_hoja[i][mapa_hoja['paq']] = c['paqueteria']
                                     if 'guia' in c and mapa_hoja['guia'] >= 0: datos_hoja[i][mapa_hoja['guia']] = c['guia']
+                                    if 'guia_retorno' in c and mapa_hoja.get('guia_ret', -1) >= 0: datos_hoja[i][mapa_hoja['guia_ret']] = c['guia_retorno'] # <-- ESCRITURA EN SHEETS AQUÍ
                                     if 'vencimiento' in c and mapa_hoja['venc'] >= 0: datos_hoja[i][mapa_hoja['venc']] = c['vencimiento']
                                     if 'asignacion' in c and mapa_hoja['asig'] >= 0: datos_hoja[i][mapa_hoja['asig']] = c['asignacion']
                                     if 'fecha_confi' in c and mapa_hoja['confi'] >= 0: datos_hoja[i][mapa_hoja['confi']] = c['fecha_confi']
@@ -4766,6 +4773,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                                     if 'fecha_recibido' in c and mapa_hoja['recibido'] >= 0: datos_hoja[i][mapa_hoja['recibido']] = c['fecha_recibido']
                                     if 'fecha_facturacion' in c and mapa_hoja['fact'] >= 0: datos_hoja[i][mapa_hoja['fact']] = c['fecha_facturacion']
                             return cambio_realizado
+# --- FIN DEL BLOQUE A REEMPLAZAR 3 ---
 
                         hay_cambios_uni = actualizar_datos_hoja(datos_uni, mapa_uni)
                         hay_cambios_hist = actualizar_datos_hoja(datos_hist, mapa_hist)

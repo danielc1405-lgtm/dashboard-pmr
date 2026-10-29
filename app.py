@@ -584,7 +584,8 @@ if not df_trabajo_completo.empty:
     col_asignacion = next((c for c in df_trabajo_completo.columns if "ASIGNACI" in str(c).upper()), None)
     col_fecha_confi = next((c for c in df_trabajo_completo.columns if "FECHA CONFI" in str(c).upper()), None)
     col_paqueteria = next((c for c in df_trabajo_completo.columns if "PAQUETERIA" in str(c).upper() or "PAQUETERÍA" in str(c).upper()), None)
-    col_guia = next((c for c in df_trabajo_completo.columns if "GUIA" in str(c).upper() or "GUÍA" in str(c).upper()), None)
+    col_guia = next((c for c in df_trabajo_completo.columns if ("GUIA" in str(c).upper() or "GUÍA" in str(c).upper()) and "DEV" not in str(c).upper() and "RET" not in str(c).upper()), None)
+    col_guia_dev = next((c for c in df_trabajo_completo.columns if ("DEV" in str(c).upper() or "RETORNO" in str(c).upper()) and ("GUIA" in str(c).upper() or "GUÍA" in str(c).upper())), None)
     col_estatus_envio = next((c for c in df_trabajo_completo.columns if "ESTATUS ENV" in str(c).upper() or "RASTREO" in str(c).upper()), None)
     col_remision = next((c for c in df_trabajo_completo.columns if "REMISION" in str(c).upper() or "REMISIÓN" in str(c).upper()), None)
     col_comentarios = next((c for c in df_trabajo_completo.columns if "COMENTARIO" in str(c).upper() or "OBSERVACION" in str(c).upper()), None)
@@ -1423,8 +1424,16 @@ elif vista_actual == "🚚 Operación del Día":
             # PESTAÑA 5: DEVOLUCIONES / RECOLECCIONES EN TRÁNSITO
             with tab_od_dev:
                 if not df_recol_transito.empty:
-                    cols_ver_recol = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria, col_guia, col_estatus_envio, col_comentarios]
-                    rename_recol = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería Guía', col_guia: 'Guía Devolución', col_estatus_envio: 'Rastreo API', col_comentarios: 'Observaciones'}
+                    cols_ver_recol = ['Aseguradora', col_taller, col_id, 'Vehiculo_Info', col_desc, col_paqueteria]
+                    if col_guia: cols_ver_recol.append(col_guia)
+                    if col_guia_dev: cols_ver_recol.append(col_guia_dev)
+                    cols_ver_recol.extend([col_estatus_envio, col_comentarios])
+                    
+                    rename_recol = {col_taller: 'Taller', col_id: 'Siniestro', 'Vehiculo_Info': 'Auto', col_desc: 'Pieza', col_paqueteria: 'Paquetería'}
+                    if col_guia: rename_recol[col_guia] = 'Guía Ida'
+                    if col_guia_dev: rename_recol[col_guia_dev] = 'Guía Devolución'
+                    rename_recol.update({col_estatus_envio: 'Rastreo API', col_comentarios: 'Observaciones'})
+                    
                     cols_f_rec = [c for c in cols_ver_recol if c and c in df_recol_transito.columns]
                     st.dataframe(df_recol_transito[cols_f_rec].rename(columns=rename_recol), use_container_width=True, hide_index=True)
                 else:
@@ -1752,7 +1761,7 @@ elif vista_actual == "⚙️ Panel Operativo":
         if not df_recoleccion.empty:
             if permiso_edicion:
                 df_recoleccion['En_Retorno'] = df_recoleccion[col_estatus].astype(str).str.upper().str.contains("TRANSITO", na=False)
-                df_recoleccion['Guia_Retorno'] = ""
+                df_recoleccion['Guia_Retorno'] = df_recoleccion[col_guia_dev].fillna("") if col_guia_dev else ""
                 cols_rec = [c for c in [col_id, col_taller, col_cant, col_desc, col_precio, col_estatus] if c in df_recoleccion.columns] + [c for c in [col_paqueteria, col_guia] if c in df_recoleccion.columns] + ['Guia_Retorno', 'En_Retorno'] + [c for c in [col_comentarios] if c in df_recoleccion.columns]
                 config_rec = base_config.copy()
                 if col_guia: config_rec[col_guia] = st.column_config.TextColumn("Guía Actual / Ida")
@@ -4405,7 +4414,9 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
     col_modelo_univ = buscar_columna(df_completo, ["MODELO"], ["MODELO"])
     col_cant_univ = buscar_columna(df_completo, ["CANTIDAD", "CANT"], ["CANTIDAD", "CANT"])
     col_paqueteria_univ = buscar_columna(df_completo, ["PAQUETERIA", "PAQUETERÍA"], ["PAQUETER"])
-    col_guia_univ = buscar_columna(df_completo, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"])
+    col_guia_univ = buscar_columna(df_completo, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"], excluidos=["RETORNO", "DEV", "ENV", "PAGO"])
+    col_guia_dev_univ = buscar_columna(df_completo, ["GUIA RETORNO", "GUÍA RETORNO", "GUIA DEVOLUCION", "GUÍA DEVOLUCIÓN"], ["GUIA RET", "GUIA DEV"])
+    col_rem_univ = buscar_columna(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
     col_rem_univ = buscar_columna(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
     col_coment_univ = buscar_columna(df_completo, ["COMENTARIOS", "OBSERVACIONES", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])
     col_venc_univ = buscar_columna(df_completo, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"])
@@ -4421,6 +4432,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             'comentario': str(r.get(col_coment_univ, '')).strip() if col_coment_univ else '',
             'paqueteria': str(r.get(col_paqueteria_univ, '')).strip() if col_paqueteria_univ else '',
             'guia': str(r.get(col_guia_univ, '')).strip() if col_guia_univ else '',
+            'guia_retorno': str(r.get(col_guia_dev_univ, '')).strip() if col_guia_dev_univ else '',
             'estatus_db': str(r.get(col_estatus_univ, '')).strip().upper() if col_estatus_univ else '',
             'remision_bool': str(r.get(col_rem_univ, '')).strip() != '' if col_rem_univ else False,
             'vencimiento_db': venc_formateada,
@@ -4508,7 +4520,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
         if 'df_editado_rec' in locals() and not df_editado_rec.empty:
             for _, row in df_editado_rec.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
-                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'estatus_db': ''})
+                orig = originales.get(k, {'comentario': '', 'paqueteria': '', 'guia': '', 'guia_retorno': '', 'estatus_db': ''})
                 
                 comentario_actual = str(row.get(col_comentarios, '')).strip()
                 paq_actual = str(row.get(col_paqueteria, '')).strip()
@@ -4518,22 +4530,17 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 
                 if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
                 if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
+                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
                 
-                # Si escribiste una Guía Retorno nueva o cambiaste la columna Guía o marcaste la casilla En Retorno:
-                if guia_retorno_nueva not in ['', 'nan', 'None', 'NAN']:
-                    cambios_a_guardar.setdefault(k, {})['guia_retorno'] = guia_retorno_nueva # <-- CORRECCIÓN AQUÍ
-                    cambios_a_guardar[k]['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
-                    cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
-                    cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
-                elif guia_actual != orig['guia'] and guia_actual not in ['', 'nan', 'None', 'NAN']:
-                    cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                if guia_retorno_nueva != orig['guia_retorno'] and guia_retorno_nueva not in ['', 'nan', 'None', 'NAN']:
+                    cambios_a_guardar.setdefault(k, {})['guia_retorno'] = guia_retorno_nueva
                     cambios_a_guardar[k]['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
                     cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
                     cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
                 elif en_retorno_chk and orig['estatus_db'] != 'EN TRANSITO (RECOLECCIÓN)':
                     cambios_a_guardar.setdefault(k, {})['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
                     cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
-# --- FIN DEL BLOQUE A REEMPLAZAR 1 ---
+        # --- FIN DEL BLOQUE A REEMPLAZAR 1 ---
 
         if not df_editado_cobro.empty:
             for _, row in df_editado_cobro.iterrows():
@@ -4711,30 +4718,41 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             datos_hist = []; headers_hist = []
 
                         # --- INICIO DEL BLOQUE A REEMPLAZAR 2 ---
-                        def mapear_columnas(headers):
+                        def mapear_columnas(headers, datos_matriz=None):
                             if not headers: return {}
-                            return {
-                                'id': headers.index(buscar_columna(headers, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"])) if buscar_columna(headers, ["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"]) else -1,
-                                'desc': headers.index(buscar_columna(headers, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"])) if buscar_columna(headers, ["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"]) else -1,
-                                'estatus': headers.index(buscar_columna(headers, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])) if buscar_columna(headers, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"]) else -1,
-                                'est_env': headers.index(buscar_columna(headers, ["ESTATUS ENVIO", "ESTATUS ENVÍO", "RASTREO"], ["ESTATUS ENV", "RASTREO"], excluidos=[])) if buscar_columna(headers, ["ESTATUS ENVIO", "ESTATUS ENVÍO", "RASTREO"], ["ESTATUS ENV", "RASTREO"], excluidos=[]) else -1,
-                                'rem': headers.index(buscar_columna(headers, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])) if buscar_columna(headers, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"]) else -1,
-                                'usr_rem': headers.index(buscar_columna(headers, ["USUARIO REMISION", "USUARIO REMISIÓN"], ["USUARIO REM"])) if buscar_columna(headers, ["USUARIO REMISION", "USUARIO REMISIÓN"], ["USUARIO REM"]) else -1,
-                                'coment': headers.index(buscar_columna(headers, ["COMENTARIOS", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])) if buscar_columna(headers, ["COMENTARIOS", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"]) else -1,
-                                'paq': headers.index(buscar_columna(headers, ["PAQUETERIA", "PAQUETERÍA"], ["PAQUETER"])) if buscar_columna(headers, ["PAQUETERIA", "PAQUETERÍA"], ["PAQUETER"]) else -1,
-                                'guia': headers.index(buscar_columna(headers, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"])) if buscar_columna(headers, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"]) else -1,
-                                'guia_ret': headers.index(buscar_columna(headers, ["GUIA DEVOLUCION", "GUÍA DEVOLUCIÓN", "GUIA RETORNO", "GUÍA RETORNO"], ["GUIA DEV", "GUIA RET"])) if buscar_columna(headers, ["GUIA DEVOLUCION", "GUÍA DEVOLUCIÓN", "GUIA RETORNO", "GUÍA RETORNO"], ["GUIA DEV", "GUIA RET"]) else -1,
-                                'venc': headers.index(buscar_columna(headers, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"])) if buscar_columna(headers, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"]) else -1,
-                                'asig': headers.index(buscar_columna(headers, ["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"])) if buscar_columna(headers, ["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"]) else -1,
-                                'confi': headers.index(buscar_columna(headers, ["CONFIRMACION", "FECHA CONFIRMACION"], ["FECHA CONFI"])) if buscar_columna(headers, ["CONFIRMACION", "FECHA CONFIRMACION"], ["FECHA CONFI"]) else -1,
-                                'envio': headers.index(buscar_columna(headers, ["FECHA ENVIO", "FECHA ENVÍO"], ["FECHA ENV"])) if buscar_columna(headers, ["FECHA ENVIO", "FECHA ENVÍO"], ["FECHA ENV"]) else -1,
-                                'recibido': headers.index(buscar_columna(headers, ["FECHA RECIBIDO"], ["FECHA REC"])) if buscar_columna(headers, ["FECHA RECIBIDO"], ["FECHA REC"]) else -1,
-                                'fact': headers.index(buscar_columna(headers, ["FECHA FACTURACION", "FECHA FACTURACIÓN"], ["FECHA FAC"])) if buscar_columna(headers, ["FECHA FACTURACION", "FECHA FACTURACIÓN"], ["FECHA FAC"]) else -1
-                            }
-# --- FIN DEL BLOQUE A REEMPLAZAR 2 ---
+                            
+                            def safe_idx(exactos, parciales, excluidos):
+                                col_name = buscar_columna(headers, exactos, parciales, excluidos)
+                                if col_name: return headers.index(col_name)
+                                if datos_matriz is not None and "RETORNO" in exactos[0]:
+                                    headers.append("GUIA RETORNO")
+                                    datos_matriz[0].append("GUIA RETORNO")
+                                    for fila in datos_matriz[1:]: fila.append("")
+                                    return len(headers) - 1
+                                return -1
 
-                        mapa_uni = mapear_columnas(headers_uni)
-                        mapa_hist = mapear_columnas(headers_hist)
+                            return {
+                                'id': safe_idx(["PEDIDO / SINIESTRO", "SINIESTRO"], ["SINIESTRO"], []),
+                                'desc': safe_idx(["DESCRIPCIÓN", "DESCRIPCION"], ["DESCRIPCI", "REFACCI"], []),
+                                'estatus': safe_idx(["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"], []),
+                                'est_env': safe_idx(["ESTATUS ENVIO", "ESTATUS ENVÍO", "RASTREO"], ["ESTATUS ENV", "RASTREO"], []),
+                                'rem': safe_idx(["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"], []),
+                                'usr_rem': safe_idx(["USUARIO REMISION", "USUARIO REMISIÓN"], ["USUARIO REM"], []),
+                                'coment': safe_idx(["COMENTARIOS", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"], []),
+                                'paq': safe_idx(["PAQUETERIA", "PAQUETERÍA"], ["PAQUETER"], []),
+                                'guia': safe_idx(["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"], ["RETORNO", "DEV"]),
+                                'guia_ret': safe_idx(["GUIA RETORNO", "GUÍA RETORNO", "GUIA DEVOLUCION", "GUÍA DEVOLUCIÓN"], ["GUIA RET", "GUIA DEV"], []),
+                                'venc': safe_idx(["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"], []),
+                                'asig': safe_idx(["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"], []),
+                                'confi': safe_idx(["CONFIRMACION", "FECHA CONFIRMACION"], ["FECHA CONFI"], []),
+                                'envio': safe_idx(["FECHA ENVIO", "FECHA ENVÍO"], ["FECHA ENV"], []),
+                                'recibido': safe_idx(["FECHA RECIBIDO"], ["FECHA REC"], []),
+                                'fact': safe_idx(["FECHA FACTURACION", "FECHA FACTURACIÓN"], ["FECHA FAC"], [])
+                            }
+                        # --- FIN DEL BLOQUE A REEMPLAZAR 2 ---
+
+                        mapa_uni = mapear_columnas(headers_uni, datos_uni)
+                        mapa_hist = mapear_columnas(headers_hist, datos_hist)
 
                         max_folio_pmr = 0
                         numeros = df_completo[col_rem_univ].astype(str).str.extract(r'(?i)PMR\s*-\s*0*(\d+)', expand=False) if col_rem_univ else pd.Series()

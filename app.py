@@ -1621,30 +1621,39 @@ elif vista_actual == "⚙️ Panel Operativo":
             for taller, df_taller in df_por_confirmar.groupby(col_taller):
                 n_sin_t = df_taller['Agrupador_Visual'].nunique()
                 with st.expander(f"🏢 {taller} — 🚗 {n_sin_t} Pedido(s) | 📦 {len(df_taller)} Pieza(s)", expanded=False):
-                    for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
-                        col_tit, col_btn_wa = st.columns([4, 1.2])
-                        with col_tit:
-                            st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
-                        with col_btn_wa:
-                            if st.button("📱 Generar Mensaje WA", key=f"wa_btn_{taller}_{siniestro_auto}", use_container_width=True):
-                                vehiculo_str = df_grupo['Vehiculo_Info'].iloc[0]
-                                msg = "🚨 NUEVA ASIGNACIÓN 🚨\n"
-                                msg += f"🏢 Taller: {taller}\n"
-                                msg += f"📄 Siniestro: {siniestro_auto}\n"
-                                msg += f"🚗 Vehículo: {vehiculo_str}\n\n"
-                                msg += "📦 Piezas:\n"
-            
-                                for _, fila_pza in df_grupo.iterrows():
-                                    cant_str = str(fila_pza.get(col_cant, '1')).replace('.0', '').strip()
-                                    if not cant_str or cant_str.lower() in ['nan', 'none']: cant_str = '1'
-                                    desc_pza = str(fila_pza.get(col_desc, '')).strip()
-                                    msg += f"🔹 {cant_str}x {desc_pza}\n"
-                
-                                st.session_state[f"msg_wa_{siniestro_auto}"] = msg
+                    # 1. Definimos la ventana emergente justo ANTES del ciclo for
+@st.dialog("📱 Mensaje para WhatsApp")
+def mostrar_dialogo_wa(mensaje):
+    st.caption("Haz clic en el ícono de la esquina superior derecha del cuadro para copiar:")
+    st.code(mensaje, language="markdown")
 
-                        if f"msg_wa_{siniestro_auto}" in st.session_state:
-                            st.caption("Copia el texto haciendo clic en el ícono de la esquina superior derecha:")
-                            st.code(st.session_state[f"msg_wa_{siniestro_auto}"], language="markdown")
+# 2. Tu ciclo for principal modificado
+for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
+    col_tit, col_btn_wa = st.columns([4, 1.2])
+    with col_tit:
+        # Se muestra el título una sola vez
+        st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
+    with col_btn_wa:
+        if st.button("📱 Generar Mensaje WA", key=f"wa_btn_{taller}_{siniestro_auto}", use_container_width=True):
+            vehiculo_str = df_grupo['Vehiculo_Info'].iloc[0]
+            msg = "🚨 NUEVA ASIGNACIÓN 🚨\n"
+            msg += f"🏢 Taller: {taller}\n"
+            msg += f"📄 Siniestro: {siniestro_auto}\n"
+            msg += f"🚗 Vehículo: {vehiculo_str}\n\n"
+            msg += "📦 Piezas:\n"
+            
+            for _, fila_pza in df_grupo.iterrows():
+                cant_str = str(fila_pza.get(col_cant, '1')).replace('.0', '').strip()
+                if not cant_str or cant_str.lower() in ['nan', 'none']: cant_str = '1'
+                desc_pza = str(fila_pza.get(col_desc, '')).strip()
+                msg += f"🔹 {cant_str}x {desc_pza}\n"
+            
+            # Lanzamos el popup con el mensaje generado
+            mostrar_dialogo_wa(msg)
+
+    # -----------------------------------------------------------------------------
+    # AQUÍ CONTINÚA DIRECTAMENTE TU TABLA (st.data_editor o st.dataframe)
+    # Asegúrate de no tener otro st.markdown con el título del siniestro aquí abajo
                         st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion: 
                             df_grupo['Confirmar Surtido'] = False; df_grupo['Pago_Danos'] = False; df_grupo['Cancelar'] = False; df_grupo['Pérdida Total'] = False; df_grupo['PDD'] = False

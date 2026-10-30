@@ -1622,36 +1622,30 @@ elif vista_actual == "⚙️ Panel Operativo":
                 n_sin_t = df_taller['Agrupador_Visual'].nunique()
                 with st.expander(f"🏢 {taller} — 🚗 {n_sin_t} Pedido(s) | 📦 {len(df_taller)} Pieza(s)", expanded=False):
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
-                        for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
-    
-            # --- TODO ESTO DEBE ESTAR ALINEADO UN TABULADOR (4 ESPACIOS) HACIA ADENTRO ---
-            col_tit, col_btn_wa = st.columns([4, 1.2])
-            with col_tit:
-                st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
-            with col_btn_wa:
-                if st.button("📱 Generar Mensaje WA", key=f"wa_btn_{taller}_{siniestro_auto}", use_container_width=True):
-                    vehiculo_str = df_grupo['Vehiculo_Info'].iloc[0]
+                        col_tit, col_btn_wa = st.columns([4, 1.2])
+                        with col_tit:
+                            st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
+                        with col_btn_wa:
+                            if st.button("📱 Generar Mensaje WA", key=f"wa_btn_{taller}_{siniestro_auto}", use_container_width=True):
+                                vehiculo_str = df_grupo['Vehiculo_Info'].iloc[0]
+                                msg = "🚨 NUEVA ASIGNACIÓN 🚨\n"
+                                msg += f"🏢 Taller: {taller}\n"
+                                msg += f"📄 Siniestro: {siniestro_auto}\n"
+                                msg += f"🚗 Vehículo: {vehiculo_str}\n\n"
+                                msg += "📦 Piezas:\n"
             
-                    msg = "🚨 NUEVA ASIGNACIÓN 🚨\n"
-                    msg += f"🏢 Taller: {taller}\n"
-                    msg += f"📄 Siniestro: {siniestro_auto}\n"
-                    msg += f"🚗 Vehículo: {vehiculo_str}\n\n"
-                    msg += "📦 Piezas:\n"
-            
-                    for _, fila_pza in df_grupo.iterrows():
-                        cant_str = str(fila_pza.get(col_cant, '1')).replace('.0', '').strip()
-                        if not cant_str or cant_str.lower() in ['nan', 'none']: cant_str = '1'
-                        desc_pza = str(fila_pza.get(col_desc, '')).strip()
-                        msg += f"🔹 {cant_str}x {desc_pza}\n"
+                                for _, fila_pza in df_grupo.iterrows():
+                                    cant_str = str(fila_pza.get(col_cant, '1')).replace('.0', '').strip()
+                                    if not cant_str or cant_str.lower() in ['nan', 'none']: cant_str = '1'
+                                    desc_pza = str(fila_pza.get(col_desc, '')).strip()
+                                    msg += f"🔹 {cant_str}x {desc_pza}\n"
                 
-                    st.session_state[f"msg_wa_{siniestro_auto}"] = msg
+                                st.session_state[f"msg_wa_{siniestro_auto}"] = msg
 
-            if f"msg_wa_{siniestro_auto}" in st.session_state:
-                st.caption("Copia el texto haciendo clic en el ícono de la esquina superior derecha:")
-                st.code(st.session_state[f"msg_wa_{siniestro_auto}"], language="markdown")
-            # -----------------------------------------------------------------------------
-    
-            # Aquí debe continuar tu código original de las tablas, alineado a esta misma altura.
+                        if f"msg_wa_{siniestro_auto}" in st.session_state:
+                            st.caption("Copia el texto haciendo clic en el ícono de la esquina superior derecha:")
+                            st.code(st.session_state[f"msg_wa_{siniestro_auto}"], language="markdown")
+                        st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion: 
                             df_grupo['Confirmar Surtido'] = False; df_grupo['Pago_Danos'] = False; df_grupo['Cancelar'] = False; df_grupo['Pérdida Total'] = False; df_grupo['PDD'] = False
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Pago_Danos', 'Cancelar', 'Pérdida Total', 'PDD'] + [c for c in [col_comentarios] if c in df_grupo.columns]

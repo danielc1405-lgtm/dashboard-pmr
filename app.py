@@ -1653,8 +1653,7 @@ elif vista_actual == "⚙️ Panel Operativo":
 
                         # -----------------------------------------------------------------------------
                         # AQUÍ CONTINÚA DIRECTAMENTE TU TABLA (st.data_editor o st.dataframe)
-                        # Asegúrate de no tener otro st.markdown con el título del siniestro aquí abajo
-                        st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
+                                               
                         if permiso_edicion: 
                             df_grupo['Confirmar Surtido'] = False; df_grupo['Pago_Danos'] = False; df_grupo['Cancelar'] = False; df_grupo['Pérdida Total'] = False; df_grupo['PDD'] = False
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Pago_Danos', 'Cancelar', 'Pérdida Total', 'PDD'] + [c for c in [col_comentarios] if c in df_grupo.columns]

@@ -384,7 +384,7 @@ def abrir_popup_monitor():
                 c_aseg = get_c(df_rep_u, ["ASEGURADORA"])
 
                 # Excluir partidas cerradas
-                estatus_excluir = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "ENTREGADO", "PAGO A TALLER", "PERDIDA TOTAL"]
+                estatus_excluir = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "ENTREGADO", "PERDIDA TOTAL"]
                 df_rep = df_rep_u[~df_rep_u[c_est].astype(str).str.upper().isin(estatus_excluir)].copy()
 
                 # Mapa de proveedores

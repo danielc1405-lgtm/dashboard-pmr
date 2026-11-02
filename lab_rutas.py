@@ -125,11 +125,13 @@ def cargar_rutas_nube():
             col_fecha = next((c for c in df.columns if 'FECHA' in c), None)
 
             # Arrastrar todas las rutas PENDIENTES, sin importar su fecha original de creación
-            df_pendientes = df[df[col_estatus].astype(str).str.upper() == 'PENDIENTE'].copy()
+            # Arrastrar todas las rutas PENDIENTES asegurando limpiar espacios
+            df_pendientes = df[df[col_estatus].astype(str).str.strip().str.upper() == 'PENDIENTE'].copy()
+            
             if col_fecha:
-                df_completadas = df[(df[col_estatus].astype(str).str.upper() == 'COMPLETADO') & (df[col_fecha].astype(str).str.contains(hoy_str_r, na=False))].copy()
+                df_completadas = df[(df[col_estatus].astype(str).str.strip().str.upper() == 'COMPLETADO') & (df[col_fecha].astype(str).str.contains(hoy_str_r, na=False))].copy()
             else:
-                df_completadas = df[df[col_estatus].astype(str).str.upper() == 'COMPLETADO'].tail(15).copy()
+                df_completadas = df[df[col_estatus].astype(str).str.strip().str.upper() == 'COMPLETADO'].tail(15).copy()
             
             def armar_diccionario_rutas(df_sub):
                 r_dict = {}

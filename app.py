@@ -996,11 +996,16 @@ elif vista_actual == "🚚 Operación del Día":
         
     if not df_rutas.empty and 'ESTATUS' in df_rutas.columns:
         fecha_hoy_str = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
-        # Solo rutas programadas el día de HOY (las de días anteriores ya no se arrastran)
-        df_rutas_dia = df_rutas[df_rutas['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)].copy()
         
-        df_rutas_pendientes = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'PENDIENTE']
-        df_rutas_completados = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.upper() == 'COMPLETADO']
+        # EL CAMBIO: Arrastrar las de HOY + TODAS las que se hayan quedado PENDIENTES
+        cond_hoy = df_rutas['FECHA'].astype(str).str.contains(fecha_hoy_str, na=False)
+        cond_pendiente = df_rutas['ESTATUS'].astype(str).str.strip().str.upper() == 'PENDIENTE'
+        
+        df_rutas_dia = df_rutas[cond_hoy | cond_pendiente].copy()
+        
+        # Limpieza de espacios con .str.strip()
+        df_rutas_pendientes = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.strip().str.upper() == 'PENDIENTE']
+        df_rutas_completados = df_rutas_dia[df_rutas_dia['ESTATUS'].astype(str).str.strip().str.upper() == 'COMPLETADO']
         
         paradas_pendientes = df_rutas_pendientes['ID_RUTA'].nunique() if 'ID_RUTA' in df_rutas_dia.columns else len(df_rutas_pendientes)
         paradas_completadas = df_rutas_completados['ID_RUTA'].nunique() if 'ID_RUTA' in df_rutas_dia.columns else len(df_rutas_completados)

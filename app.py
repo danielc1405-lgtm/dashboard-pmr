@@ -3152,7 +3152,7 @@ elif vista_actual == "🚚 Rutas":
         if tipo_operacion.lower() in ['compra', 'cotizacion', 'pago']:
             col_agrupar = 'Proveedor' if 'Proveedor' in df_seleccion.columns else df_seleccion.columns[0]
         else:
-            col_agrupar = 'Taller' if 'Taller' in df_seleccion.columns else df_seleccion.columns[0]]
+            col_agrupar = 'Taller' if 'Taller' in df_seleccion.columns else df_seleccion.columns[0]
             
             # 2. Buscar el diccionario de direcciones y ESTADOS (Para saber si es local o foráneo)
             dict_direcciones = {}

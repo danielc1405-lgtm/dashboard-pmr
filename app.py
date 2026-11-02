@@ -382,9 +382,10 @@ def abrir_popup_monitor():
                 c_venc = get_c(df_rep_u, ["VENCIMIENTO", "PROMESA"])
                 c_est = get_c(df_rep_u, ["ESTATUS", "STATUS"])
                 c_aseg = get_c(df_rep_u, ["ASEGURADORA"])
+                c_obs = get_c(df_rep_u, ["COMENTARIO", "OBSERVACION"]) # Rescatamos los comentarios
 
-                # Excluir partidas cerradas
-                estatus_excluir = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "ENTREGADO", "PERDIDA TOTAL"]
+                # Excluir partidas cerradas (Se retira "ENTREGADO" para que aparezcan como pendientes de portal)
+                estatus_excluir = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "PERDIDA TOTAL"]
                 df_rep = df_rep_u[~df_rep_u[c_est].astype(str).str.upper().isin(estatus_excluir)].copy()
 
                 # Mapa de proveedores
@@ -412,11 +413,12 @@ def abrir_popup_monitor():
                 rename_rep = {
                     c_id: 'SINIESTRO/PEDIDO', c_cdr: 'CDR', c_marca: 'MARCA', c_modelo: 'MODELO',
                     c_ano: 'AÑO', c_pieza: 'PIEZA', c_guia: 'GUÍA', c_rastreo: 'ESTATUS GUÍA',
-                    c_venc: 'FECHA VENCIMIENTO', c_est: 'ESTATUS'
+                    c_venc: 'FECHA VENCIMIENTO', c_est: 'ESTATUS', c_obs: 'OBSERVACIONES'
                 }
                 df_rep.rename(columns=rename_rep, inplace=True)
 
-                columnas_solicitadas = ['COMPAÑÍA', 'ESTATUS', 'SINIESTRO/PEDIDO', 'CDR', 'MARCA', 'MODELO', 'AÑO', 'PIEZA', 'PROVEEDOR', 'GUÍA', 'ESTATUS GUÍA', 'FECHA VENCIMIENTO']
+                # Se agrega OBSERVACIONES al reporte final
+                columnas_solicitadas = ['COMPAÑÍA', 'ESTATUS', 'SINIESTRO/PEDIDO', 'CDR', 'MARCA', 'MODELO', 'AÑO', 'PIEZA', 'PROVEEDOR', 'GUÍA', 'ESTATUS GUÍA', 'FECHA VENCIMIENTO', 'OBSERVACIONES']
                 for col in columnas_solicitadas:
                     if col not in df_rep.columns: df_rep[col] = ""
 

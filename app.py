@@ -1798,12 +1798,14 @@ elif vista_actual == "⚙️ Panel Operativo":
             if permiso_edicion:
                 df_recoleccion['En_Retorno'] = df_recoleccion[col_estatus].astype(str).str.upper().str.contains("TRANSITO", na=False)
                 df_recoleccion['Guia_Retorno'] = df_recoleccion[col_guia_dev].fillna("") if col_guia_dev else ""
-                cols_rec = [c for c in [col_id, col_taller, col_cant, col_desc, col_precio, col_estatus] if c in df_recoleccion.columns] + [c for c in [col_paqueteria, col_guia] if c in df_recoleccion.columns] + ['Guia_Retorno', 'En_Retorno'] + [c for c in [col_comentarios] if c in df_recoleccion.columns]
+                df_recoleccion['Devolucion_Recibida'] = False
+                cols_rec = [c for c in [col_id, col_taller, col_cant, col_desc, col_precio, col_estatus] if c in df_recoleccion.columns] + [c for c in [col_paqueteria, col_guia] if c in df_recoleccion.columns] + ['Guia_Retorno', 'En_Retorno', 'Devolucion_Recibida'] + [c for c in [col_comentarios] if c in df_recoleccion.columns]
                 config_rec = base_config.copy()
                 if col_guia: config_rec[col_guia] = st.column_config.TextColumn("Guía Actual / Ida")
                 config_rec["Guia_Retorno"] = st.column_config.TextColumn("🆕 Guía Retorno (Capturar aquí)")
                 config_rec["En_Retorno"] = st.column_config.CheckboxColumn("🚚 En Retorno", default=False)
-                cols_edit_rec = [col_paqueteria, col_guia, 'Guia_Retorno', 'En_Retorno', col_comentarios]
+                config_rec["Devolucion_Recibida"] = st.column_config.CheckboxColumn("🏁 Dev. Recibida", default=False)
+                cols_edit_rec = [col_paqueteria, col_guia, 'Guia_Retorno', 'En_Retorno', 'Devolucion_Recibida', col_comentarios]
                 df_editado_rec = st.data_editor(df_recoleccion[cols_rec], column_config=config_rec, disabled=[c for c in cols_rec if c not in cols_edit_rec], hide_index=True, use_container_width=True, key="ed_rec_panel")
                 for col in df_recoleccion.columns: 
                     if col not in df_editado_rec.columns: df_editado_rec[col] = df_recoleccion[col].values
@@ -4563,19 +4565,24 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                 guia_actual = str(row.get(col_guia, '')).strip()
                 guia_retorno_nueva = str(row.get('Guia_Retorno', '')).strip()
                 en_retorno_chk = bool(row.get('En_Retorno', False))
+                dev_recibida_chk = bool(row.get('Devolucion_Recibida', False))
                 
-                if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
-                if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
-                if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
-                
-                if guia_retorno_nueva != orig['guia_retorno'] and guia_retorno_nueva not in ['', 'nan', 'None', 'NAN']:
-                    cambios_a_guardar.setdefault(k, {})['guia_retorno'] = guia_retorno_nueva
-                    cambios_a_guardar[k]['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
-                    cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
-                    cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
-                elif en_retorno_chk and orig['estatus_db'] != 'EN TRANSITO (RECOLECCIÓN)':
-                    cambios_a_guardar.setdefault(k, {})['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
-                    cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
+                if dev_recibida_chk:
+                    cambios_a_guardar.setdefault(k, {})['estatus'] = 'CANCELADO' 
+                    cambios_a_guardar[k]['estatus_envio'] = 'Devolución Recibida'
+                else:
+                    if comentario_actual != orig['comentario']: cambios_a_guardar.setdefault(k, {})['comentario'] = comentario_actual
+                    if paq_actual != orig['paqueteria']: cambios_a_guardar.setdefault(k, {})['paqueteria'] = paq_actual
+                    if guia_actual != orig['guia']: cambios_a_guardar.setdefault(k, {})['guia'] = guia_actual
+                    
+                    if guia_retorno_nueva != orig['guia_retorno'] and guia_retorno_nueva not in ['', 'nan', 'None', 'NAN']:
+                        cambios_a_guardar.setdefault(k, {})['guia_retorno'] = guia_retorno_nueva
+                        cambios_a_guardar[k]['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
+                        cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
+                        cambios_a_guardar[k]['fecha_envio'] = fecha_hoy_sistema
+                    elif en_retorno_chk and orig['estatus_db'] != 'EN TRANSITO (RECOLECCIÓN)':
+                        cambios_a_guardar.setdefault(k, {})['estatus'] = 'EN TRANSITO (RECOLECCIÓN)'
+                        cambios_a_guardar[k]['estatus_envio'] = 'Recolección en Tránsito'
         # --- FIN DEL BLOQUE A REEMPLAZAR 1 ---
 
         if not df_editado_cobro.empty:

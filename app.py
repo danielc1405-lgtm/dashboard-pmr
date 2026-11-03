@@ -476,26 +476,26 @@ def abrir_centro_tareas():
     lista_siniestros = []
     doc = init_connection()
     try:
-            ws_usuarios = doc.worksheet("Usuarios")
-            datos_u = ws_usuarios.get_all_values() # Método a prueba de fallos de formato
-            if len(datos_u) > 1:
-                import pandas as pd
-                df_u = pd.DataFrame(datos_u[1:], columns=[str(c).strip().upper() for c in datos_u[0]])
+        ws_usuarios = doc.worksheet("Usuarios")
+        datos_u = ws_usuarios.get_all_values() # Método a prueba de fallos de formato
+        if len(datos_u) > 1:
+            import pandas as pd
+            df_u = pd.DataFrame(datos_u[1:], columns=[str(c).strip().upper() for c in datos_u[0]])
                 
-                # Busca la columna "NOMBRE COMPLETO" o cualquier variación segura
-                col_nombre = next((c for c in df_u.columns if "NOMBRE" in c), None)
+            # Busca la columna "NOMBRE COMPLETO" o cualquier variación segura
+            col_nombre = next((c for c in df_u.columns if "NOMBRE" in c), None)
                 
-                if col_nombre:
-                    usuarios_reales = df_u[col_nombre].astype(str).drop_duplicates().tolist()
-                else:
-                    usuarios_reales = df_u.iloc[:, 0].astype(str).drop_duplicates().tolist()
-                    
-                usuarios_reales = [u for u in usuarios_reales if u.strip() and u.lower() != "nan" and u.lower() != "none"]
+            if col_nombre:
+                usuarios_reales = df_u[col_nombre].astype(str).drop_duplicates().tolist()
             else:
-                usuarios_reales = []
-        except Exception as e:
-            print(f"Error crítico cargando usuarios: {e}")
+                usuarios_reales = df_u.iloc[:, 0].astype(str).drop_duplicates().tolist()
+                    
+            usuarios_reales = [u for u in usuarios_reales if u.strip() and u.lower() != "nan" and u.lower() != "none"]
+        else:
             usuarios_reales = []
+    except Exception as e:
+        print(f"Error crítico cargando usuarios: {e}")
+        usuarios_reales = []
 
     # 2. Cargar Siniestros Reales de la Base (Formato Panel Operativo)
         try:

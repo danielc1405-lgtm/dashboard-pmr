@@ -483,28 +483,27 @@ def abrir_centro_tareas():
         usuarios_reales = ["Error cargando usuarios"]
 
     # 2. Cargar Siniestros Reales de la Base (Formato Panel Operativo)
-    try:
-        ws_uni = doc.worksheet("BD_UNIFICADA")
-        df_uni = pd.DataFrame(ws_uni.get_all_records())
-        
-        def armar_vehiculo_tarea(r):
-            m = str(r.get('MARCA', '')).strip().upper()
-            mod = str(r.get('MODELO', '')).strip().upper()
-            veh = mod if mod.startswith(m) else f"{m} {mod}".strip()
-            ano = str(r.get('AÑO', r.get('ANO', ''))).strip()
-            if ano and ano not in ['NAN', 'NONE', '']: veh += f" | {ano}"
-            return veh
-
-        df_uni['Vehiculo'] = df_uni.apply(armar_vehiculo_tarea, axis=1)
-        # Buscar el nombre exacto de la columna de siniestros
-        col_sin = "PEDIDO / SINIESTRO" if "PEDIDO / SINIESTRO" in df_uni.columns else "SINIESTRO"
-        df_uni['Filtro_Siniestro'] = df_uni[col_sin].astype(str).str.strip() + " | " + df_uni['Vehiculo']
-        
-        # Filtramos excluyendo los que ya están cerrados
-        df_activos = df_uni[~df_uni['ESTATUS'].astype(str).str.upper().isin(["CANCELADO", "FACTURADO", "RECIBIDO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS"])].copy()
-        lista_siniestros = sorted(df_activos['Filtro_Siniestro'].dropna().unique().tolist())
-    except Exception:
-        lista_siniestros = ["Error cargando siniestros"]
+        try:
+            ws_uni = doc.worksheet("BD_UNIFICADA")
+            df_uni = pd.DataFrame(ws_uni.get_all_records())
+            
+            # Buscamos las columnas exactas según tu Google Sheet
+            col_siniestro = "Pedido / Siniestr" if "Pedido / Siniestr" in df_uni.columns else ("Pedido / Siniestro" if "Pedido / Siniestro" in df_uni.columns else None)
+            col_vehiculo = "Modelo / Vehícul" if "Modelo / Vehícul" in df_uni.columns else ("Modelo / Vehículo" if "Modelo / Vehículo" in df_uni.columns else None)
+            
+            if col_siniestro and col_vehiculo:
+                # Concatenamos Siniestro y Vehículo
+                lista_siniestros = (df_uni[col_siniestro].astype(str) + " | " + df_uni[col_vehiculo].astype(str)).drop_duplicates().tolist()
+            elif col_siniestro:
+                lista_siniestros = df_uni[col_siniestro].astype(str).drop_duplicates().tolist()
+            else:
+                lista_siniestros = []
+                
+            # Limpiamos valores vacíos
+            lista_siniestros = [s for s in lista_siniestros if s.strip() and s.lower() != "nan" and s.lower() != "nan | nan"]
+            
+        except Exception:
+            lista_siniestros = []
         df_activos = pd.DataFrame()
 
     tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
@@ -538,10 +537,36 @@ def abrir_centro_tareas():
         instruccion_nueva = st.text_area("Instrucción o Mensaje:")
                 
         if st.button("📤 Enviar Tarea", type="primary"):
-            if usuario_destino != "Seleccionar..." and instruccion_nueva:
-                st.success(f"Tarea enviada a {usuario_destino}")
+            if usuario_destino != "Seleccionar..." and instruccion_nueva.strip():
+                try:
+                    import datetime
+                    import uuid
+                    
+                    id_tarea = str(uuid.uuid4().hex)[:6].upper()
+                    fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                    emisor = st.session_state.get('usuario', 'Usuario Actual')
+                    vehiculo_final = siniestro_seleccionado if siniestro_seleccionado != "Seleccionar..." else "General"
+                    
+                    nueva_fila = [
+                        id_tarea,          # A: ID_Tarea
+                        fecha_hoy,         # B: Fecha_Creacion
+                        emisor,            # C: Emisor
+                        usuario_destino,   # D: Receptor
+                        vehiculo_final,    # E: Siniestro / Taller / Piezas
+                        instruccion_nueva, # F: Instruccion
+                        "Pendiente",       # G: Status
+                        ""                 # H: Respuesta
+                    ]
+                    
+                    ws_tareas = doc.worksheet("Gestor_Tareas")
+                    ws_tareas.append_row(nueva_fila)
+                    
+                    st.success(f"✅ Tarea enviada a {usuario_destino}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error al guardar en Google Sheets: {e}")
             else:
-                st.warning("Faltan datos obligatorios (Usuario e Instrucción).")
+                st.warning("⚠️ Faltan datos obligatorios (Usuario e Instrucción).")
 
 @st.dialog("📖 Directorio Operativo", width="large")
 def abrir_directorio():

@@ -552,9 +552,6 @@ def abrir_directorio():
 # Dividimos col_btn en sub-columnas para acomodar los nuevos botones ordenadamente
 sub_col1, sub_col2, sub_col3 = col_btn.columns(3)
         
-with sub_col1:
-    btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
-    espacio_spinner = st.empty()
 with sub_col2:
     if st.button("🔔 Tareas", use_container_width=True):
         abrir_centro_tareas()

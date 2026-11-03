@@ -645,6 +645,8 @@ def abrir_centro_tareas():
             if usuario_destino != "Seleccionar..." and instruccion_nueva.strip():
                 import datetime
                 import uuid
+                import time
+                
                 id_tarea = str(uuid.uuid4().hex)[:6].upper()
                 fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                 
@@ -653,9 +655,15 @@ def abrir_centro_tareas():
                     ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
 
                 nueva_fila = [id_tarea, fecha_hoy, usuario_activo_real, usuario_destino, ref_final, instruccion_nueva.strip(), "Pendiente", ""]
+                
                 try:
-                    ws_tareas.append_row(nueva_fila)
+                    # Garantiza la conexión fresca dentro del botón para evitar fallos de guardado
+                    doc_guardar = init_connection()
+                    ws_guardar = doc_guardar.worksheet("Gestor_Tareas")
+                    ws_guardar.append_row(nueva_fila)
+                    
                     st.success(f"✅ Tarea enviada a {usuario_destino}")
+                    time.sleep(1)
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error al guardar: {e}")
@@ -928,48 +936,45 @@ else:
     df_trabajo = df_proceso = df_recoleccion_total = pd.DataFrame()
 
 # ==============================================================================
-# === MÁSCARA COMERCIAL EXTREMA (MODO DEMO / INTERCEPTOR VISUAL) ===
+# === MÁSCARA COMERCIAL EXTREMA (MODO DEMO / INTERCEPTOR DE NÚCLEO) ===
 # ==============================================================================
 if rol_activo == 'DEMO':
-    import re
     import pandas as pd
     import streamlit as st
-    
-    # 1. Guardamos las funciones originales de dibujo de Streamlit para no perderlas
-    _original_dataframe = st.dataframe
-    _original_data_editor = st.data_editor
-    _original_table = st.table
-    _original_metric = st.metric
-    
-    # 2. Función que detecta y oculta dinero en cualquier DataFrame
-    def enmascarar_df_extremo(df):
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            df_oculto = df.copy()
-            
-            # A. Ocultar por nombre de columna (Finanzas y Operaciones)
+    from streamlit.delta_generator import DeltaGenerator
+
+    # 1. Guardamos las funciones originales del núcleo de Streamlit
+    if not hasattr(st.session_state, '_dg_dataframe'):
+        st.session_state._dg_dataframe = DeltaGenerator.dataframe
+        st.session_state._dg_data_editor = DeltaGenerator.data_editor
+
+    # 2. Interceptor para tablas de solo lectura (Resumen Financiero, etc.)
+    def core_masked_dataframe(self, data=None, *args, **kwargs):
+        if isinstance(data, pd.DataFrame) and not data.empty:
+            data = data.copy()
             palabras_dinero = ["PRECIO", "COSTO", "IMPORTE", "TOTAL", "ASIGNADO", "PROCESO", "CONCRETADO", "PDD", "PT", "CANCELADO", "ACUMULADO"]
-            for c in df_oculto.columns:
+            for c in data.columns:
                 if any(p in str(c).upper() for p in palabras_dinero):
-                    df_oculto[c] = "$ ***"
-                    
-            # B. Ocultar por Formato (Busca cualquier celda que ya esté formateada como "$ 1,500.00")
-            df_oculto = df_oculto.replace(to_replace=r'^.*\$\s*[\d\.,]+.*$', value='$ ***', regex=True)
-            return df_oculto
-        return df
+                    data[c] = data[c].astype(object) # Forzar tipo texto
+                    data[c] = "$ ***"
+        return st.session_state._dg_dataframe(self, data, *args, **kwargs)
 
-    # 3. Función que detecta dinero en las Tarjetas (Métricas individuales)
-    def enmascarar_metric_extremo(label, value, delta=None, *args, **kwargs):
-        if re.search(r'\$\s*[\d\.,]+', str(value)):
-            value = "$ ***"
-        if delta is not None and re.search(r'\$\s*[\d\.,]+', str(delta)):
-            delta = "$ ***"
-        return _original_metric(label, value, delta, *args, **kwargs)
+    # 3. Interceptor para tablas editables (Panel Operativo)
+    def core_masked_data_editor(self, data=None, *args, **kwargs):
+        # SEGURIDAD EXTREMA: Ocultamos las columnas visualmente usando la configuración nativa.
+        # Así el DEMO no ve el dinero, pero al guardar cambios no corrompes tu base de datos.
+        if isinstance(data, pd.DataFrame):
+            col_config = kwargs.get('column_config', {}) or {}
+            palabras_dinero = ["PRECIO", "COSTO", "IMPORTE", "TOTAL", "ASIGNADO", "PROCESO", "CONCRETADO", "PDD", "PT", "CANCELADO", "ACUMULADO"]
+            for c in data.columns:
+                if any(p in str(c).upper() for p in palabras_dinero):
+                    col_config[c] = None # Oculta la columna de la pantalla
+            kwargs['column_config'] = col_config
+        return st.session_state._dg_data_editor(self, data, *args, **kwargs)
 
-    # 4. EMBOSCADA: Reemplazamos las funciones de Streamlit temporalmente
-    st.dataframe = lambda df, *args, **kwargs: _original_dataframe(enmascarar_df_extremo(df), *args, **kwargs)
-    st.data_editor = lambda df, *args, **kwargs: _original_data_editor(enmascarar_df_extremo(df), *args, **kwargs)
-    st.table = lambda df, *args, **kwargs: _original_table(enmascarar_df_extremo(df), *args, **kwargs)
-    st.metric = enmascarar_metric_extremo
+    # 4. Inyectar el parche al motor principal de Streamlit
+    DeltaGenerator.dataframe = core_masked_dataframe
+    DeltaGenerator.data_editor = core_masked_data_editor
 
 # ==============================================================================
 # === [BLOQUE 5: NOTIFICACIONES Y BANDEJA PDF] ===

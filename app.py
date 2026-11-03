@@ -527,22 +527,43 @@ def abrir_centro_tareas():
     with tabs_tareas[0]:
         st.subheader("Tareas Asignadas a Mí")
         if not df_tareas.empty and 'Receptor' in df_tareas.columns:
-            # Coincidencia flexible sin importar espacios o mayúsculas
             mis_pendientes = df_tareas[
-                (df_tareas['Receptor'].astype(str).str.strip().str.lower() == u_activo_clean) & 
+                (df_tareas['Receptor'].astype(str).str.strip().str.lower().apply(lambda x: u_activo_clean in x or x in u_activo_clean)) & 
                 (df_tareas['Status'].astype(str).str.strip().str.lower() == 'pendiente')
             ]
             if not mis_pendientes.empty:
                 for idx, row in mis_pendientes.iterrows():
                     with st.container(border=True):
-                        col_t1, col_t2 = st.columns([3.5, 1])
-                        col_t1.markdown(f"**De:** 👤 {row.get('Emisor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
-                        col_t1.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
-                        col_t1.info(f"**Mensaje:** {row.get('Instruccion', '')}")
-                        if col_t2.button("✅ Marcar Resuelto", key=f"res_{idx}", use_container_width=True):
-                            ws_tareas.update_cell(idx + 2, df_tareas.columns.get_loc('Status') + 1, "Resuelto")
-                            st.success("Tarea completada.")
-                            st.rerun()
+                        st.markdown(f"**De:** 👤 {row.get('Emisor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
+                        st.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
+                        st.info(f"**Mensaje:** {row.get('Instruccion', '')}")
+                        
+                        # Campo de texto para ingresar respuesta + Botón de resolver
+                        col_r1, col_r2 = st.columns([3, 1])
+                        with col_r1:
+                            txt_respuesta = st.text_input(
+                                "Respuesta / Comentario:", 
+                                key=f"resp_{idx}", 
+                                placeholder="Escribe aquí tu respuesta antes de finalizar..."
+                            )
+                        with col_r2:
+                            st.write("")
+                            st.write("")
+                            if st.button("✅ Marcar Resuelto", key=f"res_{idx}", use_container_width=True):
+                                row_num = idx + 2 # Fila correspondiente en Google Sheets
+                                
+                                # 1. Guardar Estatus como Resuelto
+                                if 'Status' in df_tareas.columns:
+                                    col_status_idx = df_tareas.columns.get_loc('Status') + 1
+                                    ws_tareas.update_cell(row_num, col_status_idx, "Resuelto")
+                                
+                                # 2. Guardar Comentario en la columna Respuesta
+                                if 'Respuesta' in df_tareas.columns:
+                                    col_resp_idx = df_tareas.columns.get_loc('Respuesta') + 1
+                                    ws_tareas.update_cell(row_num, col_resp_idx, txt_respuesta.strip())
+                                
+                                st.success("Tarea resuelta y respuesta guardada correctamente.")
+                                st.rerun()
             else:
                 st.info("No tienes tareas pendientes asignadas por el momento.")
         else:
@@ -552,14 +573,17 @@ def abrir_centro_tareas():
     with tabs_tareas[1]:
         st.subheader("Tareas que he Solicitado")
         if not df_tareas.empty and 'Emisor' in df_tareas.columns:
-            # Compara si el ID de usuario o el Nombre coinciden parcialmente
             mis_enviados = df_tareas[
                 df_tareas['Emisor'].astype(str).str.strip().str.lower().apply(
                     lambda x: u_activo_clean in x or x in u_activo_clean
                 )
             ]
             if not mis_enviados.empty:
-                cols_mostrar = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status'] if c in mis_enviados.columns]
+                # Incluye la columna 'Respuesta' en la vista
+                cols_mostrar = [
+                    c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status', 'Respuesta'] 
+                    if c in mis_enviados.columns
+                ]
                 st.dataframe(mis_enviados[cols_mostrar], hide_index=True, use_container_width=True)
             else:
                 st.info("No has enviado solicitudes aún con este usuario.")

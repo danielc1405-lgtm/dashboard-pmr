@@ -486,24 +486,28 @@ def abrir_centro_tareas():
     # 2. Cargar Siniestros Reales de la Base (Formato Panel Operativo)
         try:
             ws_uni = doc.worksheet("BD_UNIFICADA")
-            df_uni = pd.DataFrame(ws_uni.get_all_records())
+            datos_uni = ws_uni.get_all_values()
             
-            # Buscamos las columnas exactas según tu Google Sheet
-            col_siniestro = "Pedido / Siniestr" if "Pedido / Siniestr" in df_uni.columns else ("Pedido / Siniestro" if "Pedido / Siniestro" in df_uni.columns else None)
-            col_vehiculo = "Modelo / Vehícul" if "Modelo / Vehícul" in df_uni.columns else ("Modelo / Vehículo" if "Modelo / Vehículo" in df_uni.columns else None)
-            
-            if col_siniestro and col_vehiculo:
-                # Concatenamos Siniestro y Vehículo
-                lista_siniestros = (df_uni[col_siniestro].astype(str) + " | " + df_uni[col_vehiculo].astype(str)).drop_duplicates().tolist()
-            elif col_siniestro:
-                lista_siniestros = df_uni[col_siniestro].astype(str).drop_duplicates().tolist()
+            if len(datos_uni) > 1:
+                import pandas as pd
+                # Convertimos a DataFrame ignorando los nombres de encabezados para evitar fallos por saltos de línea
+                df_uni = pd.DataFrame(datos_uni[1:])
+                
+                # Extraemos directamente por posición de columna
+                # Índice 1 = Columna B (Pedido / Siniestro)
+                # Índice 6 = Columna G (Modelo / Vehículo)
+                siniestros = df_uni.iloc[:, 1].astype(str)
+                vehiculos = df_uni.iloc[:, 6].astype(str)
+                
+                lista_siniestros = (siniestros + " | " + vehiculos).drop_duplicates().tolist()
+                
+                # Limpieza de vacíos
+                lista_siniestros = [s for s in lista_siniestros if s.strip() and s != " | " and "nan" not in s.lower()]
             else:
                 lista_siniestros = []
                 
-            # Limpiamos valores vacíos
-            lista_siniestros = [s for s in lista_siniestros if s.strip() and s.lower() != "nan" and s.lower() != "nan | nan"]
-            
-        except Exception:
+        except Exception as e:
+            print(f"Error cargando siniestros por posición: {e}")
             lista_siniestros = []
         df_activos = pd.DataFrame()
 

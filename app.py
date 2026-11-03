@@ -665,18 +665,8 @@ def abrir_directorio():
             
     if busqueda_dir:
         st.info(f"Buscando '{busqueda_dir}' en la base de datos de contactos...")
-        # Aquí irá la lógica para filtrar tu DataFrame de directorio y mostrar los resultados (Ej. st.dataframe o tarjetas)
+        # Aquí irá la lógica para filtrar tu DataFrame de directorio y mostrar los resultados
 
-# 4. Botones disparadores (Ubicados en la barra superior al lado de Guardar)
-# Dividimos col_btn en sub-columnas para acomodar los nuevos botones ordenadamente
-sub_col1, sub_col2, sub_col3 = col_btn.columns(3)
-        
-with sub_col2:
-    if st.button("🔔 Tareas", use_container_width=True):
-        abrir_centro_tareas()
-with sub_col3:
-    if st.button("📖 Directorio", use_container_width=True):
-        abrir_directorio()
 
 # ==============================================================================
 # === [BLOQUE 4: CARGA Y PROCESAMIENTO DE DATOS (LAZY LOADING)] ===

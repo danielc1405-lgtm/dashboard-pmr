@@ -475,32 +475,32 @@ with col_btn_pop:
 def abrir_centro_tareas():
     lista_siniestros = []
     doc = init_connection()
-try:
-        ws_usuarios = doc.worksheet("Usuarios")
-        datos_u = ws_usuarios.col_values(1)
-        usuarios_reales = []
-        for u in datos_u[1:]:
-            u_limpio = str(u).strip()
-            if u_limpio and u_limpio.lower() != "nan" and u_limpio not in usuarios_reales:
-                usuarios_reales.append(u_limpio)
-    except Exception:
-        usuarios_reales = []
-
     try:
-        ws_uni = doc.worksheet("BD_UNIFICADA")
-        datos_uni = ws_uni.get_all_values()
-        lista_siniestros = []
-        if len(datos_uni) > 1:
-            for fila in datos_uni[1:]:
-                if len(fila) > 6:
-                    sin = str(fila[1]).strip()
-                    veh = str(fila[6]).strip()
-                    if sin and sin.lower() != "nan":
-                        item = f"{sin} | {veh}" if veh else sin
-                        if item not in lista_siniestros:
-                            lista_siniestros.append(item)
-    except Exception:
-        lista_siniestros = []
+            ws_usuarios = doc.worksheet("Usuarios")
+            datos_u = ws_usuarios.col_values(1)
+            usuarios_reales = []
+            for u in datos_u[1:]:
+                u_limpio = str(u).strip()
+                if u_limpio and u_limpio.lower() != "nan" and u_limpio not in usuarios_reales:
+                    usuarios_reales.append(u_limpio)
+        except Exception:
+            usuarios_reales = []
+
+        try:
+            ws_uni = doc.worksheet("BD_UNIFICADA")
+            datos_uni = ws_uni.get_all_values()
+            lista_siniestros = []
+            if len(datos_uni) > 1:
+                for fila in datos_uni[1:]:
+                    if len(fila) > 6:
+                        sin = str(fila[1]).strip()
+                        veh = str(fila[6]).strip()
+                        if sin and sin.lower() != "nan":
+                            item = f"{sin} | {veh}" if veh else sin
+                            if item not in lista_siniestros:
+                                lista_siniestros.append(item)
+        except Exception:
+            lista_siniestros = []
         df_activos = pd.DataFrame()
 
     tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])

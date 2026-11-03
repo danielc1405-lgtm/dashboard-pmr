@@ -523,7 +523,11 @@ def abrir_centro_tareas():
         with col_nueva_1:
             usuario_destino = st.selectbox("Asignar a:", ["Seleccionar..."] + usuarios_reales)
         with col_nueva_2:
-            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo:", ["Seleccionar..."] + lista_siniestros)
+            opciones_siniestros = ["Seleccionar..."]
+            if isinstance(lista_siniestros, list) and len(lista_siniestros) > 0:
+                opciones_siniestros.extend(lista_siniestros)
+            
+            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo:", opciones_siniestros)
                 
         if siniestro_seleccionado != "Seleccionar..." and not df_activos.empty:
             siniestro_id = siniestro_seleccionado.split(" | ")[0].strip()
@@ -614,48 +618,6 @@ lista_usuarios_activos = [
 
 # 2. Definición del Dialog (Ventana Emergente de Tareas)
 @st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
-def abrir_centro_tareas():
-    tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
-            
-    # --- Pestaña 1: Bandeja de Entrada ---
-    with tabs_tareas[0]:
-        st.subheader("Tareas Asignadas a Mí")
-        st.info("No tienes tareas pendientes por el momento.")
-        # Aquí irá la lógica que lee de Google Sheets las tareas con status "Pendiente" asignadas al usuario actual
-
-    # --- Pestaña 2: Bandeja de Salida ---
-    with tabs_tareas[1]:
-        st.subheader("Tareas que he Solicitado")
-        st.info("No tienes solicitudes activas.")
-        # Aquí irá la lógica que lee de Google Sheets las tareas creadas por el usuario actual que aún no están en "Cerrado"
-
-    # --- Pestaña 3: Nueva Tarea ---
-    with tabs_tareas[2]:
-        st.subheader("Asignar Nueva Tarea")
-                
-        col_nueva_1, col_nueva_2 = st.columns(2)
-        with col_nueva_1:
-            usuario_destino = st.selectbox("Asignar a:", ["Seleccionar..."] + lista_usuarios_activos)
-        with col_nueva_2:
-            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo:", ["Seleccionar..."] + lista_siniestros_dinamicos)
-                
-        # Desplegar piezas si se selecciona un siniestro (Simulación de la lógica dinámica)
-        if siniestro_seleccionado != "Seleccionar...":
-            # Aquí extraerías el número de siniestro del string seleccionado para filtrar el DF
-            siniestro_id = siniestro_seleccionado.split(" | ")[0]
-            # Aquí filtrarías tu df real para sacar las piezas de ese siniestro
-            piezas_del_siniestro = ["Lógica pendiente: Conectar con df filtrado"] 
-                    
-            st.multiselect("Selecciona la(s) Pieza(s) a revisar:", piezas_del_siniestro)
-                
-        instruccion_nueva = st.text_area("Instrucción o Mensaje:")
-                
-        if st.button("📤 Enviar Tarea", type="primary"):
-            if usuario_destino != "Seleccionar..." and instruccion_nueva:
-                st.success(f"Tarea enviada a {usuario_destino}")
-                # Aquí irá la lógica para guardar en Google Sheets
-            else:
-                st.warning("Faltan datos obligatorios.")
 
 # 3. Definición del Dialog (Ventana Emergente del Directorio)
 @st.dialog("📖 Directorio Operativo", width="large")

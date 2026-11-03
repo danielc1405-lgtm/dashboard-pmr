@@ -475,60 +475,59 @@ with col_btn:
 # === [SISTEMA DE TAREAS Y MENSAJERÍA INTERNA (POPUP)] ===
 # ==============================================================================
         
-# 1. Definición del Dialog (Ventana Emergente)
+# 1. Preparación de datos dinámicos (Siniestros y Usuarios)
+# Ajusta "Siniestro", "Vehiculo", etc., a los nombres exactos de tus columnas en tu DataFrame principal
+try:
+    if not df.empty:
+        # Crea una lista concatenando los datos relevantes para el selectbox
+        lista_siniestros_dinamicos = df.apply(
+            lambda row: f"{row.get('Siniestro', '')} | {row.get('Vehiculo', '')} | {row.get('Modelo', '')}", 
+            axis=1
+        ).drop_duplicates().tolist()
+    else:
+        lista_siniestros_dinamicos = []
+except Exception:
+    lista_siniestros_dinamicos = []
+
+lista_usuarios_activos = [
+    "Marco", "Daniel", "Diana", "Operaciones", "Ventas", "Compras", "Administración"
+]
+
+# 2. Definición del Dialog (Ventana Emergente de Tareas)
 @st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
 def abrir_centro_tareas():
-    tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea", "📖 Directorio Rápido"])
-
-    # --- Pestaña 1: Bandeja de Entrada (Lo que me piden a mi) ---
+    tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
+            
+    # --- Pestaña 1: Bandeja de Entrada ---
     with tabs_tareas[0]:
         st.subheader("Tareas Asignadas a Mí")
-        st.info("Aquí aparecerán las tareas que otros usuarios te han asignado (En desarrollo: Conexión a Google Sheets).")
-        # Ejemplo visual temporal
-        with st.container(border=True):
-            cols_tarea = st.columns([3, 1])
-            with cols_tarea[0]:
-                st.markdown("**De:** Marco | **Siniestro:** B66119160 | BMW 330")
-                st.markdown("**Instrucción:** Revisar si la facia es la versión M o la normal.")
-            with cols_tarea[1]:
-                st.text_input("Mi Respuesta:", key="resp_temp_1", placeholder="Escribe aquí...")
-                st.button("✔️ Marcar Atendido", key="btn_atend_1", use_container_width=True)
+        st.info("No tienes tareas pendientes por el momento.")
+        # Aquí irá la lógica que lee de Google Sheets las tareas con status "Pendiente" asignadas al usuario actual
 
-    # --- Pestaña 2: Bandeja de Salida (Lo que yo pedí) ---
+    # --- Pestaña 2: Bandeja de Salida ---
     with tabs_tareas[1]:
         st.subheader("Tareas que he Solicitado")
-        st.info("Aquí verás el estatus de las peticiones que hiciste y podrás dar el 'Enterado' final.")
-        # Ejemplo visual temporal
-        with st.container(border=True):
-            cols_salida = st.columns([3, 1])
-            with cols_salida[0]:
-                st.markdown("**Para:** Diana | **Siniestro:** B69819465 | KIA SELTOS")
-                st.markdown("**Instrucción:** ¿Ya facturamos estas piezas?")
-                st.success("**Respuesta de Diana:** Ya quedó, folio F-1029")
-            with cols_salida[1]:
-                st.button("✅ Enterado (Cerrar)", key="btn_cerrar_1", use_container_width=True, type="primary")
+        st.info("No tienes solicitudes activas.")
+        # Aquí irá la lógica que lee de Google Sheets las tareas creadas por el usuario actual que aún no están en "Cerrado"
 
     # --- Pestaña 3: Nueva Tarea ---
     with tabs_tareas[2]:
         st.subheader("Asignar Nueva Tarea")
                 
-        # Simulamos la lista concatenada basada en tu imagen
-        lista_siniestros_vehiculos = [
-            "B66119160 | BMW 330 | 2018 | WBA8A7101JK379553",
-            "B69819465 | KIA SELTOS | 2022 | MZBER2A46NN342712",
-            "B75964467 | VOLKSWAGEN VIRTUS | 2022 | WVW3J4D2XNT013096"
-        ]
-                
         col_nueva_1, col_nueva_2 = st.columns(2)
         with col_nueva_1:
-            usuario_destino = st.selectbox("Asignar a:", ["Seleccionar...", "Marco", "Daniel", "Diana", "Operaciones"])
+            usuario_destino = st.selectbox("Asignar a:", ["Seleccionar..."] + lista_usuarios_activos)
         with col_nueva_2:
-            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo:", ["Seleccionar..."] + lista_siniestros_vehiculos)
+            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo:", ["Seleccionar..."] + lista_siniestros_dinamicos)
                 
-        # Desplegar piezas si se selecciona un siniestro (Simulación)
+        # Desplegar piezas si se selecciona un siniestro (Simulación de la lógica dinámica)
         if siniestro_seleccionado != "Seleccionar...":
-            st.text_input("Taller asignado (Autocompletado):", value="TALLER EJEMPLO S.A.", disabled=True)
-            st.multiselect("Selecciona la(s) Pieza(s) a revisar:", ["Facia Delantera", "Faro Izquierdo", "Parrilla"])
+            # Aquí extraerías el número de siniestro del string seleccionado para filtrar el DF
+            siniestro_id = siniestro_seleccionado.split(" | ")[0]
+            # Aquí filtrarías tu df real para sacar las piezas de ese siniestro
+            piezas_del_siniestro = ["Lógica pendiente: Conectar con df filtrado"] 
+                    
+            st.multiselect("Selecciona la(s) Pieza(s) a revisar:", piezas_del_siniestro)
                 
         instruccion_nueva = st.text_area("Instrucción o Mensaje:")
                 
@@ -539,17 +538,29 @@ def abrir_centro_tareas():
             else:
                 st.warning("Faltan datos obligatorios.")
 
-    # --- Pestaña 4: Directorio Rápido ---
-    with tabs_tareas[3]:
-        st.subheader("Directorio de Contactos")
-        busqueda_dir = st.text_input("🔍 Buscar por Nombre, Taller o Proveedor:")
-        st.info("Buscador de contactos rápido sin salir de la operación.")
-        # Aquí irá la tabla filtrada del directorio
+# 3. Definición del Dialog (Ventana Emergente del Directorio)
+@st.dialog("📖 Directorio Operativo", width="large")
+def abrir_directorio():
+    st.subheader("Buscador de Contactos")
+    busqueda_dir = st.text_input("🔍 Buscar por Nombre, Taller o Proveedor:", placeholder="Ej. Taller Bajio, Autopartes Monterrey...")
+            
+    if busqueda_dir:
+        st.info(f"Buscando '{busqueda_dir}' en la base de datos de contactos...")
+        # Aquí irá la lógica para filtrar tu DataFrame de directorio y mostrar los resultados (Ej. st.dataframe o tarjetas)
 
-# 2. Botón disparador del Dialog (Ubicado en la barra superior al lado de Guardar)
-with col_btn: # Reutilizamos la columna de botones o creamos una nueva si es necesario
-    if st.button("🔔 Tareas (2)", use_container_width=True):
+# 4. Botones disparadores (Ubicados en la barra superior al lado de Guardar)
+# Dividimos col_btn en sub-columnas para acomodar los nuevos botones ordenadamente
+sub_col1, sub_col2, sub_col3 = col_btn.columns(3)
+        
+with sub_col1:
+    btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
+    espacio_spinner = st.empty()
+with sub_col2:
+    if st.button("🔔 Tareas", use_container_width=True):
         abrir_centro_tareas()
+with sub_col3:
+    if st.button("📖 Directorio", use_container_width=True):
+        abrir_directorio()
 
 # ==============================================================================
 # === [BLOQUE 4: CARGA Y PROCESAMIENTO DE DATOS (LAZY LOADING)] ===

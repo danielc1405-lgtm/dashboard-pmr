@@ -524,14 +524,20 @@ def abrir_centro_tareas():
     u_activo_clean = str(usuario_activo_real).strip().lower()
 
     import re
+    import unicodedata
     def coincide_usuario(u1, u2):
-        s1, s2 = str(u1).strip().lower(), str(u2).strip().lower()
-        if not s1 or not s2: return False
-        if s1 in s2 or s2 in s1: return True
-        c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
-        if c1 in c2 or c2 in c1: return True
-        palabras = [w for w in re.findall(r'[a-z0-9]+', s2) if len(w) >= 4]
-        return any(w in c1 for w in palabras)
+        try:
+            s1 = unicodedata.normalize('NFKD', str(u1)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
+            s2 = unicodedata.normalize('NFKD', str(u2)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
+            if not s1 or not s2: return False
+            c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
+            if c1 in c2 or c2 in c1: return True
+            
+            for i in range(len(c2) - 4):
+                if c2[i:i+5] in c1: return True
+            return False
+        except:
+            return False
 
     # --- TAB 1: BANDEJA DE ENTRADA ---
     with tabs_tareas[0]:
@@ -702,31 +708,36 @@ with col_btn_dir:
 @st.cache_data(ttl=60)
 def contar_tareas_pendientes(usuario):
     import re
+    import unicodedata
     def coincide_u(u1, u2):
-        s1, s2 = str(u1).strip().lower(), str(u2).strip().lower()
-        if not s1 or not s2: return False
-        if s1 in s2 or s2 in s1: return True
-        c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
-        if c1 in c2 or c2 in c1: return True
-        palabras = [w for w in re.findall(r'[a-z0-9]+', s2) if len(w) >= 4]
-        return any(w in c1 for w in palabras)
+        try:
+            # Limpieza de acentos y caracteres especiales
+            s1 = unicodedata.normalize('NFKD', str(u1)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
+            s2 = unicodedata.normalize('NFKD', str(u2)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
+            if not s1 or not s2: return False
+            c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
+            if c1 in c2 or c2 in c1: return True
+            
+            # Motor de coincidencia de apellidos (ventana de 5 letras)
+            for i in range(len(c2) - 4):
+                if c2[i:i+5] in c1: return True
+            return False
+        except:
+            return False
 
     try:
         doc = init_connection()
         datos = doc.worksheet("Gestor_Tareas").get_all_records()
         total_alertas = 0
         for d in datos:
-            rec = d.get('Receptor', d.get('Receptor:', ''))
-            emi = d.get('Emisor', d.get('Emisor:', ''))
+            rec = str(d.get('Receptor', d.get('Receptor:', '')))
+            emi = str(d.get('Emisor', d.get('Emisor:', '')))
             st_val = str(d.get('Status', d.get('Status:', ''))).strip().lower()
             
-            # 🔔 Alerta 1: Tareas pendientes que me enviaron a mí
             if coincide_u(usuario, rec) and st_val == 'pendiente':
                 total_alertas += 1
-            # 🔔 Alerta 2: Respuestas recibidas de mis solicitudes esperando que las finalice
             elif coincide_u(usuario, emi) and st_val == 'resuelto':
                 total_alertas += 1
-                
         return total_alertas
     except:
         return 0

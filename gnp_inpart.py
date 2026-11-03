@@ -339,12 +339,7 @@ def automatizar_inpart():
 
                                 vin_elem = page.locator("span[id*='lblVIN']")
                                 vin_texto_raw = vin_elem.first.inner_text().strip() if vin_elem.count() > 0 else ""
-                                if '/' in vin_texto_raw:
-                                    vin_texto = vin_texto_raw.split('/')[0].strip()
-                                    origen_texto = vin_texto_raw.split('/')[1].strip()
-                                else:
-                                    vin_texto = vin_texto_raw
-                                    origen_texto = "Original"
+                                vin_texto = vin_texto_raw.split('/')[0].strip() if '/' in vin_texto_raw else vin_texto_raw
 
                                 anio_elem = page.locator("span[id*='lblYearModel']")
                                 anio_texto = anio_elem.first.inner_text().strip() if anio_elem.count() > 0 else ""
@@ -361,10 +356,13 @@ def automatizar_inpart():
                                     for item_fila in filas_items:
                                         desc_elem_pieza = item_fila.locator("span[id*='lblPartDescription_']")
                                         precio_elem_pieza = item_fila.locator("span[id*='lblItemPrice_']")
+                                        origen_elem_pieza = item_fila.locator("span[id*='lblPartType_']")
                                         
                                         if desc_elem_pieza.count() > 0:
                                             desc_pieza = desc_elem_pieza.first.inner_text().strip()
                                             precio_pieza = precio_elem_pieza.first.inner_text().strip() if precio_elem_pieza.count() > 0 else "0"
+                                            # Extracción estricta: Solo pone lo que encuentre en el portal. Cero improvisaciones.
+                                            origen_texto = origen_elem_pieza.first.inner_text().strip() if origen_elem_pieza.count() > 0 else ""
                                             if not desc_pieza or desc_pieza == "0": continue
                                             
                                             partidas_extraidas.append({

@@ -473,6 +473,7 @@ with col_btn_pop:
 
 @st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
 def abrir_centro_tareas():
+    lista_siniestros = []
     doc = init_connection()
     # 1. Cargar Usuarios Reales de la Base
     try:

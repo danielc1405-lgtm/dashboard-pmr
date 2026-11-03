@@ -928,23 +928,48 @@ else:
     df_trabajo = df_proceso = df_recoleccion_total = pd.DataFrame()
 
 # ==============================================================================
-# === MÁSCARA COMERCIAL (MODO DEMO) ===
+# === MÁSCARA COMERCIAL EXTREMA (MODO DEMO / INTERCEPTOR VISUAL) ===
 # ==============================================================================
 if rol_activo == 'DEMO':
-    def enmascarar_dinero(df):
-        if not df.empty:
-            cols_dinero = [c for c in df.columns if any(p in str(c).upper() for p in ["PRECIO", "COSTO"])]
-            for c in cols_dinero:
-                df[c] = "$ ***"
-        return df
+    import re
+    import pandas as pd
+    import streamlit as st
     
-    df_completo = enmascarar_dinero(df_completo)
-    df_trabajo = enmascarar_dinero(df_trabajo)
-    df_proceso = enmascarar_dinero(df_proceso)
-    df_trabajo_completo = enmascarar_dinero(df_trabajo_completo)
-    df_recoleccion_total = enmascarar_dinero(df_recoleccion_total)
-    if not df_compras.empty:
-        df_compras = enmascarar_dinero(df_compras)
+    # 1. Guardamos las funciones originales de dibujo de Streamlit para no perderlas
+    _original_dataframe = st.dataframe
+    _original_data_editor = st.data_editor
+    _original_table = st.table
+    _original_metric = st.metric
+    
+    # 2. Función que detecta y oculta dinero en cualquier DataFrame
+    def enmascarar_df_extremo(df):
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            df_oculto = df.copy()
+            
+            # A. Ocultar por nombre de columna (Finanzas y Operaciones)
+            palabras_dinero = ["PRECIO", "COSTO", "IMPORTE", "TOTAL", "ASIGNADO", "PROCESO", "CONCRETADO", "PDD", "PT", "CANCELADO", "ACUMULADO"]
+            for c in df_oculto.columns:
+                if any(p in str(c).upper() for p in palabras_dinero):
+                    df_oculto[c] = "$ ***"
+                    
+            # B. Ocultar por Formato (Busca cualquier celda que ya esté formateada como "$ 1,500.00")
+            df_oculto = df_oculto.replace(to_replace=r'^.*\$\s*[\d\.,]+.*$', value='$ ***', regex=True)
+            return df_oculto
+        return df
+
+    # 3. Función que detecta dinero en las Tarjetas (Métricas individuales)
+    def enmascarar_metric_extremo(label, value, delta=None, *args, **kwargs):
+        if re.search(r'\$\s*[\d\.,]+', str(value)):
+            value = "$ ***"
+        if delta is not None and re.search(r'\$\s*[\d\.,]+', str(delta)):
+            delta = "$ ***"
+        return _original_metric(label, value, delta, *args, **kwargs)
+
+    # 4. EMBOSCADA: Reemplazamos las funciones de Streamlit temporalmente
+    st.dataframe = lambda df, *args, **kwargs: _original_dataframe(enmascarar_df_extremo(df), *args, **kwargs)
+    st.data_editor = lambda df, *args, **kwargs: _original_data_editor(enmascarar_df_extremo(df), *args, **kwargs)
+    st.table = lambda df, *args, **kwargs: _original_table(enmascarar_df_extremo(df), *args, **kwargs)
+    st.metric = enmascarar_metric_extremo
 
 # ==============================================================================
 # === [BLOQUE 5: NOTIFICACIONES Y BANDEJA PDF] ===

@@ -517,11 +517,21 @@ def abrir_centro_tareas():
 
     tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
 
+    # Limpieza de espacios en columnas de la hoja
+    if not df_tareas.empty:
+        df_tareas.columns = [str(c).strip() for c in df_tareas.columns]
+
+    u_activo_clean = str(usuario_activo_real).strip().lower()
+
     # --- TAB 1: BANDEJA DE ENTRADA ---
     with tabs_tareas[0]:
         st.subheader("Tareas Asignadas a Mí")
         if not df_tareas.empty and 'Receptor' in df_tareas.columns:
-            mis_pendientes = df_tareas[(df_tareas['Receptor'].astype(str).str.lower() == usuario_activo_real.lower()) & (df_tareas['Status'].astype(str).str.lower() == 'pendiente')]
+            # Coincidencia flexible sin importar espacios o mayúsculas
+            mis_pendientes = df_tareas[
+                (df_tareas['Receptor'].astype(str).str.strip().str.lower() == u_activo_clean) & 
+                (df_tareas['Status'].astype(str).str.strip().str.lower() == 'pendiente')
+            ]
             if not mis_pendientes.empty:
                 for idx, row in mis_pendientes.iterrows():
                     with st.container(border=True):
@@ -534,7 +544,25 @@ def abrir_centro_tareas():
                             st.success("Tarea completada.")
                             st.rerun()
             else:
-                st.success("No tienes tareas pendientes por el momento.")
+                st.info("No tienes tareas pendientes asignadas por el momento.")
+        else:
+            st.info("No hay tareas registradas en el sistema.")
+
+    # --- TAB 2: MIS SOLICITUDES (ENVIADAS) ---
+    with tabs_tareas[1]:
+        st.subheader("Tareas que he Solicitado")
+        if not df_tareas.empty and 'Emisor' in df_tareas.columns:
+            # Compara si el ID de usuario o el Nombre coinciden parcialmente
+            mis_enviados = df_tareas[
+                df_tareas['Emisor'].astype(str).str.strip().str.lower().apply(
+                    lambda x: u_activo_clean in x or x in u_activo_clean
+                )
+            ]
+            if not mis_enviados.empty:
+                cols_mostrar = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status'] if c in mis_enviados.columns]
+                st.dataframe(mis_enviados[cols_mostrar], hide_index=True, use_container_width=True)
+            else:
+                st.info("No has enviado solicitudes aún con este usuario.")
         else:
             st.info("No hay tareas registradas en el sistema.")
 

@@ -473,97 +473,116 @@ with col_btn_pop:
 
 @st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
 def abrir_centro_tareas():
-    lista_siniestros = []
     doc = init_connection()
-    
+    usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
+
+    # 1. Extraer Usuarios
     try:
         ws_usuarios = doc.worksheet("Usuarios")
-        datos_u = ws_usuarios.col_values(1)
-        usuarios_reales = []
-        for u in datos_u[1:]:
-            u_limpio = str(u).strip()
-            if u_limpio and u_limpio.lower() != "nan" and u_limpio not in usuarios_reales:
-                usuarios_reales.append(u_limpio)
-    except Exception:
+        usuarios_reales = [str(u).strip() for u in ws_usuarios.col_values(1)[1:] if str(u).strip().lower() != "nan" and str(u).strip()]
+    except:
         usuarios_reales = []
 
+    # 2. Extraer Tareas (Gestor_Tareas)
+    try:
+        ws_tareas = doc.worksheet("Gestor_Tareas")
+        datos_tareas = ws_tareas.get_all_records()
+        df_tareas = pd.DataFrame(datos_tareas)
+    except:
+        df_tareas = pd.DataFrame()
+
+    # 3. Extraer Siniestros y Refacciones (BD_UNIFICADA)
     try:
         ws_uni = doc.worksheet("BD_UNIFICADA")
         datos_uni = ws_uni.get_all_values()
-        lista_siniestros = []
-        if len(datos_uni) > 1:
-            for fila in datos_uni[1:]:
-                if len(fila) > 6:
-                    sin = str(fila[1]).strip()
-                    veh = str(fila[6]).strip()
-                    if sin and sin.lower() != "nan":
-                        item = f"{sin} | {veh}" if veh else sin
-                        if item not in lista_siniestros:
-                            lista_siniestros.append(item)
-    except Exception:
-        lista_siniestros = []
+        df_uni_local = pd.DataFrame(datos_uni[1:], columns=[str(h).strip() for h in datos_uni[0]])
         
-    df_activos = pd.DataFrame()
+        col_sin_loc = next((c for c in df_uni_local.columns if "SINIESTRO" in str(c).upper()), None)
+        col_marca_loc = next((c for c in df_uni_local.columns if "MARCA" in str(c).upper()), None)
+        col_mod_loc = next((c for c in df_uni_local.columns if "MODELO" in str(c).upper()), None)
+        col_desc_loc = next((c for c in df_uni_local.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+
+        lista_siniestros = []
+        if col_sin_loc and col_marca_loc and col_mod_loc:
+            df_unicos = df_uni_local.drop_duplicates(subset=[col_sin_loc])
+            for _, r in df_unicos.iterrows():
+                sin_val = str(r[col_sin_loc]).strip()
+                mar_val = str(r[col_marca_loc]).strip()
+                mod_val = str(r[col_mod_loc]).strip()
+                if sin_val:
+                    lista_siniestros.append(f"{sin_val} | {mar_val} {mod_val}")
+    except:
+        df_uni_local = pd.DataFrame()
+        lista_siniestros = []
 
     tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
-        
+
+    # --- TAB 1: BANDEJA DE ENTRADA ---
     with tabs_tareas[0]:
         st.subheader("Tareas Asignadas a Mí")
-        st.info("No tienes tareas pendientes por el momento.")
+        if not df_tareas.empty and 'Receptor' in df_tareas.columns:
+            mis_pendientes = df_tareas[(df_tareas['Receptor'].astype(str).str.lower() == usuario_activo_real.lower()) & (df_tareas['Status'].astype(str).str.lower() == 'pendiente')]
+            if not mis_pendientes.empty:
+                for idx, row in mis_pendientes.iterrows():
+                    with st.container(border=True):
+                        col_t1, col_t2 = st.columns([3.5, 1])
+                        col_t1.markdown(f"**De:** 👤 {row.get('Emisor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
+                        col_t1.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
+                        col_t1.info(f"**Mensaje:** {row.get('Instruccion', '')}")
+                        if col_t2.button("✅ Marcar Resuelto", key=f"res_{idx}", use_container_width=True):
+                            ws_tareas.update_cell(idx + 2, df_tareas.columns.get_loc('Status') + 1, "Resuelto")
+                            st.success("Tarea completada.")
+                            st.rerun()
+            else:
+                st.success("No tienes tareas pendientes por el momento.")
+        else:
+            st.info("No hay tareas registradas en el sistema.")
 
+    # --- TAB 2: MIS SOLICITUDES (ENVIADAS) ---
     with tabs_tareas[1]:
         st.subheader("Tareas que he Solicitado")
-        st.info("No tienes solicitudes activas.")
+        if not df_tareas.empty and 'Emisor' in df_tareas.columns:
+            mis_enviados = df_tareas[df_tareas['Emisor'].astype(str).str.lower() == usuario_activo_real.lower()]
+            if not mis_enviados.empty:
+                st.dataframe(mis_enviados[['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status']], hide_index=True, use_container_width=True)
+            else:
+                st.info("No has enviado solicitudes.")
 
+    # --- TAB 3: NUEVA TAREA ---
     with tabs_tareas[2]:
         st.subheader("Asignar Nueva Tarea")
         col_nueva_1, col_nueva_2 = st.columns(2)
         with col_nueva_1:
             usuario_destino = st.selectbox("Asignar a:", ["Seleccionar..."] + usuarios_reales)
         with col_nueva_2:
-            opciones_siniestros = ["Seleccionar..."]
-            if isinstance(lista_siniestros, list) and len(lista_siniestros) > 0:
-                opciones_siniestros.extend(lista_siniestros)
-            
-            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo:", opciones_siniestros)
-                
-        if siniestro_seleccionado != "Seleccionar..." and not df_activos.empty:
-            siniestro_id = siniestro_seleccionado.split(" | ")[0].strip()
-            col_desc_real = "DESCRIPCIÓN" if "DESCRIPCIÓN" in df_activos.columns else ("DESCRIPCION" if "DESCRIPCION" in df_activos.columns else "REFACCION")
-            piezas_del_siniestro = df_activos[df_activos[col_sin].astype(str).str.strip() == siniestro_id][col_desc_real].dropna().unique().tolist()
-            st.multiselect("Selecciona la(s) Pieza(s) a revisar:", piezas_del_siniestro)
-                
+            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo:", ["Seleccionar...", "General"] + lista_siniestros)
+        
+        piezas_seleccionadas = []
+        if siniestro_seleccionado not in ["Seleccionar...", "General"] and not df_uni_local.empty and col_desc_loc:
+            id_sin_puro = siniestro_seleccionado.split(" | ")[0].strip()
+            piezas_del_siniestro = df_uni_local[df_uni_local[col_sin_loc].astype(str).str.strip() == id_sin_puro][col_desc_loc].dropna().unique().tolist()
+            piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro)
+
         instruccion_nueva = st.text_area("Instrucción o Mensaje:")
-                
+        
         if st.button("📤 Enviar Tarea", type="primary"):
             if usuario_destino != "Seleccionar..." and instruccion_nueva.strip():
+                import datetime
+                import uuid
+                id_tarea = str(uuid.uuid4().hex)[:6].upper()
+                fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                
+                ref_final = siniestro_seleccionado
+                if piezas_seleccionadas:
+                    ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
+
+                nueva_fila = [id_tarea, fecha_hoy, usuario_activo_real, usuario_destino, ref_final, instruccion_nueva.strip(), "Pendiente", ""]
                 try:
-                    import datetime
-                    import uuid
-                    
-                    id_tarea = str(uuid.uuid4().hex)[:6].upper()
-                    fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                    emisor = st.session_state.get('usuario', 'Usuario Actual')
-                    vehiculo_final = siniestro_seleccionado if siniestro_seleccionado != "Seleccionar..." else "General"
-                    
-                    nueva_fila = [
-                        id_tarea,          # A: ID_Tarea
-                        fecha_hoy,         # B: Fecha_Creacion
-                        emisor,            # C: Emisor
-                        usuario_destino,   # D: Receptor
-                        vehiculo_final,    # E: Siniestro / Taller / Piezas
-                        instruccion_nueva, # F: Instruccion
-                        "Pendiente",       # G: Status
-                        ""                 # H: Respuesta
-                    ]
-                    
-                    ws_tareas = doc.worksheet("Gestor_Tareas")
                     ws_tareas.append_row(nueva_fila)
-                    
                     st.success(f"✅ Tarea enviada a {usuario_destino}")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error al guardar en Google Sheets: {e}")
+                    st.error(f"❌ Error al guardar: {e}")
             else:
                 st.warning("⚠️ Faltan datos obligatorios (Usuario e Instrucción).")
 
@@ -610,48 +629,25 @@ with col_btn_dir:
     if st.button("📖 Directorio", use_container_width=True):
         abrir_directorio()
 
+@st.cache_data(ttl=60)
+def contar_tareas_pendientes(usuario):
+    try:
+        doc = init_connection()
+        datos = doc.worksheet("Gestor_Tareas").get_all_records()
+        return sum(1 for d in datos if str(d.get('Receptor', '')).lower() == usuario.lower() and str(d.get('Status', '')).lower() == 'pendiente')
+    except:
+        return 0
+
+pendientes_badge = contar_tareas_pendientes(usuario_activo)
+label_btn_tareas = f"🔔 Tareas ({pendientes_badge})" if pendientes_badge > 0 else "🔔 Tareas"
+
 with col_btn_tar:
-    if st.button("🔔 Tareas", use_container_width=True):
+    if st.button(label_btn_tareas, use_container_width=True):
         abrir_centro_tareas()
 
 with col_btn_gua:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
     espacio_spinner = st.empty()
-
-# ==============================================================================
-# === [SISTEMA DE TAREAS Y MENSAJERÍA INTERNA (POPUP)] ===
-# ==============================================================================
-        
-# 1. Preparación de datos dinámicos (Siniestros y Usuarios)
-# Ajusta "Siniestro", "Vehiculo", etc., a los nombres exactos de tus columnas en tu DataFrame principal
-try:
-    if not df.empty:
-        # Crea una lista concatenando los datos relevantes para el selectbox
-        lista_siniestros_dinamicos = df.apply(
-            lambda row: f"{row.get('Siniestro', '')} | {row.get('Vehiculo', '')} | {row.get('Modelo', '')}", 
-            axis=1
-        ).drop_duplicates().tolist()
-    else:
-        lista_siniestros_dinamicos = []
-except Exception:
-    lista_siniestros_dinamicos = []
-
-lista_usuarios_activos = [
-    "Marco", "Daniel", "Diana", "Operaciones", "Ventas", "Compras", "Administración"
-]
-
-# 2. Definición del Dialog (Ventana Emergente de Tareas)
-@st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
-
-# 3. Definición del Dialog (Ventana Emergente del Directorio)
-@st.dialog("📖 Directorio Operativo", width="large")
-def abrir_directorio():
-    st.subheader("Buscador de Contactos")
-    busqueda_dir = st.text_input("🔍 Buscar por Nombre, Taller o Proveedor:", placeholder="Ej. Taller Bajio, Autopartes Monterrey...")
-            
-    if busqueda_dir:
-        st.info(f"Buscando '{busqueda_dir}' en la base de datos de contactos...")
-        # Aquí irá la lógica para filtrar tu DataFrame de directorio y mostrar los resultados
 
 
 # ==============================================================================
@@ -826,6 +822,25 @@ if not df_trabajo_completo.empty:
 else:
     col_id = col_taller = col_marca = col_modelo = col_desc = col_origen = col_cant = col_precio = col_estatus = col_vencimiento = col_asignacion = col_fecha_confi = col_paqueteria = col_guia = col_estatus_envio = col_remision = col_comentarios = col_aseg = None
     df_trabajo = df_proceso = df_recoleccion_total = pd.DataFrame()
+
+# ==============================================================================
+# === MÁSCARA COMERCIAL (MODO DEMO) ===
+# ==============================================================================
+if rol_activo == 'DEMO':
+    def enmascarar_dinero(df):
+        if not df.empty:
+            cols_dinero = [c for c in df.columns if any(p in str(c).upper() for p in ["PRECIO", "COSTO"])]
+            for c in cols_dinero:
+                df[c] = "$ ***"
+        return df
+    
+    df_completo = enmascarar_dinero(df_completo)
+    df_trabajo = enmascarar_dinero(df_trabajo)
+    df_proceso = enmascarar_dinero(df_proceso)
+    df_trabajo_completo = enmascarar_dinero(df_trabajo_completo)
+    df_recoleccion_total = enmascarar_dinero(df_recoleccion_total)
+    if not df_compras.empty:
+        df_compras = enmascarar_dinero(df_compras)
 
 # ==============================================================================
 # === [BLOQUE 5: NOTIFICACIONES Y BANDEJA PDF] ===

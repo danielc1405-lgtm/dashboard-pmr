@@ -475,7 +475,7 @@ with col_btn_pop:
 def abrir_centro_tareas():
     lista_siniestros = []
     doc = init_connection()
-    try:
+try:
             ws_usuarios = doc.worksheet("Usuarios")
             datos_u = ws_usuarios.col_values(1)
             usuarios_reales = []

@@ -579,12 +579,43 @@ def abrir_centro_tareas():
                 )
             ]
             if not mis_enviados.empty:
-                # Incluye la columna 'Respuesta' en la vista
-                cols_mostrar = [
-                    c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status', 'Respuesta'] 
-                    if c in mis_enviados.columns
-                ]
-                st.dataframe(mis_enviados[cols_mostrar], hide_index=True, use_container_width=True)
+                # Clasificación de tareas por su estatus
+                para_cerrar = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'resuelto']
+                en_espera = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'pendiente']
+                finalizadas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'finalizado']
+
+                # 1. Tareas con respuesta recibida (Esperando tu visto bueno)
+                if not para_cerrar.empty:
+                    st.markdown("### 💬 Respuestas Recibidas (Por Confirmar / Cierre)")
+                    for idx, row in para_cerrar.iterrows():
+                        with st.container(border=True):
+                            col_c1, col_c2 = st.columns([3.5, 1])
+                            col_c1.markdown(f"**Para:** 👤 {row.get('Receptor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
+                            col_c1.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
+                            col_c1.markdown(f"**Tu Instrucción:** {row.get('Instruccion', '')}")
+                            col_c1.success(f"💬 **Respuesta de {row.get('Receptor', 'N/A')}:** {row.get('Respuesta', 'Sin comentario')}")
+                            
+                            st.write("")
+                            if col_c2.button("🏁 Finalizar Tarea", key=f"fin_{idx}", use_container_width=True):
+                                row_num = idx + 2 # Fila en Google Sheets
+                                if 'Status' in df_tareas.columns:
+                                    col_status_idx = df_tareas.columns.get_loc('Status') + 1
+                                    ws_tareas.update_cell(row_num, col_status_idx, "Finalizado")
+                                st.success("Tarea finalizada y archivada correctamente.")
+                                st.rerun()
+
+                # 2. Tareas enviadas que aún no tienen respuesta
+                if not en_espera.empty:
+                    st.markdown("### ⏳ En Espera de Respuesta")
+                    cols_mostrar_esp = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status'] if c in en_espera.columns]
+                    st.dataframe(en_espera[cols_mostrar_esp], hide_index=True, use_container_width=True)
+
+                # 3. Historial de tareas cerradas/finalizadas
+                if not finalizadas.empty:
+                    with st.expander("📁 Ver Historial de Tareas Finalizadas"):
+                        cols_mostrar_fin = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta', 'Status'] if c in finalizadas.columns]
+                        st.dataframe(finalizadas[cols_mostrar_fin], hide_index=True, use_container_width=True)
+
             else:
                 st.info("No has enviado solicitudes aún con este usuario.")
         else:

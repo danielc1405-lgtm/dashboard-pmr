@@ -438,8 +438,8 @@ def abrir_popup_monitor():
             else:
                 st.warning("No hay datos en la base principal para generar el reporte.")
 
-# El parámetro vertical_alignment="center" alinea todo a la misma altura (6 columnas ahora)
-col_logo, col_menu, col_aseg, col_btn_ref, col_btn_pop, col_btn = st.columns([1.2, 5.0, 1.4, 0.4, 0.4, 1.2], vertical_alignment="center")
+# El parámetro vertical_alignment="center" alinea todo a la misma altura en una sola fila estructurada.
+col_logo, col_menu, col_aseg, col_btn_ref, col_btn_pop, col_btn_dir, col_btn_tar, col_btn_gua = st.columns([1.2, 4.3, 1.4, 0.3, 0.3, 0.9, 0.9, 1.1], vertical_alignment="center")
 
 with col_logo:
     try: 
@@ -467,7 +467,126 @@ with col_btn_pop:
     if st.button("🖥️", help="Abrir Pop-up con Estatus Crítico y Consola Matrix", use_container_width=True):
         abrir_popup_monitor()
 
-with col_btn:
+# ==============================================================================
+# === [SISTEMA DE TAREAS Y DIRECTORIO FUNCIONALES] ===
+# ==============================================================================
+
+@st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
+def abrir_centro_tareas():
+    doc = init_connection()
+    # 1. Cargar Usuarios Reales de la Base
+    try:
+        ws_usuarios = doc.worksheet("Usuarios")
+        df_u = pd.DataFrame(ws_usuarios.get_all_records())
+        usuarios_reales = df_u['Nombre Completo'].dropna().unique().tolist()
+    except Exception:
+        usuarios_reales = ["Error cargando usuarios"]
+
+    # 2. Cargar Siniestros Reales de la Base (Formato Panel Operativo)
+    try:
+        ws_uni = doc.worksheet("BD_UNIFICADA")
+        df_uni = pd.DataFrame(ws_uni.get_all_records())
+        
+        def armar_vehiculo_tarea(r):
+            m = str(r.get('MARCA', '')).strip().upper()
+            mod = str(r.get('MODELO', '')).strip().upper()
+            veh = mod if mod.startswith(m) else f"{m} {mod}".strip()
+            ano = str(r.get('AÑO', r.get('ANO', ''))).strip()
+            if ano and ano not in ['NAN', 'NONE', '']: veh += f" | {ano}"
+            return veh
+
+        df_uni['Vehiculo'] = df_uni.apply(armar_vehiculo_tarea, axis=1)
+        # Buscar el nombre exacto de la columna de siniestros
+        col_sin = "PEDIDO / SINIESTRO" if "PEDIDO / SINIESTRO" in df_uni.columns else "SINIESTRO"
+        df_uni['Filtro_Siniestro'] = df_uni[col_sin].astype(str).str.strip() + " | " + df_uni['Vehiculo']
+        
+        # Filtramos excluyendo los que ya están cerrados
+        df_activos = df_uni[~df_uni['ESTATUS'].astype(str).str.upper().isin(["CANCELADO", "FACTURADO", "RECIBIDO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS"])].copy()
+        lista_siniestros = sorted(df_activos['Filtro_Siniestro'].dropna().unique().tolist())
+    except Exception:
+        lista_siniestros = ["Error cargando siniestros"]
+        df_activos = pd.DataFrame()
+
+    tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
+            
+    with tabs_tareas[0]:
+        st.subheader("Tareas Asignadas a Mí")
+        st.info("No tienes tareas pendientes por el momento.")
+
+    with tabs_tareas[1]:
+        st.subheader("Tareas que he Solicitado")
+        st.info("No tienes solicitudes activas.")
+
+    with tabs_tareas[2]:
+        st.subheader("Asignar Nueva Tarea")
+        col_nueva_1, col_nueva_2 = st.columns(2)
+        with col_nueva_1:
+            usuario_destino = st.selectbox("Asignar a:", ["Seleccionar..."] + usuarios_reales)
+        with col_nueva_2:
+            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo:", ["Seleccionar..."] + lista_siniestros)
+                
+        if siniestro_seleccionado != "Seleccionar..." and not df_activos.empty:
+            siniestro_id = siniestro_seleccionado.split(" | ")[0].strip()
+            col_desc_real = "DESCRIPCIÓN" if "DESCRIPCIÓN" in df_activos.columns else ("DESCRIPCION" if "DESCRIPCION" in df_activos.columns else "REFACCION")
+            piezas_del_siniestro = df_activos[df_activos[col_sin].astype(str).str.strip() == siniestro_id][col_desc_real].dropna().unique().tolist()
+            st.multiselect("Selecciona la(s) Pieza(s) a revisar:", piezas_del_siniestro)
+                
+        instruccion_nueva = st.text_area("Instrucción o Mensaje:")
+                
+        if st.button("📤 Enviar Tarea", type="primary"):
+            if usuario_destino != "Seleccionar..." and instruccion_nueva:
+                st.success(f"Tarea enviada a {usuario_destino}")
+            else:
+                st.warning("Faltan datos obligatorios (Usuario e Instrucción).")
+
+@st.dialog("📖 Directorio Operativo", width="large")
+def abrir_directorio():
+    st.subheader("Buscador de Contactos")
+    busqueda_dir = st.text_input("🔍 Buscar por Nombre, Taller o Proveedor:", placeholder="Ej. Taller Bajio, Autopartes Monterrey...")
+            
+    if busqueda_dir:
+        doc = init_connection()
+        encontrados = 0
+        
+        # Búsqueda real en BD_TALLERES
+        try:
+            ws_t = doc.worksheet("BD_TALLERES")
+            df_t = pd.DataFrame(ws_t.get_all_records())
+            mask_t = df_t.astype(str).apply(lambda row: row.str.contains(busqueda_dir, case=False, na=False)).any(axis=1)
+            res_t = df_t[mask_t]
+            if not res_t.empty:
+                st.markdown("#### 🏢 Resultados en Talleres (CDR)")
+                st.dataframe(res_t, hide_index=True, use_container_width=True)
+                encontrados += len(res_t)
+        except Exception:
+            pass
+
+        # Búsqueda real en BD_PROVEEDORES
+        try:
+            ws_p = doc.worksheet("BD_PROVEEDORES")
+            df_p = pd.DataFrame(ws_p.get_all_records())
+            mask_p = df_p.astype(str).apply(lambda row: row.str.contains(busqueda_dir, case=False, na=False)).any(axis=1)
+            res_p = df_p[mask_p]
+            if not res_p.empty:
+                st.markdown("#### 📦 Resultados en Proveedores")
+                st.dataframe(res_p, hide_index=True, use_container_width=True)
+                encontrados += len(res_p)
+        except Exception:
+            pass
+
+        if encontrados == 0:
+            st.warning(f"No se encontraron coincidencias para '{busqueda_dir}'.")
+
+# Inyección de los botones directamente en las columnas declaradas arriba
+with col_btn_dir:
+    if st.button("📖 Directorio", use_container_width=True):
+        abrir_directorio()
+
+with col_btn_tar:
+    if st.button("🔔 Tareas", use_container_width=True):
+        abrir_centro_tareas()
+
+with col_btn_gua:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
     espacio_spinner = st.empty()
 

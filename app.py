@@ -566,16 +566,6 @@ def abrir_centro_tareas():
         else:
             st.info("No hay tareas registradas en el sistema.")
 
-    # --- TAB 2: MIS SOLICITUDES (ENVIADAS) ---
-    with tabs_tareas[1]:
-        st.subheader("Tareas que he Solicitado")
-        if not df_tareas.empty and 'Emisor' in df_tareas.columns:
-            mis_enviados = df_tareas[df_tareas['Emisor'].astype(str).str.lower() == usuario_activo_real.lower()]
-            if not mis_enviados.empty:
-                st.dataframe(mis_enviados[['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status']], hide_index=True, use_container_width=True)
-            else:
-                st.info("No has enviado solicitudes.")
-
     # --- TAB 3: NUEVA TAREA ---
     with tabs_tareas[2]:
         st.subheader("Asignar Nueva Tarea")

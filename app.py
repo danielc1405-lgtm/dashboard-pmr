@@ -523,13 +523,23 @@ def abrir_centro_tareas():
 
     u_activo_clean = str(usuario_activo_real).strip().lower()
 
+    import re
+    def coincide_usuario(u1, u2):
+        s1, s2 = str(u1).strip().lower(), str(u2).strip().lower()
+        if not s1 or not s2: return False
+        if s1 in s2 or s2 in s1: return True
+        c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
+        if c1 in c2 or c2 in c1: return True
+        palabras = [w for w in re.findall(r'[a-z0-9]+', s2) if len(w) >= 4]
+        return any(w in c1 for w in palabras)
+
     # --- TAB 1: BANDEJA DE ENTRADA ---
     with tabs_tareas[0]:
         st.subheader("Tareas Asignadas a Mí")
         if not df_tareas.empty and 'Receptor' in df_tareas.columns:
+            # Filtro inteligente de usuario y estatus pendiente
             mis_pendientes = df_tareas[
-                (df_tareas['Receptor'].astype(str).str.strip().str.lower().apply(lambda x: u_activo_clean in x or x in u_activo_clean)) & 
-                (df_tareas['Status'].astype(str).str.strip().str.lower() == 'pendiente')
+                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Receptor', '')) and str(r.get('Status', '')).strip().lower() == 'pendiente', axis=1)
             ]
             if not mis_pendientes.empty:
                 for idx, row in mis_pendientes.iterrows():
@@ -538,7 +548,6 @@ def abrir_centro_tareas():
                         st.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
                         st.info(f"**Mensaje:** {row.get('Instruccion', '')}")
                         
-                        # Campo de texto para ingresar respuesta + Botón de resolver
                         col_r1, col_r2 = st.columns([3, 1])
                         with col_r1:
                             txt_respuesta = st.text_input(
@@ -550,18 +559,11 @@ def abrir_centro_tareas():
                             st.write("")
                             st.write("")
                             if st.button("✅ Marcar Resuelto", key=f"res_{idx}", use_container_width=True):
-                                row_num = idx + 2 # Fila correspondiente en Google Sheets
-                                
-                                # 1. Guardar Estatus como Resuelto
+                                row_num = idx + 2
                                 if 'Status' in df_tareas.columns:
-                                    col_status_idx = df_tareas.columns.get_loc('Status') + 1
-                                    ws_tareas.update_cell(row_num, col_status_idx, "Resuelto")
-                                
-                                # 2. Guardar Comentario en la columna Respuesta
+                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Resuelto")
                                 if 'Respuesta' in df_tareas.columns:
-                                    col_resp_idx = df_tareas.columns.get_loc('Respuesta') + 1
-                                    ws_tareas.update_cell(row_num, col_resp_idx, txt_respuesta.strip())
-                                
+                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Respuesta') + 1, txt_respuesta.strip())
                                 st.success("Tarea resuelta y respuesta guardada correctamente.")
                                 st.rerun()
             else:
@@ -574,17 +576,14 @@ def abrir_centro_tareas():
         st.subheader("Tareas que he Solicitado")
         if not df_tareas.empty and 'Emisor' in df_tareas.columns:
             mis_enviados = df_tareas[
-                df_tareas['Emisor'].astype(str).str.strip().str.lower().apply(
-                    lambda x: u_activo_clean in x or x in u_activo_clean
-                )
+                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Emisor', '')), axis=1)
             ]
             if not mis_enviados.empty:
-                # Clasificación de tareas por su estatus
                 para_cerrar = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'resuelto']
                 en_espera = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'pendiente']
                 finalizadas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'finalizado']
 
-                # 1. Tareas con respuesta recibida (Esperando tu visto bueno)
+                # 1. Respuestas listas para confirmar / finalizar
                 if not para_cerrar.empty:
                     st.markdown("### 💬 Respuestas Recibidas (Por Confirmar / Cierre)")
                     for idx, row in para_cerrar.iterrows():
@@ -597,25 +596,23 @@ def abrir_centro_tareas():
                             
                             st.write("")
                             if col_c2.button("🏁 Finalizar Tarea", key=f"fin_{idx}", use_container_width=True):
-                                row_num = idx + 2 # Fila en Google Sheets
+                                row_num = idx + 2
                                 if 'Status' in df_tareas.columns:
-                                    col_status_idx = df_tareas.columns.get_loc('Status') + 1
-                                    ws_tareas.update_cell(row_num, col_status_idx, "Finalizado")
+                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Finalizado")
                                 st.success("Tarea finalizada y archivada correctamente.")
                                 st.rerun()
 
-                # 2. Tareas enviadas que aún no tienen respuesta
+                # 2. En espera
                 if not en_espera.empty:
                     st.markdown("### ⏳ En Espera de Respuesta")
-                    cols_mostrar_esp = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status'] if c in en_espera.columns]
-                    st.dataframe(en_espera[cols_mostrar_esp], hide_index=True, use_container_width=True)
+                    cols_esp = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status'] if c in en_espera.columns]
+                    st.dataframe(en_espera[cols_esp], hide_index=True, use_container_width=True)
 
-                # 3. Historial de tareas cerradas/finalizadas
+                # 3. Historial archivado
                 if not finalizadas.empty:
                     with st.expander("📁 Ver Historial de Tareas Finalizadas"):
-                        cols_mostrar_fin = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta', 'Status'] if c in finalizadas.columns]
-                        st.dataframe(finalizadas[cols_mostrar_fin], hide_index=True, use_container_width=True)
-
+                        cols_fin = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta', 'Status'] if c in finalizadas.columns]
+                        st.dataframe(finalizadas[cols_fin], hide_index=True, use_container_width=True)
             else:
                 st.info("No has enviado solicitudes aún con este usuario.")
         else:
@@ -704,10 +701,33 @@ with col_btn_dir:
 
 @st.cache_data(ttl=60)
 def contar_tareas_pendientes(usuario):
+    import re
+    def coincide_u(u1, u2):
+        s1, s2 = str(u1).strip().lower(), str(u2).strip().lower()
+        if not s1 or not s2: return False
+        if s1 in s2 or s2 in s1: return True
+        c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
+        if c1 in c2 or c2 in c1: return True
+        palabras = [w for w in re.findall(r'[a-z0-9]+', s2) if len(w) >= 4]
+        return any(w in c1 for w in palabras)
+
     try:
         doc = init_connection()
         datos = doc.worksheet("Gestor_Tareas").get_all_records()
-        return sum(1 for d in datos if str(d.get('Receptor', '')).lower() == usuario.lower() and str(d.get('Status', '')).lower() == 'pendiente')
+        total_alertas = 0
+        for d in datos:
+            rec = d.get('Receptor', d.get('Receptor:', ''))
+            emi = d.get('Emisor', d.get('Emisor:', ''))
+            st_val = str(d.get('Status', d.get('Status:', ''))).strip().lower()
+            
+            # 🔔 Alerta 1: Tareas pendientes que me enviaron a mí
+            if coincide_u(usuario, rec) and st_val == 'pendiente':
+                total_alertas += 1
+            # 🔔 Alerta 2: Respuestas recibidas de mis solicitudes esperando que las finalice
+            elif coincide_u(usuario, emi) and st_val == 'resuelto':
+                total_alertas += 1
+                
+        return total_alertas
     except:
         return 0
 

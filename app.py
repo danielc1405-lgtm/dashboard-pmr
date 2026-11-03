@@ -476,52 +476,30 @@ def abrir_centro_tareas():
     lista_siniestros = []
     doc = init_connection()
     try:
-        ws_usuarios = doc.worksheet("Usuarios")
-        datos_u = ws_usuarios.get_all_values() # Método a prueba de fallos de formato
-        if len(datos_u) > 1:
-            import pandas as pd
-            df_u = pd.DataFrame(datos_u[1:], columns=[str(c).strip().upper() for c in datos_u[0]])
-                
-            # Busca la columna "NOMBRE COMPLETO" o cualquier variación segura
-            col_nombre = next((c for c in df_u.columns if "NOMBRE" in c), None)
-                
-            if col_nombre:
-                usuarios_reales = df_u[col_nombre].astype(str).drop_duplicates().tolist()
-            else:
-                usuarios_reales = df_u.iloc[:, 0].astype(str).drop_duplicates().tolist()
-                    
-            usuarios_reales = [u for u in usuarios_reales if u.strip() and u.lower() != "nan" and u.lower() != "none"]
-        else:
+            ws_usuarios = doc.worksheet("Usuarios")
+            datos_u = ws_usuarios.col_values(1)
             usuarios_reales = []
-    except Exception as e:
-        print(f"Error crítico cargando usuarios: {e}")
-        usuarios_reales = []
+            for u in datos_u[1:]:
+                u_limpio = str(u).strip()
+                if u_limpio and u_limpio.lower() != "nan" and u_limpio not in usuarios_reales:
+                    usuarios_reales.append(u_limpio)
+        except Exception:
+            usuarios_reales = []
 
-    # 2. Cargar Siniestros Reales de la Base (Formato Panel Operativo)
         try:
             ws_uni = doc.worksheet("BD_UNIFICADA")
             datos_uni = ws_uni.get_all_values()
-            
+            lista_siniestros = []
             if len(datos_uni) > 1:
-                import pandas as pd
-                # Convertimos a DataFrame ignorando los nombres de encabezados para evitar fallos por saltos de línea
-                df_uni = pd.DataFrame(datos_uni[1:])
-                
-                # Extraemos directamente por posición de columna
-                # Índice 1 = Columna B (Pedido / Siniestro)
-                # Índice 6 = Columna G (Modelo / Vehículo)
-                siniestros = df_uni.iloc[:, 1].astype(str)
-                vehiculos = df_uni.iloc[:, 6].astype(str)
-                
-                lista_siniestros = (siniestros + " | " + vehiculos).drop_duplicates().tolist()
-                
-                # Limpieza de vacíos
-                lista_siniestros = [s for s in lista_siniestros if s.strip() and s != " | " and "nan" not in s.lower()]
-            else:
-                lista_siniestros = []
-                
-        except Exception as e:
-            print(f"Error cargando siniestros por posición: {e}")
+                for fila in datos_uni[1:]:
+                    if len(fila) > 6:
+                        sin = str(fila[1]).strip()
+                        veh = str(fila[6]).strip()
+                        if sin and sin.lower() != "nan":
+                            item = f"{sin} | {veh}" if veh else sin
+                            if item not in lista_siniestros:
+                                lista_siniestros.append(item)
+        except Exception:
             lista_siniestros = []
         df_activos = pd.DataFrame()
 

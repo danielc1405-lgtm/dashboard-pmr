@@ -550,6 +550,7 @@ with col_btn:
             if st.button("🔔 Tareas (2)", use_container_width=True):
                 abrir_centro_tareas()
 
+
 # ==============================================================================
 # === [BLOQUE 4: CARGA Y PROCESAMIENTO DE DATOS (LAZY LOADING)] ===
 # ==============================================================================

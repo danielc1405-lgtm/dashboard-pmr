@@ -515,16 +515,18 @@ def abrir_centro_tareas():
         df_uni_local = pd.DataFrame()
         lista_siniestros = []
 
-    tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
+    tabs_tareas = st.tabs(["📥 Bandeja de Entrada", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
 
     # Limpieza de espacios en columnas de la hoja
     if not df_tareas.empty:
         df_tareas.columns = [str(c).strip() for c in df_tareas.columns]
 
-    u_activo_clean = str(usuario_activo_real).strip().lower()
-
     import re
     import unicodedata
+    import datetime
+    import uuid
+    import time
+
     def coincide_usuario(u1, u2):
         try:
             s1 = unicodedata.normalize('NFKD', str(u1)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
@@ -532,52 +534,70 @@ def abrir_centro_tareas():
             if not s1 or not s2: return False
             c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
             if c1 in c2 or c2 in c1: return True
-            
             for i in range(len(c2) - 4):
                 if c2[i:i+5] in c1: return True
             return False
         except:
             return False
 
-    # --- TAB 1: BANDEJA DE ENTRADA ---
+    # --- FUNCIÓN: RENDERIZAR HISTORIAL ESTILO WHATSAPP ---
+    def renderizar_hilo_chat(row):
+        st.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')} | 📅 {row.get('Fecha_Creacion', '')}")
+        caja_chat = st.container(height=280)
+        with caja_chat:
+            # Mensaje Inicial (Emisor)
+            with st.chat_message("user", avatar="👤"):
+                st.markdown(f"**{row.get('Emisor', 'N/A')}:** {row.get('Instruccion', '')}")
+            
+            # Mensajes acumulados en Respuesta
+            historial = str(row.get('Respuesta', '')).strip()
+            if historial:
+                for linea in historial.split('\\n'):
+                    if linea.strip():
+                        # Diferenciador visual: verde para el usuario activo, gris para el resto
+                        avatar = "🟢" if usuario_activo_real.lower() in linea.lower() else "👤"
+                        with st.chat_message("assistant" if avatar == "🟢" else "user", avatar=avatar):
+                            st.markdown(linea)
+        return historial
+
+    # --- TAB 1: BANDEJA DE ENTRADA (CHATS ACTIVOS) ---
     with tabs_tareas[0]:
         st.subheader("Tareas Asignadas a Mí")
         if not df_tareas.empty and 'Receptor' in df_tareas.columns:
-            # Filtro inteligente de usuario y estatus pendiente
             mis_pendientes = df_tareas[
                 df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Receptor', '')) and str(r.get('Status', '')).strip().lower() == 'pendiente', axis=1)
             ]
             if not mis_pendientes.empty:
                 for idx, row in mis_pendientes.iterrows():
                     with st.container(border=True):
-                        st.markdown(f"**De:** 👤 {row.get('Emisor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
-                        st.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
-                        st.info(f"**Mensaje:** {row.get('Instruccion', '')}")
+                        historial_actual = renderizar_hilo_chat(row)
                         
-                        col_r1, col_r2 = st.columns([3, 1])
-                        with col_r1:
-                            txt_respuesta = st.text_input(
-                                "Respuesta / Comentario:", 
-                                key=f"resp_{idx}", 
-                                placeholder="Escribe aquí tu respuesta antes de finalizar..."
-                            )
-                        with col_r2:
-                            st.write("")
-                            st.write("")
-                            if st.button("✅ Marcar Resuelto", key=f"res_{idx}", use_container_width=True):
+                        col_in, col_btn1, col_btn2 = st.columns([3, 1, 1])
+                        with col_in:
+                            txt_respuesta = st.text_input("Mensaje", key=f"msg_in_{idx}", label_visibility="collapsed", placeholder="Escribe tu respuesta aquí...")
+                        with col_btn1:
+                            if st.button("📤 Enviar", key=f"env_in_{idx}", use_container_width=True):
+                                if txt_respuesta.strip():
+                                    ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+                                    nuevo_msj = f"[{ahora}] {usuario_activo_real}: {txt_respuesta.strip()}"
+                                    historial_nuevo = historial_actual + "\\n" + nuevo_msj if historial_actual else nuevo_msj
+                                    
+                                    row_num = idx + 2
+                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Respuesta') + 1, historial_nuevo)
+                                    st.rerun()
+                        with col_btn2:
+                            if st.button("✅ Resuelto", key=f"res_in_{idx}", use_container_width=True):
                                 row_num = idx + 2
-                                if 'Status' in df_tareas.columns:
-                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Resuelto")
-                                if 'Respuesta' in df_tareas.columns:
-                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Respuesta') + 1, txt_respuesta.strip())
-                                st.success("Tarea resuelta y respuesta guardada correctamente.")
+                                ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Resuelto")
+                                st.toast("Tarea resuelta")
+                                time.sleep(1)
                                 st.rerun()
             else:
                 st.info("No tienes tareas pendientes asignadas por el momento.")
         else:
             st.info("No hay tareas registradas en el sistema.")
 
-    # --- TAB 2: MIS SOLICITUDES (ENVIADAS) ---
+    # --- TAB 2: MIS SOLICITUDES (CHATS ENVIADOS) ---
     with tabs_tareas[1]:
         st.subheader("Tareas que he Solicitado")
         if not df_tareas.empty and 'Emisor' in df_tareas.columns:
@@ -585,36 +605,42 @@ def abrir_centro_tareas():
                 df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Emisor', '')), axis=1)
             ]
             if not mis_enviados.empty:
-                para_cerrar = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'resuelto']
-                en_espera = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'pendiente']
+                tareas_abiertas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])]
                 finalizadas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'finalizado']
 
-                # 1. Respuestas listas para confirmar / finalizar
-                if not para_cerrar.empty:
-                    st.markdown("### 💬 Respuestas Recibidas (Por Confirmar / Cierre)")
-                    for idx, row in para_cerrar.iterrows():
+                if not tareas_abiertas.empty:
+                    st.markdown("### 💬 Seguimiento de mis solicitudes")
+                    for idx, row in tareas_abiertas.iterrows():
                         with st.container(border=True):
-                            col_c1, col_c2 = st.columns([3.5, 1])
-                            col_c1.markdown(f"**Para:** 👤 {row.get('Receptor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
-                            col_c1.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
-                            col_c1.markdown(f"**Tu Instrucción:** {row.get('Instruccion', '')}")
-                            col_c1.success(f"💬 **Respuesta de {row.get('Receptor', 'N/A')}:** {row.get('Respuesta', 'Sin comentario')}")
+                            estatus_badge = "🟢 Resuelto (Por confirmar)" if str(row.get('Status', '')).lower() == 'resuelto' else "⏳ En Espera"
+                            st.markdown(f"**Estado:** {estatus_badge} | **Para:** 👤 {row.get('Receptor', 'N/A')}")
                             
-                            st.write("")
-                            if col_c2.button("🏁 Finalizar Tarea", key=f"fin_{idx}", use_container_width=True):
-                                row_num = idx + 2
-                                if 'Status' in df_tareas.columns:
+                            historial_actual = renderizar_hilo_chat(row)
+                            
+                            col_in, col_btn1, col_btn2 = st.columns([3, 1, 1])
+                            with col_in:
+                                txt_respuesta = st.text_input("Mensaje", key=f"msg_out_{idx}", label_visibility="collapsed", placeholder="Escribe un nuevo mensaje...")
+                            with col_btn1:
+                                if st.button("📤 Enviar", key=f"env_out_{idx}", use_container_width=True):
+                                    if txt_respuesta.strip():
+                                        ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+                                        nuevo_msj = f"[{ahora}] {usuario_activo_real}: {txt_respuesta.strip()}"
+                                        historial_nuevo = historial_actual + "\\n" + nuevo_msj if historial_actual else nuevo_msj
+                                        
+                                        row_num = idx + 2
+                                        ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Respuesta') + 1, historial_nuevo)
+                                        # Si ya estaba resuelto, reabrimos el ticket
+                                        if str(row.get('Status', '')).lower() == 'resuelto':
+                                            ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Pendiente")
+                                        st.rerun()
+                            with col_btn2:
+                                if st.button("🏁 Finalizar Tarea", key=f"fin_out_{idx}", use_container_width=True):
+                                    row_num = idx + 2
                                     ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Finalizado")
-                                st.success("Tarea finalizada y archivada correctamente.")
-                                st.rerun()
+                                    st.toast("Tarea archivada.")
+                                    time.sleep(1)
+                                    st.rerun()
 
-                # 2. En espera
-                if not en_espera.empty:
-                    st.markdown("### ⏳ En Espera de Respuesta")
-                    cols_esp = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status'] if c in en_espera.columns]
-                    st.dataframe(en_espera[cols_esp], hide_index=True, use_container_width=True)
-
-                # 3. Historial archivado
                 if not finalizadas.empty:
                     with st.expander("📁 Ver Historial de Tareas Finalizadas"):
                         cols_fin = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta', 'Status'] if c in finalizadas.columns]
@@ -639,14 +665,10 @@ def abrir_centro_tareas():
             piezas_del_siniestro = df_uni_local[df_uni_local[col_sin_loc].astype(str).str.strip() == id_sin_puro][col_desc_loc].dropna().unique().tolist()
             piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro)
 
-        instruccion_nueva = st.text_area("Instrucción o Mensaje:")
+        instruccion_nueva = st.text_area("Instrucción o Mensaje Inicial:")
         
         if st.button("📤 Enviar Tarea", type="primary"):
             if usuario_destino != "Seleccionar..." and instruccion_nueva.strip():
-                import datetime
-                import uuid
-                import time
-                
                 id_tarea = str(uuid.uuid4().hex)[:6].upper()
                 fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                 
@@ -657,7 +679,6 @@ def abrir_centro_tareas():
                 nueva_fila = [id_tarea, fecha_hoy, usuario_activo_real, usuario_destino, ref_final, instruccion_nueva.strip(), "Pendiente", ""]
                 
                 try:
-                    # Garantiza la conexión fresca dentro del botón para evitar fallos de guardado
                     doc_guardar = init_connection()
                     ws_guardar = doc_guardar.worksheet("Gestor_Tareas")
                     ws_guardar.append_row(nueva_fila)

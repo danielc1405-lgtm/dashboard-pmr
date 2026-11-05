@@ -502,9 +502,7 @@ except Exception as e:
 
 @st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
 def abrir_centro_tareas():
-    # Recarga únicamente el modal cada 4 segundos
-    st_autorefresh(interval=4000, key="chat_updater_modal")
-    
+        
     doc = init_connection()
     usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
 
@@ -587,13 +585,19 @@ def abrir_centro_tareas():
                         with st.chat_message("assistant" if avatar == "🟢" else "user", avatar=avatar):
                             st.markdown(linea)
                             
-        # MAGIA: Código JavaScript para forzar el scroll hacia abajo
+        
+        # MAGIA 2.0: Forzar scroll hacia abajo buscando múltiples clases nativas de Streamlit
         components.html(
             """
             <script>
-                const cajas = window.parent.document.querySelectorAll('.stScrollableContainer');
+                const doc = window.parent.document;
+                // Buscamos todas las cajas con scroll de Streamlit
+                const cajas = doc.querySelectorAll('div[data-testid="stVerticalBlock"], div.stScrollableContainer, div.stChatMessageContainer');
+                
                 cajas.forEach(caja => {
-                    caja.scrollTop = caja.scrollHeight;
+                    if (caja.scrollHeight > caja.clientHeight) {
+                        caja.scrollTop = caja.scrollHeight;
+                    }
                 });
             </script>
             """,
@@ -819,8 +823,9 @@ label_btn_tareas = f"🔔 Tareas ({pendientes_badge})" if pendientes_badge > 0 e
 
 with col_btn_tar:
     # 1. Al presionar el botón, guardamos en la memoria que el modal está abierto
-    if st.button("🔔 Centro de Tareas", key="btn_abrir_modal_tareas"):
-        st.session_state['modal_tareas_abierto'] = True
+    # Así de sencillo, el @st.dialog se encarga de mantenerla abierta
+if st.button("🔔 Centro de Tareas"):
+    abrir_centro_tareas()
 
 # 2. Mostramos el modal de forma persistente mientras la variable sea True
 if st.session_state.get('modal_tareas_abierto', False):

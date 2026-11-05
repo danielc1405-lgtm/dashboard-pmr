@@ -480,7 +480,7 @@ with col_btn_pop:
         abrir_popup_monitor()
 
         # 1. Refresca la aplicación en segundo plano cada 5 segundos (5000 ms)
-st_autorefresh(interval=5000, key="vigilante_notificaciones")
+# st_autorefresh(interval=5000, key="vigilante_notificaciones")
 
 # 2. Revisa directamente en Supabase si tienes mensajes pendientes
 try:

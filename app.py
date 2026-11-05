@@ -16,6 +16,7 @@ import json
 import re
 from google.oauth2.service_account import Credentials
 from supabase import create_client, Client
+from streamlit_autorefresh import st_autorefresh
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -482,6 +483,10 @@ with col_btn_pop:
 
 @st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
 def abrir_centro_tareas():
+    # --- ESTA ES LA LÍNEA MÁGICA ---
+    # Recarga la ventana cada 4 segundos (4000 milisegundos) buscando nuevos mensajes
+    st_autorefresh(interval=4000, key="chat_updater")
+    
     doc = init_connection()
     usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
 

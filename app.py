@@ -1809,8 +1809,11 @@ elif vista_actual == "⚙️ Panel Operativo":
     if col_estatus:
         df_proceso = df_proceso[~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi)]
 
-    filtro_col0, filtro_col1, filtro_col2, filtro_col3, filtro_col4 = st.columns([1, 1.2, 1, 1.5, 1.5])
-    with filtro_col0: estado_sel = st.multiselect("🌎 Estado:", sorted([str(e) for e in df_proceso['Estado_CDR'].dropna().unique() if str(e).strip() != '']), placeholder="Todos...")
+    # Se agrega filtro_col5 y se ajustan las proporciones para acomodar 6 columnas
+    filtro_col0, filtro_col1, filtro_col2, filtro_col3, filtro_col4, filtro_col5 = st.columns([0.9, 1.1, 0.9, 1.4, 1.1, 1.4])
+    
+    with filtro_col0: 
+        estado_sel = st.multiselect("🌎 Estado:", sorted([str(e) for e in df_proceso['Estado_CDR'].dropna().unique() if str(e).strip() != '']), placeholder="Todos...")
     with filtro_col1: 
         df_t1 = df_proceso.copy()
         if estado_sel: df_t1 = df_t1[df_t1['Estado_CDR'].astype(str).isin(estado_sel)]
@@ -1826,13 +1829,20 @@ elif vista_actual == "⚙️ Panel Operativo":
     with filtro_col4:
         df_t4 = df_t3.copy()
         if siniestro_sel: df_t4 = df_t4[df_t4['Filtro_Siniestro'].isin(siniestro_sel)]
-        desc_sel = st.multiselect(f"⚙️ Refacción:", sorted(list(df_t4[col_desc].dropna().astype(str).unique())) if col_desc in df_t4.columns else [], placeholder="Todas...")
+        # NUEVO FILTRO VIN: Se alimenta de df_t4
+        vin_sel = st.multiselect("🏷️ VIN / Serie:", sorted(list(df_t4[col_vin].dropna().astype(str).unique())) if col_vin and col_vin in df_t4.columns else [], placeholder="Todos...")
+    with filtro_col5:
+        df_t5 = df_t4.copy()
+        # LA REFACCIÓN AHORA SE ALIMENTA DE df_t5 (Filtrado por VIN)
+        if vin_sel: df_t5 = df_t5[df_t5[col_vin].astype(str).isin(vin_sel)]
+        desc_sel = st.multiselect(f"⚙️ Refacción:", sorted(list(df_t5[col_desc].dropna().astype(str).unique())) if col_desc in df_t5.columns else [], placeholder="Todas...")
 
     df_filtrado = df_proceso.copy()
     if estado_sel: df_filtrado = df_filtrado[df_filtrado['Estado_CDR'].astype(str).isin(estado_sel)]
     if taller_sel: df_filtrado = df_filtrado[df_filtrado[col_taller].astype(str).isin(taller_sel)]
     if estatus_sel: df_filtrado = df_filtrado[df_filtrado[col_estatus].astype(str).isin(estatus_sel)]
     if siniestro_sel: df_filtrado = df_filtrado[df_filtrado['Filtro_Siniestro'].isin(siniestro_sel)]
+    if vin_sel: df_filtrado = df_filtrado[df_filtrado[col_vin].astype(str).isin(vin_sel)] # <-- LÍNEA NUEVA
     if desc_sel: df_filtrado = df_filtrado[df_filtrado[col_desc].astype(str).isin(desc_sel)]
 
     def generar_llave_temp(id_val, desc_val):
@@ -1901,6 +1911,7 @@ elif vista_actual == "⚙️ Panel Operativo":
     if siniestro_sel:
         ids_sel = [s.split(" - ")[0] for s in siniestro_sel]
         df_recoleccion = df_recoleccion[df_recoleccion[col_id].isin(ids_sel)]
+    if vin_sel: df_recoleccion = df_recoleccion[df_recoleccion[col_vin].astype(str).isin(vin_sel)] # <-- LÍNEA NUEVA
     if desc_sel: df_recoleccion = df_recoleccion[df_recoleccion[col_desc].astype(str).isin(desc_sel)]
 
     st.markdown("---")

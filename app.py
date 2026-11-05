@@ -818,7 +818,7 @@ pendientes_badge = contar_tareas_pendientes(usuario_activo)
 label_btn_tareas = f"🔔 Tareas ({pendientes_badge})" if pendientes_badge > 0 else "🔔 Tareas"
 
 with col_btn_tar:
-    i# 1. Al presionar el botón, guardamos en la memoria que el modal está abierto
+# 1. Al presionar el botón, guardamos en la memoria que el modal está abierto
 if st.button("🔔 Centro de Tareas", key="btn_abrir_modal_tareas"):
     st.session_state['modal_tareas_abierto'] = True
 

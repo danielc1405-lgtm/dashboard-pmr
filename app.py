@@ -15,18 +15,6 @@ import gspread
 import json
 import re
 from google.oauth2.service_account import Credentials
-from supabase import create_client, Client
-from streamlit_autorefresh import st_autorefresh
-import streamlit.components.v1 as components
-from streamlit_autorefresh import st_autorefresh
-
-@st.cache_resource
-def init_supabase() -> Client:
-    url = st.secrets["supabase"]["SUPABASE_URL"]
-    key = st.secrets["supabase"]["SUPABASE_KEY"]
-    return create_client(url, key)
-
-supabase = init_supabase()
 
 warnings.filterwarnings("ignore")
 
@@ -479,50 +467,31 @@ with col_btn_pop:
     if st.button("🖥️", help="Abrir Pop-up con Estatus Crítico y Consola Matrix", use_container_width=True):
         abrir_popup_monitor()
 
-        # 1. Refresca la aplicación en segundo plano cada 5 segundos (5000 ms)
-# st_autorefresh(interval=5000, key="vigilante_notificaciones")
-
-# 2. Revisa directamente en Supabase si tienes mensajes pendientes
-try:
-    if 'usuario_actual' in st.session_state:
-        yo = st.session_state['usuario_actual']
-        pendientes = supabase.table("gestor_tareas").select("id").eq("receptor", yo).eq("status", "Pendiente").execute()
-        
-        cantidad_pendientes = len(pendientes.data)
-        
-        # 3. Si hay mensajes, muestra un banner amarillo enorme en la app
-        if cantidad_pendientes > 0:
-            st.warning(f"🔔 ¡TIENES {cantidad_pendientes} TAREA(S) O MENSAJE(S) SIN LEER! Abre el Centro de Tareas para responder.")
-except Exception as e:
-    pass
-
 # ==============================================================================
 # === [SISTEMA DE TAREAS Y DIRECTORIO FUNCIONALES] ===
 # ==============================================================================
 
 @st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
 def abrir_centro_tareas():
-        
     doc = init_connection()
     usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
 
-    # 1. Extraer Usuarios (Desde Google Sheets)
+    # 1. Extraer Usuarios
     try:
         ws_usuarios = doc.worksheet("Usuarios")
         usuarios_reales = [str(u).strip() for u in ws_usuarios.col_values(1)[1:] if str(u).strip().lower() != "nan" and str(u).strip()]
     except:
         usuarios_reales = []
 
-    # 2. Extraer Tareas (¡AHORA DESDE SUPABASE!)
+    # 2. Extraer Tareas (Gestor_Tareas)
     try:
-        # Obtenemos los datos en milisegundos
-        response = supabase.table("gestor_tareas").select("*").order("created_at", desc=False).execute()
-        df_tareas = pd.DataFrame(response.data)
-    except Exception as e:
-        st.error(f"Error al conectar con Supabase: {e}")
+        ws_tareas = doc.worksheet("Gestor_Tareas")
+        datos_tareas = ws_tareas.get_all_records()
+        df_tareas = pd.DataFrame(datos_tareas)
+    except:
         df_tareas = pd.DataFrame()
 
-    # 3. Extraer Siniestros y Refacciones (Desde Google Sheets)
+    # 3. Extraer Siniestros y Refacciones (BD_UNIFICADA)
     try:
         ws_uni = doc.worksheet("BD_UNIFICADA")
         datos_uni = ws_uni.get_all_values()
@@ -546,14 +515,16 @@ def abrir_centro_tareas():
         df_uni_local = pd.DataFrame()
         lista_siniestros = []
 
-    tabs_tareas = st.tabs(["📥 Bandeja de Entrada", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
+    tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
+
+    # Limpieza de espacios en columnas de la hoja
+    if not df_tareas.empty:
+        df_tareas.columns = [str(c).strip() for c in df_tareas.columns]
+
+    u_activo_clean = str(usuario_activo_real).strip().lower()
 
     import re
     import unicodedata
-    import datetime
-    import uuid
-    import time
-
     def coincide_usuario(u1, u2):
         try:
             s1 = unicodedata.normalize('NFKD', str(u1)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
@@ -561,137 +532,97 @@ def abrir_centro_tareas():
             if not s1 or not s2: return False
             c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
             if c1 in c2 or c2 in c1: return True
+            
             for i in range(len(c2) - 4):
                 if c2[i:i+5] in c1: return True
             return False
         except:
             return False
 
-    # --- FUNCIÓN: RENDERIZAR HISTORIAL ESTILO WHATSAPP ---
-    def renderizar_hilo_chat(row):
-        fecha_formateada = str(row.get('created_at', ''))[:16].replace('T', ' ')
-        st.markdown(f"**Referencia:** 🚗 {row.get('referencia', '')} | 📅 {fecha_formateada}")
-        
-        caja_chat = st.container(height=280)
-        with caja_chat:
-            with st.chat_message("user", avatar="👤"):
-                st.markdown(f"**{row.get('emisor', 'N/A')}:** {row.get('instruccion', '')}")
-            
-            historial = str(row.get('respuesta', '')).strip()
-            if historial and historial != "None":
-                for linea in historial.split('\\n'):
-                    if linea.strip():
-                        avatar = "🟢" if usuario_activo_real.lower() in linea.lower() else "👤"
-                        with st.chat_message("assistant" if avatar == "🟢" else "user", avatar=avatar):
-                            st.markdown(linea)
-                            
-        
-        # MAGIA 2.0: Forzar scroll hacia abajo buscando múltiples clases nativas de Streamlit
-        components.html(
-            """
-            <script>
-                const doc = window.parent.document;
-                // Buscamos todas las cajas con scroll de Streamlit
-                const cajas = doc.querySelectorAll('div[data-testid="stVerticalBlock"], div.stScrollableContainer, div.stChatMessageContainer');
-                
-                cajas.forEach(caja => {
-                    if (caja.scrollHeight > caja.clientHeight) {
-                        caja.scrollTop = caja.scrollHeight;
-                    }
-                });
-            </script>
-            """,
-            height=0
-        )
-        return historial
-
     # --- TAB 1: BANDEJA DE ENTRADA ---
     with tabs_tareas[0]:
         st.subheader("Tareas Asignadas a Mí")
-        if not df_tareas.empty and 'receptor' in df_tareas.columns:
+        if not df_tareas.empty and 'Receptor' in df_tareas.columns:
+            # Filtro inteligente de usuario y estatus pendiente
             mis_pendientes = df_tareas[
-                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('receptor', '')) and str(r.get('status', '')).strip().lower() == 'pendiente', axis=1)
+                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Receptor', '')) and str(r.get('Status', '')).strip().lower() == 'pendiente', axis=1)
             ]
             if not mis_pendientes.empty:
                 for idx, row in mis_pendientes.iterrows():
                     with st.container(border=True):
-                        historial_actual = renderizar_hilo_chat(row)
+                        st.markdown(f"**De:** 👤 {row.get('Emisor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
+                        st.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
+                        st.info(f"**Mensaje:** {row.get('Instruccion', '')}")
                         
-                        col_in, col_btn1, col_btn2 = st.columns([3, 1, 1])
-                        with col_in:
-                            txt_respuesta = st.text_input("Mensaje", key=f"msg_in_{row['id']}", label_visibility="collapsed", placeholder="Escribe tu respuesta...")
-                        with col_btn1:
-                            if st.button("📤 Enviar", key=f"env_in_{row['id']}", use_container_width=True):
-                                if txt_respuesta.strip():
-                                    ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-                                    nuevo_msj = f"[{ahora}] {usuario_activo_real}: {txt_respuesta.strip()}"
-                                    historial_nuevo = historial_actual + "\\n" + nuevo_msj if historial_actual and historial_actual != "None" else nuevo_msj
-                                    
-                                    # Guardar respuesta en Supabase
-                                    supabase.table("gestor_tareas").update({"respuesta": historial_nuevo}).eq("id", row['id']).execute()
-                                    st.rerun()
-                        with col_btn2:
-                            if st.button("✅ Resuelto", key=f"res_in_{row['id']}", use_container_width=True):
-                                # Actualizar estatus en Supabase
-                                supabase.table("gestor_tareas").update({"status": "Resuelto"}).eq("id", row['id']).execute()
-                                st.toast("Tarea resuelta")
-                                time.sleep(1)
+                        col_r1, col_r2 = st.columns([3, 1])
+                        with col_r1:
+                            txt_respuesta = st.text_input(
+                                "Respuesta / Comentario:", 
+                                key=f"resp_{idx}", 
+                                placeholder="Escribe aquí tu respuesta antes de finalizar..."
+                            )
+                        with col_r2:
+                            st.write("")
+                            st.write("")
+                            if st.button("✅ Marcar Resuelto", key=f"res_{idx}", use_container_width=True):
+                                row_num = idx + 2
+                                if 'Status' in df_tareas.columns:
+                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Resuelto")
+                                if 'Respuesta' in df_tareas.columns:
+                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Respuesta') + 1, txt_respuesta.strip())
+                                st.success("Tarea resuelta y respuesta guardada correctamente.")
                                 st.rerun()
             else:
-                st.info("No tienes tareas pendientes.")
+                st.info("No tienes tareas pendientes asignadas por el momento.")
         else:
             st.info("No hay tareas registradas en el sistema.")
 
-    # --- TAB 2: MIS SOLICITUDES ---
+    # --- TAB 2: MIS SOLICITUDES (ENVIADAS) ---
     with tabs_tareas[1]:
         st.subheader("Tareas que he Solicitado")
-        if not df_tareas.empty and 'emisor' in df_tareas.columns:
+        if not df_tareas.empty and 'Emisor' in df_tareas.columns:
             mis_enviados = df_tareas[
-                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('emisor', '')), axis=1)
+                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Emisor', '')), axis=1)
             ]
             if not mis_enviados.empty:
-                tareas_abiertas = mis_enviados[mis_enviados['status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])]
-                finalizadas = mis_enviados[mis_enviados['status'].astype(str).str.strip().str.lower() == 'finalizado']
+                para_cerrar = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'resuelto']
+                en_espera = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'pendiente']
+                finalizadas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'finalizado']
 
-                if not tareas_abiertas.empty:
-                    for idx, row in tareas_abiertas.iterrows():
+                # 1. Respuestas listas para confirmar / finalizar
+                if not para_cerrar.empty:
+                    st.markdown("### 💬 Respuestas Recibidas (Por Confirmar / Cierre)")
+                    for idx, row in para_cerrar.iterrows():
                         with st.container(border=True):
-                            estatus_badge = "🟢 Resuelto (Por confirmar)" if str(row.get('status', '')).lower() == 'resuelto' else "⏳ En Espera"
-                            st.markdown(f"**Estado:** {estatus_badge} | **Para:** 👤 {row.get('receptor', 'N/A')}")
+                            col_c1, col_c2 = st.columns([3.5, 1])
+                            col_c1.markdown(f"**Para:** 👤 {row.get('Receptor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
+                            col_c1.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
+                            col_c1.markdown(f"**Tu Instrucción:** {row.get('Instruccion', '')}")
+                            col_c1.success(f"💬 **Respuesta de {row.get('Receptor', 'N/A')}:** {row.get('Respuesta', 'Sin comentario')}")
                             
-                            historial_actual = renderizar_hilo_chat(row)
-                            
-                            col_in, col_btn1, col_btn2 = st.columns([3, 1, 1])
-                            with col_in:
-                                txt_respuesta = st.text_input("Mensaje", key=f"msg_out_{row['id']}", label_visibility="collapsed", placeholder="Nuevo mensaje...")
-                            with col_btn1:
-                                if st.button("📤 Enviar", key=f"env_out_{row['id']}", use_container_width=True):
-                                    if txt_respuesta.strip():
-                                        ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-                                        nuevo_msj = f"[{ahora}] {usuario_activo_real}: {txt_respuesta.strip()}"
-                                        historial_nuevo = historial_actual + "\\n" + nuevo_msj if historial_actual and historial_actual != "None" else nuevo_msj
-                                        
-                                        datos_update = {"respuesta": historial_nuevo}
-                                        if str(row.get('status', '')).lower() == 'resuelto':
-                                            datos_update["status"] = "Pendiente"
-                                            
-                                        supabase.table("gestor_tareas").update(datos_update).eq("id", row['id']).execute()
-                                        st.rerun()
-                            with col_btn2:
-                                if st.button("🏁 Finalizar", key=f"fin_out_{row['id']}", use_container_width=True):
-                                    supabase.table("gestor_tareas").update({"status": "Finalizado"}).eq("id", row['id']).execute()
-                                    st.toast("Tarea archivada.")
-                                    time.sleep(1)
-                                    st.rerun()
+                            st.write("")
+                            if col_c2.button("🏁 Finalizar Tarea", key=f"fin_{idx}", use_container_width=True):
+                                row_num = idx + 2
+                                if 'Status' in df_tareas.columns:
+                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Finalizado")
+                                st.success("Tarea finalizada y archivada correctamente.")
+                                st.rerun()
 
+                # 2. En espera
+                if not en_espera.empty:
+                    st.markdown("### ⏳ En Espera de Respuesta")
+                    cols_esp = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status'] if c in en_espera.columns]
+                    st.dataframe(en_espera[cols_esp], hide_index=True, use_container_width=True)
+
+                # 3. Historial archivado
                 if not finalizadas.empty:
                     with st.expander("📁 Ver Historial de Tareas Finalizadas"):
-                        cols_fin = [c for c in ['created_at', 'receptor', 'referencia', 'instruccion', 'respuesta', 'status'] if c in finalizadas.columns]
+                        cols_fin = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta', 'Status'] if c in finalizadas.columns]
                         st.dataframe(finalizadas[cols_fin], hide_index=True, use_container_width=True)
             else:
-                st.info("No has enviado solicitudes.")
+                st.info("No has enviado solicitudes aún con este usuario.")
         else:
-            st.info("No hay tareas registradas.")
+            st.info("No hay tareas registradas en el sistema.")
 
     # --- TAB 3: NUEVA TAREA ---
     with tabs_tareas[2]:
@@ -706,37 +637,30 @@ def abrir_centro_tareas():
         if siniestro_seleccionado not in ["Seleccionar...", "General"] and not df_uni_local.empty and col_desc_loc:
             id_sin_puro = siniestro_seleccionado.split(" | ")[0].strip()
             piezas_del_siniestro = df_uni_local[df_uni_local[col_sin_loc].astype(str).str.strip() == id_sin_puro][col_desc_loc].dropna().unique().tolist()
-            piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s):", piezas_del_siniestro)
+            piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro)
 
-        instruccion_nueva = st.text_area("Instrucción o Mensaje Inicial:")
+        instruccion_nueva = st.text_area("Instrucción o Mensaje:")
         
         if st.button("📤 Enviar Tarea", type="primary"):
             if usuario_destino != "Seleccionar..." and instruccion_nueva.strip():
+                import datetime
+                import uuid
                 id_tarea = str(uuid.uuid4().hex)[:6].upper()
+                fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                
                 ref_final = siniestro_seleccionado
                 if piezas_seleccionadas:
                     ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
 
-                # Insertar directo en Supabase
-                datos_insert = {
-                    "id_tarea": id_tarea,
-                    "emisor": usuario_activo_real,
-                    "receptor": usuario_destino,
-                    "referencia": ref_final,
-                    "instruccion": instruccion_nueva.strip(),
-                    "status": "Pendiente",
-                    "respuesta": ""
-                }
-                
+                nueva_fila = [id_tarea, fecha_hoy, usuario_activo_real, usuario_destino, ref_final, instruccion_nueva.strip(), "Pendiente", ""]
                 try:
-                    supabase.table("gestor_tareas").insert(datos_insert).execute()
+                    ws_tareas.append_row(nueva_fila)
                     st.success(f"✅ Tarea enviada a {usuario_destino}")
-                    time.sleep(1)
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error al guardar en Supabase: {e}")
+                    st.error(f"❌ Error al guardar: {e}")
             else:
-                st.warning("⚠️ Faltan datos obligatorios.")
+                st.warning("⚠️ Faltan datos obligatorios (Usuario e Instrucción).")
 
 @st.dialog("📖 Directorio Operativo", width="large")
 def abrir_directorio():
@@ -822,14 +746,8 @@ pendientes_badge = contar_tareas_pendientes(usuario_activo)
 label_btn_tareas = f"🔔 Tareas ({pendientes_badge})" if pendientes_badge > 0 else "🔔 Tareas"
 
 with col_btn_tar:
-    # 1. Al presionar el botón, guardamos en la memoria que el modal está abierto
-    # Así de sencillo, el @st.dialog se encarga de mantenerla abierta
-    if st.button("🔔 Centro de Tareas"):
-       # abrir_centro_tareas()
-
-# 2. Mostramos el modal de forma persistente mientras la variable sea True
-if st.session_state.get('modal_tareas_abierto', False):
-    abrir_centro_tareas()
+    if st.button(label_btn_tareas, use_container_width=True):
+        abrir_centro_tareas()
 
 with col_btn_gua:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
@@ -1010,45 +928,23 @@ else:
     df_trabajo = df_proceso = df_recoleccion_total = pd.DataFrame()
 
 # ==============================================================================
-# === MÁSCARA COMERCIAL EXTREMA (MODO DEMO / INTERCEPTOR DE NÚCLEO) ===
+# === MÁSCARA COMERCIAL (MODO DEMO) ===
 # ==============================================================================
 if rol_activo == 'DEMO':
-    import pandas as pd
-    import streamlit as st
-    from streamlit.delta_generator import DeltaGenerator
-
-    # 1. Guardamos las funciones originales del núcleo de Streamlit
-    if not hasattr(st.session_state, '_dg_dataframe'):
-        st.session_state._dg_dataframe = DeltaGenerator.dataframe
-        st.session_state._dg_data_editor = DeltaGenerator.data_editor
-
-    # 2. Interceptor para tablas de solo lectura (Resumen Financiero, etc.)
-    def core_masked_dataframe(self, data=None, *args, **kwargs):
-        if isinstance(data, pd.DataFrame) and not data.empty:
-            data = data.copy()
-            palabras_dinero = ["PRECIO", "COSTO", "IMPORTE", "TOTAL", "ASIGNADO", "PROCESO", "CONCRETADO", "PDD", "PT", "CANCELADO", "ACUMULADO"]
-            for c in data.columns:
-                if any(p in str(c).upper() for p in palabras_dinero):
-                    data[c] = data[c].astype(object) # Forzar tipo texto
-                    data[c] = "$ ***"
-        return st.session_state._dg_dataframe(self, data, *args, **kwargs)
-
-    # 3. Interceptor para tablas editables (Panel Operativo)
-    def core_masked_data_editor(self, data=None, *args, **kwargs):
-        # SEGURIDAD EXTREMA: Ocultamos las columnas visualmente usando la configuración nativa.
-        # Así el DEMO no ve el dinero, pero al guardar cambios no corrompes tu base de datos.
-        if isinstance(data, pd.DataFrame):
-            col_config = kwargs.get('column_config', {}) or {}
-            palabras_dinero = ["PRECIO", "COSTO", "IMPORTE", "TOTAL", "ASIGNADO", "PROCESO", "CONCRETADO", "PDD", "PT", "CANCELADO", "ACUMULADO"]
-            for c in data.columns:
-                if any(p in str(c).upper() for p in palabras_dinero):
-                    col_config[c] = None # Oculta la columna de la pantalla
-            kwargs['column_config'] = col_config
-        return st.session_state._dg_data_editor(self, data, *args, **kwargs)
-
-    # 4. Inyectar el parche al motor principal de Streamlit
-    DeltaGenerator.dataframe = core_masked_dataframe
-    DeltaGenerator.data_editor = core_masked_data_editor
+    def enmascarar_dinero(df):
+        if not df.empty:
+            cols_dinero = [c for c in df.columns if any(p in str(c).upper() for p in ["PRECIO", "COSTO"])]
+            for c in cols_dinero:
+                df[c] = "$ ***"
+        return df
+    
+    df_completo = enmascarar_dinero(df_completo)
+    df_trabajo = enmascarar_dinero(df_trabajo)
+    df_proceso = enmascarar_dinero(df_proceso)
+    df_trabajo_completo = enmascarar_dinero(df_trabajo_completo)
+    df_recoleccion_total = enmascarar_dinero(df_recoleccion_total)
+    if not df_compras.empty:
+        df_compras = enmascarar_dinero(df_compras)
 
 # ==============================================================================
 # === [BLOQUE 5: NOTIFICACIONES Y BANDEJA PDF] ===

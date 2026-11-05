@@ -15,6 +15,15 @@ import gspread
 import json
 import re
 from google.oauth2.service_account import Credentials
+from supabase import create_client, Client
+
+@st.cache_resource
+def init_supabase() -> Client:
+    url = st.secrets["supabase"]["SUPABASE_URL"]
+    key = st.secrets["supabase"]["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_supabase()
 
 warnings.filterwarnings("ignore")
 
@@ -476,22 +485,23 @@ def abrir_centro_tareas():
     doc = init_connection()
     usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
 
-    # 1. Extraer Usuarios
+    # 1. Extraer Usuarios (Desde Google Sheets)
     try:
         ws_usuarios = doc.worksheet("Usuarios")
         usuarios_reales = [str(u).strip() for u in ws_usuarios.col_values(1)[1:] if str(u).strip().lower() != "nan" and str(u).strip()]
     except:
         usuarios_reales = []
 
-    # 2. Extraer Tareas (Gestor_Tareas)
+    # 2. Extraer Tareas (¡AHORA DESDE SUPABASE!)
     try:
-        ws_tareas = doc.worksheet("Gestor_Tareas")
-        datos_tareas = ws_tareas.get_all_records()
-        df_tareas = pd.DataFrame(datos_tareas)
-    except:
+        # Obtenemos los datos en milisegundos
+        response = supabase.table("gestor_tareas").select("*").order("created_at", desc=False).execute()
+        df_tareas = pd.DataFrame(response.data)
+    except Exception as e:
+        st.error(f"Error al conectar con Supabase: {e}")
         df_tareas = pd.DataFrame()
 
-    # 3. Extraer Siniestros y Refacciones (BD_UNIFICADA)
+    # 3. Extraer Siniestros y Refacciones (Desde Google Sheets)
     try:
         ws_uni = doc.worksheet("BD_UNIFICADA")
         datos_uni = ws_uni.get_all_values()
@@ -517,10 +527,6 @@ def abrir_centro_tareas():
 
     tabs_tareas = st.tabs(["📥 Bandeja de Entrada", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
 
-    # Limpieza de espacios en columnas de la hoja
-    if not df_tareas.empty:
-        df_tareas.columns = [str(c).strip() for c in df_tareas.columns]
-
     import re
     import unicodedata
     import datetime
@@ -542,30 +548,28 @@ def abrir_centro_tareas():
 
     # --- FUNCIÓN: RENDERIZAR HISTORIAL ESTILO WHATSAPP ---
     def renderizar_hilo_chat(row):
-        st.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')} | 📅 {row.get('Fecha_Creacion', '')}")
+        fecha_formateada = str(row.get('created_at', ''))[:16].replace('T', ' ')
+        st.markdown(f"**Referencia:** 🚗 {row.get('referencia', '')} | 📅 {fecha_formateada}")
         caja_chat = st.container(height=280)
         with caja_chat:
-            # Mensaje Inicial (Emisor)
             with st.chat_message("user", avatar="👤"):
-                st.markdown(f"**{row.get('Emisor', 'N/A')}:** {row.get('Instruccion', '')}")
+                st.markdown(f"**{row.get('emisor', 'N/A')}:** {row.get('instruccion', '')}")
             
-            # Mensajes acumulados en Respuesta
-            historial = str(row.get('Respuesta', '')).strip()
-            if historial:
+            historial = str(row.get('respuesta', '')).strip()
+            if historial and historial != "None":
                 for linea in historial.split('\\n'):
                     if linea.strip():
-                        # Diferenciador visual: verde para el usuario activo, gris para el resto
                         avatar = "🟢" if usuario_activo_real.lower() in linea.lower() else "👤"
                         with st.chat_message("assistant" if avatar == "🟢" else "user", avatar=avatar):
                             st.markdown(linea)
         return historial
 
-    # --- TAB 1: BANDEJA DE ENTRADA (CHATS ACTIVOS) ---
+    # --- TAB 1: BANDEJA DE ENTRADA ---
     with tabs_tareas[0]:
         st.subheader("Tareas Asignadas a Mí")
-        if not df_tareas.empty and 'Receptor' in df_tareas.columns:
+        if not df_tareas.empty and 'receptor' in df_tareas.columns:
             mis_pendientes = df_tareas[
-                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Receptor', '')) and str(r.get('Status', '')).strip().lower() == 'pendiente', axis=1)
+                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('receptor', '')) and str(r.get('status', '')).strip().lower() == 'pendiente', axis=1)
             ]
             if not mis_pendientes.empty:
                 for idx, row in mis_pendientes.iterrows():
@@ -574,81 +578,79 @@ def abrir_centro_tareas():
                         
                         col_in, col_btn1, col_btn2 = st.columns([3, 1, 1])
                         with col_in:
-                            txt_respuesta = st.text_input("Mensaje", key=f"msg_in_{idx}", label_visibility="collapsed", placeholder="Escribe tu respuesta aquí...")
+                            txt_respuesta = st.text_input("Mensaje", key=f"msg_in_{row['id']}", label_visibility="collapsed", placeholder="Escribe tu respuesta...")
                         with col_btn1:
-                            if st.button("📤 Enviar", key=f"env_in_{idx}", use_container_width=True):
+                            if st.button("📤 Enviar", key=f"env_in_{row['id']}", use_container_width=True):
                                 if txt_respuesta.strip():
                                     ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
                                     nuevo_msj = f"[{ahora}] {usuario_activo_real}: {txt_respuesta.strip()}"
-                                    historial_nuevo = historial_actual + "\\n" + nuevo_msj if historial_actual else nuevo_msj
+                                    historial_nuevo = historial_actual + "\\n" + nuevo_msj if historial_actual and historial_actual != "None" else nuevo_msj
                                     
-                                    row_num = idx + 2
-                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Respuesta') + 1, historial_nuevo)
+                                    # Guardar respuesta en Supabase
+                                    supabase.table("gestor_tareas").update({"respuesta": historial_nuevo}).eq("id", row['id']).execute()
                                     st.rerun()
                         with col_btn2:
-                            if st.button("✅ Resuelto", key=f"res_in_{idx}", use_container_width=True):
-                                row_num = idx + 2
-                                ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Resuelto")
+                            if st.button("✅ Resuelto", key=f"res_in_{row['id']}", use_container_width=True):
+                                # Actualizar estatus en Supabase
+                                supabase.table("gestor_tareas").update({"status": "Resuelto"}).eq("id", row['id']).execute()
                                 st.toast("Tarea resuelta")
                                 time.sleep(1)
                                 st.rerun()
             else:
-                st.info("No tienes tareas pendientes asignadas por el momento.")
+                st.info("No tienes tareas pendientes.")
         else:
             st.info("No hay tareas registradas en el sistema.")
 
-    # --- TAB 2: MIS SOLICITUDES (CHATS ENVIADOS) ---
+    # --- TAB 2: MIS SOLICITUDES ---
     with tabs_tareas[1]:
         st.subheader("Tareas que he Solicitado")
-        if not df_tareas.empty and 'Emisor' in df_tareas.columns:
+        if not df_tareas.empty and 'emisor' in df_tareas.columns:
             mis_enviados = df_tareas[
-                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Emisor', '')), axis=1)
+                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('emisor', '')), axis=1)
             ]
             if not mis_enviados.empty:
-                tareas_abiertas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])]
-                finalizadas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'finalizado']
+                tareas_abiertas = mis_enviados[mis_enviados['status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])]
+                finalizadas = mis_enviados[mis_enviados['status'].astype(str).str.strip().str.lower() == 'finalizado']
 
                 if not tareas_abiertas.empty:
-                    st.markdown("### 💬 Seguimiento de mis solicitudes")
                     for idx, row in tareas_abiertas.iterrows():
                         with st.container(border=True):
-                            estatus_badge = "🟢 Resuelto (Por confirmar)" if str(row.get('Status', '')).lower() == 'resuelto' else "⏳ En Espera"
-                            st.markdown(f"**Estado:** {estatus_badge} | **Para:** 👤 {row.get('Receptor', 'N/A')}")
+                            estatus_badge = "🟢 Resuelto (Por confirmar)" if str(row.get('status', '')).lower() == 'resuelto' else "⏳ En Espera"
+                            st.markdown(f"**Estado:** {estatus_badge} | **Para:** 👤 {row.get('receptor', 'N/A')}")
                             
                             historial_actual = renderizar_hilo_chat(row)
                             
                             col_in, col_btn1, col_btn2 = st.columns([3, 1, 1])
                             with col_in:
-                                txt_respuesta = st.text_input("Mensaje", key=f"msg_out_{idx}", label_visibility="collapsed", placeholder="Escribe un nuevo mensaje...")
+                                txt_respuesta = st.text_input("Mensaje", key=f"msg_out_{row['id']}", label_visibility="collapsed", placeholder="Nuevo mensaje...")
                             with col_btn1:
-                                if st.button("📤 Enviar", key=f"env_out_{idx}", use_container_width=True):
+                                if st.button("📤 Enviar", key=f"env_out_{row['id']}", use_container_width=True):
                                     if txt_respuesta.strip():
                                         ahora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
                                         nuevo_msj = f"[{ahora}] {usuario_activo_real}: {txt_respuesta.strip()}"
-                                        historial_nuevo = historial_actual + "\\n" + nuevo_msj if historial_actual else nuevo_msj
+                                        historial_nuevo = historial_actual + "\\n" + nuevo_msj if historial_actual and historial_actual != "None" else nuevo_msj
                                         
-                                        row_num = idx + 2
-                                        ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Respuesta') + 1, historial_nuevo)
-                                        # Si ya estaba resuelto, reabrimos el ticket
-                                        if str(row.get('Status', '')).lower() == 'resuelto':
-                                            ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Pendiente")
+                                        datos_update = {"respuesta": historial_nuevo}
+                                        if str(row.get('status', '')).lower() == 'resuelto':
+                                            datos_update["status"] = "Pendiente"
+                                            
+                                        supabase.table("gestor_tareas").update(datos_update).eq("id", row['id']).execute()
                                         st.rerun()
                             with col_btn2:
-                                if st.button("🏁 Finalizar Tarea", key=f"fin_out_{idx}", use_container_width=True):
-                                    row_num = idx + 2
-                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Finalizado")
+                                if st.button("🏁 Finalizar", key=f"fin_out_{row['id']}", use_container_width=True):
+                                    supabase.table("gestor_tareas").update({"status": "Finalizado"}).eq("id", row['id']).execute()
                                     st.toast("Tarea archivada.")
                                     time.sleep(1)
                                     st.rerun()
 
                 if not finalizadas.empty:
                     with st.expander("📁 Ver Historial de Tareas Finalizadas"):
-                        cols_fin = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta', 'Status'] if c in finalizadas.columns]
+                        cols_fin = [c for c in ['created_at', 'receptor', 'referencia', 'instruccion', 'respuesta', 'status'] if c in finalizadas.columns]
                         st.dataframe(finalizadas[cols_fin], hide_index=True, use_container_width=True)
             else:
-                st.info("No has enviado solicitudes aún con este usuario.")
+                st.info("No has enviado solicitudes.")
         else:
-            st.info("No hay tareas registradas en el sistema.")
+            st.info("No hay tareas registradas.")
 
     # --- TAB 3: NUEVA TAREA ---
     with tabs_tareas[2]:
@@ -663,33 +665,37 @@ def abrir_centro_tareas():
         if siniestro_seleccionado not in ["Seleccionar...", "General"] and not df_uni_local.empty and col_desc_loc:
             id_sin_puro = siniestro_seleccionado.split(" | ")[0].strip()
             piezas_del_siniestro = df_uni_local[df_uni_local[col_sin_loc].astype(str).str.strip() == id_sin_puro][col_desc_loc].dropna().unique().tolist()
-            piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro)
+            piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s):", piezas_del_siniestro)
 
         instruccion_nueva = st.text_area("Instrucción o Mensaje Inicial:")
         
         if st.button("📤 Enviar Tarea", type="primary"):
             if usuario_destino != "Seleccionar..." and instruccion_nueva.strip():
                 id_tarea = str(uuid.uuid4().hex)[:6].upper()
-                fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-                
                 ref_final = siniestro_seleccionado
                 if piezas_seleccionadas:
                     ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
 
-                nueva_fila = [id_tarea, fecha_hoy, usuario_activo_real, usuario_destino, ref_final, instruccion_nueva.strip(), "Pendiente", ""]
+                # Insertar directo en Supabase
+                datos_insert = {
+                    "id_tarea": id_tarea,
+                    "emisor": usuario_activo_real,
+                    "receptor": usuario_destino,
+                    "referencia": ref_final,
+                    "instruccion": instruccion_nueva.strip(),
+                    "status": "Pendiente",
+                    "respuesta": ""
+                }
                 
                 try:
-                    doc_guardar = init_connection()
-                    ws_guardar = doc_guardar.worksheet("Gestor_Tareas")
-                    ws_guardar.append_row(nueva_fila)
-                    
+                    supabase.table("gestor_tareas").insert(datos_insert).execute()
                     st.success(f"✅ Tarea enviada a {usuario_destino}")
                     time.sleep(1)
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error al guardar: {e}")
+                    st.error(f"❌ Error al guardar en Supabase: {e}")
             else:
-                st.warning("⚠️ Faltan datos obligatorios (Usuario e Instrucción).")
+                st.warning("⚠️ Faltan datos obligatorios.")
 
 @st.dialog("📖 Directorio Operativo", width="large")
 def abrir_directorio():

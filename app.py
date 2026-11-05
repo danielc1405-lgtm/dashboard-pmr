@@ -824,7 +824,7 @@ label_btn_tareas = f"🔔 Tareas ({pendientes_badge})" if pendientes_badge > 0 e
 with col_btn_tar:
     # 1. Al presionar el botón, guardamos en la memoria que el modal está abierto
     # Así de sencillo, el @st.dialog se encarga de mantenerla abierta
-    if st.button("🔔 Centro de Tareas"):
+    #if st.button("🔔 Centro de Tareas"):
         abrir_centro_tareas()
 
 # 2. Mostramos el modal de forma persistente mientras la variable sea True

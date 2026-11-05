@@ -2695,74 +2695,113 @@ elif vista_actual == "🏢 Directorio":
             with st.expander("➕ Agregar / Registrar Nuevo Taller (CDR)", expanded=False):
                 st.info("Registra un nuevo taller integrando todos los datos operativos y de contacto.")
                 with st.form("form_nuevo_taller", clear_on_submit=True):
-                    st.subheader("Datos del Taller") # (Si tenías un subtítulo, déjalo)
-    
-                    # 🟢 AQUÍ EMPIEZA EL CÓDIGO NUEVO QUE PEGASTE
-                    asesores_historicos = []
-                    if not df_catalogo.empty:
-                        col_ase_cat = next((c for c in df_catalogo.columns if "ASESOR" in str(c).upper()), None)
-    
-                    # ... (todo el bloque de columnas, text_inputs y selectbox dinámicos) ...
-    
-                    nuevo_contacto = c6.text_input("Contacto Taller")
-                    nuevo_tel = c7.text_input("Teléfono Principal / Contacto")
-                    # 🟢 AQUÍ TERMINA EL CÓDIGO NUEVO
-    
+                    st.subheader("Datos del Taller")
+                
+                # 1. Extraer lista dinámica de asesores
+                asesores_historicos = []
+                if not df_catalogo.empty:
+                    col_ase_cat = next((c for c in df_catalogo.columns if "ASESOR" in str(c).upper()), None)
+                    if col_ase_cat:
+                        asesores_historicos = sorted([str(a).strip().upper() for a in df_catalogo[col_ase_cat].dropna().unique() if str(a).strip() != ''])
 
-                    if st.form_submit_button("💾 Guardar Taller en Catálogo", type="primary"):
-                        if nuevo_taller.strip() and nueva_ciudad.strip() and nuevo_estado.strip():
-                            partes_dir = [p.strip() for p in [nueva_calle, nueva_colonia, nuevo_cp] if p.strip() != ""]
-                            nueva_dir = ", ".join(partes_dir)
-                            with st.spinner("Guardando en la base de datos..."):
-                                try:
-                                    doc = init_connection()
-                                    try: ws_cat = doc.worksheet("BD_TALLERES")
+                # Fila 1: Taller, Ciudad, Estado
+                c1, c2, c3 = st.columns([2, 2, 2])
+                nuevo_taller = c1.text_input("Nombre del Taller / CDR * (Obligatorio)")
+                
+                col_ciudad_cat = next((c for c in df_catalogo.columns if "CIUDAD" in str(c).upper()), None)
+                ciudades_bd = [str(c).strip().title() for c in df_catalogo[col_ciudad_cat].dropna().unique() if str(c).strip() != ''] if col_ciudad_cat else []
+                lista_ciudades = sorted(list(set(ciudades_bd)))
+                
+                ciudad_sel = c2.selectbox("Ciudad *", [""] + lista_ciudades + ["➕ OTRA CIUDAD (Escribir manual)"])
+                if ciudad_sel == "➕ OTRA CIUDAD (Escribir manual)": 
+                    nueva_ciudad = c2.text_input("✍️ Escribe el nombre de la nueva Ciudad *").title()
+                else:
+                    nueva_ciudad = ciudad_sel
+
+                lista_estados_mexico = [
+                    "Aguascalientes", "Baja California", "Baja California Sur", "Campeche", "Chiapas", 
+                    "Chihuahua", "Ciudad de México", "Coahuila", "Colima", "Durango", "Estado de México", 
+                    "Guanajuato", "Guerrero", "Hidalgo", "Jalisco", "Michoacán", "Morelos", "Nayarit", 
+                    "Nuevo León", "Oaxaca", "Puebla", "Querétaro", "Quintana Roo", "San Luis Potosí", 
+                    "Sinaloa", "Sonora", "Tabasco", "Tamaulipas", "Tlaxcala", "Veracruz", "Yucatán", "Zacatecas"
+                ]
+                nuevo_estado = c3.selectbox("Estado *", [""] + lista_estados_mexico)
+
+                # Fila 2: Dirección (Recuperamos Calle, Colonia y CP para la línea 2714)
+                c4, c5, c6 = st.columns([2, 2, 1])
+                nueva_calle = c4.text_input("Calle y Número")
+                nueva_colonia = c5.text_input("Colonia")
+                nuevo_cp = c6.text_input("Código Postal")
+                
+                # Fila 3: Asignaciones y Contactos
+                c7, c8, c9, c10 = st.columns(4)
+                
+                opciones_asesor = [""] + asesores_historicos + ["➕ ESCRIBIR NUEVO ASESOR"]
+                asesor_sel = c7.selectbox("Asesor Asignado *", opciones_asesor)
+                
+                if asesor_sel == "➕ ESCRIBIR NUEVO ASESOR":
+                    asesor_asignado = c7.text_input("✍️ Nombre del nuevo asesor").upper()
+                else:
+                    asesor_asignado = asesor_sel
+                    
+                nuevo_seguro = c8.selectbox("Seguro", ["MULTI", "GNP", "AMBOS", "OTRO"])
+                nuevo_contacto = c9.text_input("Contacto Taller")
+                nuevo_tel = c10.text_input("Teléfono Principal / Contacto")    
+
+                if st.form_submit_button("💾 Guardar Taller en Catálogo", type="primary"):
+                    if nuevo_taller.strip() and nueva_ciudad.strip() and nuevo_estado.strip():
+                        partes_dir = [p.strip() for p in [nueva_calle, nueva_colonia, nuevo_cp] if p.strip() != ""]
+                        nueva_dir = ", ".join(partes_dir)
+                        with st.spinner("Guardando en la base de datos..."):
+                            try:
+                                doc = init_connection()
+                                try: ws_cat = doc.worksheet("BD_TALLERES")
+                                except:
+                                    try: ws_cat = doc.worksheet("Catálogo")
                                     except:
-                                        try: ws_cat = doc.worksheet("Catálogo")
-                                        except:
-                                            st.error("⚠️ No se encontró la pestaña BD_TALLERES. Verifica el nombre en Google Sheets.")
-                                            st.stop()
+                                        st.error("⚠️ No se encontró la pestaña BD_TALLERES. Verifica el nombre en Google Sheets.")
+                                        st.stop()
                                             
-                                    headers = [str(h).strip().upper() for h in ws_cat.row_values(1)]
-                                    fila_nueva = [""] * len(headers)
+                                headers = [str(h).strip().upper() for h in ws_cat.row_values(1)]
+                                fila_nueva = [""] * len(headers)
                                     
-                                    def s_idx(n): return headers.index(n) if n in headers else -1
+                                def s_idx(n): return headers.index(n) if n in headers else -1
                                     
-                                    idx_tall = s_idx(col_taller_cat.upper()) if col_taller_cat else s_idx('TALLER')
-                                    idx_cont = s_idx('CONTACTO')
-                                    idx_tel = s_idx(col_tel_cat.upper()) if col_tel_cat else s_idx('TELEFONO')
-                                    idx_wa = s_idx('WHATSAPP')
-                                    idx_corr = s_idx('CORREO')
-                                    idx_dir = s_idx(col_dir_cat.upper()) if col_dir_cat else s_idx('DIRECCION')
-                                    idx_ciu = s_idx(col_ciudad_cat.upper()) if col_ciudad_cat else s_idx('CIUDAD')
-                                    idx_est = s_idx(col_estado_cat.upper()) if col_estado_cat else s_idx('ESTADO')
-                                    idx_ase = s_idx('ASESOR')
-                                    idx_seg = s_idx('SEGURO')
+                                idx_tall = s_idx(col_taller_cat.upper()) if col_taller_cat else s_idx('TALLER')
+                                idx_cont = s_idx('CONTACTO')
+                                idx_tel = s_idx(col_tel_cat.upper()) if col_tel_cat else s_idx('TELEFONO')
+                                idx_wa = s_idx('WHATSAPP')
+                                idx_corr = s_idx('CORREO')
+                                idx_dir = s_idx(col_dir_cat.upper()) if col_dir_cat else s_idx('DIRECCION')
+                                idx_ciu = s_idx(col_ciudad_cat.upper()) if col_ciudad_cat else s_idx('CIUDAD')
+                                idx_est = s_idx(col_estado_cat.upper()) if col_estado_cat else s_idx('ESTADO')
+                                idx_ase = s_idx('ASESOR')
+                                idx_seg = s_idx('SEGURO')
                                     
-                                    if idx_tall >= 0: fila_nueva[idx_tall] = nuevo_taller.upper()
-                                    if idx_cont >= 0: fila_nueva[idx_cont] = nuevo_contacto.upper()
-                                    if idx_tel >= 0: fila_nueva[idx_tel] = str(nuevo_tel)
-                                    if idx_wa >= 0: fila_nueva[idx_wa] = str(nuevo_wa)
-                                    if idx_corr >= 0: fila_nueva[idx_corr] = nuevo_correo
-                                    if idx_dir >= 0: fila_nueva[idx_dir] = nueva_dir.upper()
-                                    if idx_ciu >= 0: fila_nueva[idx_ciu] = nueva_ciudad.upper()
-                                    if idx_est >= 0: fila_nueva[idx_est] = nuevo_estado.upper()
-                                    if idx_ase >= 0: fila_nueva[idx_ase] = asesor_asignado.upper()
-                                    if idx_seg >= 0: fila_nueva[idx_seg] = nuevo_seguro.upper()
+                                if idx_tall >= 0: fila_nueva[idx_tall] = nuevo_taller.upper()
+                                if idx_cont >= 0: fila_nueva[idx_cont] = nuevo_contacto.upper()
+                                if idx_tel >= 0: fila_nueva[idx_tel] = str(nuevo_tel)
+                                if idx_wa >= 0: fila_nueva[idx_wa] = str(nuevo_wa)
+                                if idx_corr >= 0: fila_nueva[idx_corr] = nuevo_correo
+                                if idx_dir >= 0: fila_nueva[idx_dir] = nueva_dir.upper()
+                                if idx_ciu >= 0: fila_nueva[idx_ciu] = nueva_ciudad.upper()
+                                if idx_est >= 0: fila_nueva[idx_est] = nuevo_estado.upper()
+                                if idx_ase >= 0: fila_nueva[idx_ase] = asesor_asignado.upper()
+                                if idx_seg >= 0: fila_nueva[idx_seg] = nuevo_seguro.upper()
                                     
-                                    # Fallback si el archivo maestro no tiene cabeceras o no detecta el Taller
-                                    if len(headers) == 0 or idx_tall == -1:
-                                        fila_nueva = [nuevo_taller.upper(), nuevo_contacto.upper(), str(nuevo_tel), str(nuevo_wa), nuevo_correo, nueva_dir.upper(), nueva_ciudad.upper(), nuevo_estado.upper(), asesor_asignado.upper(), nuevo_seguro.upper()]
+                                # Fallback si el archivo maestro no tiene cabeceras o no detecta el Taller
+                                if len(headers) == 0 or idx_tall == -1:
+                                    fila_nueva = [nuevo_taller.upper(), nuevo_contacto.upper(), str(nuevo_tel), str(nuevo_wa), nuevo_correo, nueva_dir.upper(), nueva_ciudad.upper(), nuevo_estado.upper(), asesor_asignado.upper(), nuevo_seguro.upper()]
                                     
-                                    ws_cat.append_row(fila_nueva, value_input_option='USER_ENTERED')
-                                    st.success(f"✅ ¡Taller '{nuevo_taller}' guardado exitosamente!")
-                                    st.cache_data.clear()
-                                    time.sleep(1.5)
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"Error guardando taller: {e}")
-                        else:
-                            st.error("❌ Por favor completa los campos obligatorios: Taller, Ciudad y Estado.")
+                                ws_cat.append_row(fila_nueva, value_input_option='USER_ENTERED')
+                                st.success(f"✅ ¡Taller '{nuevo_taller}' guardado exitosamente!")
+                                st.cache_data.clear()
+                                time.sleep(1.5)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error guardando taller: {e}")
+                    else:
+                        st.error("❌ Por favor completa los campos obligatorios: Taller, Ciudad y Estado.")
 
     
     # ==========================

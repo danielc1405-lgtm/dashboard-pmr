@@ -2695,47 +2695,19 @@ elif vista_actual == "🏢 Directorio":
             with st.expander("➕ Agregar / Registrar Nuevo Taller (CDR)", expanded=False):
                 st.info("Registra un nuevo taller integrando todos los datos operativos y de contacto.")
                 with st.form("form_nuevo_taller", clear_on_submit=True):
-                    mapa_asesores = {"Monterrey": "Oscar Landeros Martinez", "CDMX": "Yessica Vianney Martinez Olivar", "Guadalajara": "Estefany Dayanna Ochoa Aranda"}
-                    
-                    c1, c2, c3 = st.columns([2, 2, 1])
-                    nuevo_taller = c1.text_input("Nombre del Taller / CDR * (Obligatorio)")
-                    
-                    ciudades_bd = [str(c).strip().title() for c in df_catalogo[col_ciudad_cat].dropna().unique() if str(c).strip() != ''] if col_ciudad_cat else []
-                    lista_ciudades = sorted(list(set(list(mapa_asesores.keys()) + ciudades_bd)))
-                    
-                    ciudad_sel = c2.selectbox("Ciudad *", [""] + lista_ciudades + ["➕ OTRA CIUDAD (Escribir manual)"])
-                    if ciudad_sel == "➕ OTRA CIUDAD (Escribir manual)": 
-                        nueva_ciudad = c2.text_input("✍️ Escribe el nombre de la nueva Ciudad *").title()
-                        asesor_asignado = c3.text_input("Asesor Asignado (Manual)").upper()
-                    elif ciudad_sel != "": 
-                        nueva_ciudad = ciudad_sel
-                        asesor_asignado = mapa_asesores.get(ciudad_sel, "")
-                        c3.text_input("Asesor Asignado", value=asesor_asignado, disabled=True)
-                    else: 
-                        nueva_ciudad = ""; asesor_asignado = ""
-                        c3.text_input("Asesor Asignado", disabled=True)
-                    
-                    c4, c5, c6, c7 = st.columns(4)
-                    lista_estados_mexico = [
-                        "Aguascalientes", "Baja California", "Baja California Sur", "Campeche", "Chiapas", 
-                        "Chihuahua", "Ciudad de México", "Coahuila", "Colima", "Durango", "Estado de México", 
-                        "Guanajuato", "Guerrero", "Hidalgo", "Jalisco", "Michoacán", "Morelos", "Nayarit", 
-                        "Nuevo León", "Oaxaca", "Puebla", "Querétaro", "Quintana Roo", "San Luis Potosí", 
-                        "Sinaloa", "Sonora", "Tabasco", "Tamaulipas", "Tlaxcala", "Veracruz", "Yucatán", "Zacatecas"
-                    ]
-                    nuevo_estado = c4.selectbox("Estado *", [""] + lista_estados_mexico)
-                    nuevo_seguro = c5.selectbox("Seguro", ["MULTI", "GNP", "AMBOS", "OTRO"])
+                    st.subheader("Datos del Taller") # (Si tenías un subtítulo, déjalo)
+    
+                    # 🟢 AQUÍ EMPIEZA EL CÓDIGO NUEVO QUE PEGASTE
+                    asesores_historicos = []
+                    if not df_catalogo.empty:
+                        col_ase_cat = next((c for c in df_catalogo.columns if "ASESOR" in str(c).upper()), None)
+    
+                    # ... (todo el bloque de columnas, text_inputs y selectbox dinámicos) ...
+    
                     nuevo_contacto = c6.text_input("Contacto Taller")
                     nuevo_tel = c7.text_input("Teléfono Principal / Contacto")
-                    
-                    c8, c9 = st.columns(2)
-                    nuevo_wa = c8.text_input("Whatsapp")
-                    nuevo_correo = c9.text_input("Correo")
-                    
-                    c10, c11, c12 = st.columns([2, 2, 1])
-                    nueva_calle = c10.text_input("Calle y Número")
-                    nueva_colonia = c11.text_input("Colonia")
-                    nuevo_cp = c12.text_input("C.P.")
+                    # 🟢 AQUÍ TERMINA EL CÓDIGO NUEVO
+    
 
                     if st.form_submit_button("💾 Guardar Taller en Catálogo", type="primary"):
                         if nuevo_taller.strip() and nueva_ciudad.strip() and nuevo_estado.strip():

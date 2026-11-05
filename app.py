@@ -17,6 +17,8 @@ import re
 from google.oauth2.service_account import Credentials
 from supabase import create_client, Client
 from streamlit_autorefresh import st_autorefresh
+import streamlit.components.v1 as components
+from streamlit_autorefresh import st_autorefresh
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -477,6 +479,23 @@ with col_btn_pop:
     if st.button("🖥️", help="Abrir Pop-up con Estatus Crítico y Consola Matrix", use_container_width=True):
         abrir_popup_monitor()
 
+        # 1. Refresca la aplicación en segundo plano cada 5 segundos (5000 ms)
+st_autorefresh(interval=5000, key="vigilante_notificaciones")
+
+# 2. Revisa directamente en Supabase si tienes mensajes pendientes
+try:
+    if 'usuario_actual' in st.session_state:
+        yo = st.session_state['usuario_actual']
+        pendientes = supabase.table("gestor_tareas").select("id").eq("receptor", yo).eq("status", "Pendiente").execute()
+        
+        cantidad_pendientes = len(pendientes.data)
+        
+        # 3. Si hay mensajes, muestra un banner amarillo enorme en la app
+        if cantidad_pendientes > 0:
+            st.warning(f"🔔 ¡TIENES {cantidad_pendientes} TAREA(S) O MENSAJE(S) SIN LEER! Abre el Centro de Tareas para responder.")
+except Exception as e:
+    pass
+
 # ==============================================================================
 # === [SISTEMA DE TAREAS Y DIRECTORIO FUNCIONALES] ===
 # ==============================================================================
@@ -555,6 +574,7 @@ def abrir_centro_tareas():
     def renderizar_hilo_chat(row):
         fecha_formateada = str(row.get('created_at', ''))[:16].replace('T', ' ')
         st.markdown(f"**Referencia:** 🚗 {row.get('referencia', '')} | 📅 {fecha_formateada}")
+        
         caja_chat = st.container(height=280)
         with caja_chat:
             with st.chat_message("user", avatar="👤"):
@@ -567,6 +587,19 @@ def abrir_centro_tareas():
                         avatar = "🟢" if usuario_activo_real.lower() in linea.lower() else "👤"
                         with st.chat_message("assistant" if avatar == "🟢" else "user", avatar=avatar):
                             st.markdown(linea)
+                            
+        # MAGIA: Código JavaScript para forzar el scroll hacia abajo
+        components.html(
+            """
+            <script>
+                const cajas = window.parent.document.querySelectorAll('.stScrollableContainer');
+                cajas.forEach(caja => {
+                    caja.scrollTop = caja.scrollHeight;
+                });
+            </script>
+            """,
+            height=0
+        )
         return historial
 
     # --- TAB 1: BANDEJA DE ENTRADA ---

@@ -474,7 +474,7 @@ def abrir_popup_monitor():
                 st.warning("No hay datos en la base principal para generar el reporte.")
 
 # El parámetro vertical_alignment="center" alinea todo a la misma altura en una sola fila estructurada.
-col_logo, col_menu, col_aseg, col_btn_ref, col_btn_pop, col_btn_dir, col_btn_tar, col_btn_gua = st.columns([1.2, 4.3, 1.4, 0.3, 0.3, 0.9, 0.9, 1.1], vertical_alignment="bottom")
+col_logo, col_menu, col_aseg, col_btn_dir, col_btn_tar, col_btn_ref, col_btn_pop, col_btn_gua = st.columns([1.2, 4.3, 1.4, 0.9, 0.9, 0.6, 0.6, 1.1], vertical_alignment="bottom")
 
 with col_logo:
     try: 

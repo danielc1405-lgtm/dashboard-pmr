@@ -67,7 +67,11 @@ st.markdown("""
         /* ELIMINAR EL PARPADEO GRIS AL EDITAR CELDAS */
         [data-testid="stDataGrid"] { opacity: 1 !important; }
         .st-emotion-cache-1kyxreq { display: none !important; }
-        div[data-testid="stAppViewContainer"] { transition: none !important; }
+        /* Forzar fondo negro puro en toda la aplicación */
+        .stApp, div[data-testid="stAppViewContainer"] { 
+            transition: none !important; 
+            background-color: #000000 !important; 
+        }
 
         /* --- ESTILO GLOBAL TERMINAL MATRIX --- */
         @keyframes matrix_pulse {

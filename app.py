@@ -475,17 +475,20 @@ def abrir_popup_monitor():
             else:
                 st.warning("No hay datos en la base principal para generar el reporte.")
 
-# El parámetro vertical_alignment="center" alinea todo a la misma altura en una sola fila estructurada.
-col_logo, col_menu, col_aseg, col_btn_dir, col_btn_tar, col_btn_ref, col_btn_pop, col_btn_gua = st.columns([1.2, 4.3, 1.4, 0.9, 0.9, 0.6, 0.6, 1.1], vertical_alignment="bottom")
+# Encabezado estructurado en 2 niveles: Logo a la izquierda | Menú arriba y Controles abajo a la derecha
+col_logo, col_derecha = st.columns([1.15, 8.85], vertical_alignment="center")
 
 with col_logo:
     try: 
-        st.image("logo.png", use_column_width=True)
+        st.image("logo.png", use_container_width=True)
     except: 
         st.markdown("**PREMIER**")
 
-with col_menu:
+with col_derecha:
     vista_actual = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
+    col_espacio, col_aseg, col_btn_dir, col_btn_tar, col_btn_ref, col_btn_pop, col_btn_gua = st.columns(
+        [2.8, 1.5, 1.0, 1.0, 0.5, 0.5, 1.1], vertical_alignment="center"
+    )
 
 with col_aseg:
     vistas_con_aseguradora = ["📊 Analítico", "⚙️ Panel Operativo", "🧾 Facturación", "🔍 Consultas"]

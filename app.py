@@ -551,158 +551,356 @@ with col_btn_pop:
 # === [SISTEMA DE TAREAS Y DIRECTORIO FUNCIONALES] ===
 # ==============================================================================
 
+def obtener_mapa_usuarios(doc):
+    """Mapea Usuario <-> Nombre Completo para evitar fallos de coincidencia."""
+    usuarios_dropdown = []
+    grupos_identidad = []
+    try:
+        ws_u = doc.worksheet("Usuarios")
+        datos_u = ws_u.get_all_values()
+        if len(datos_u) > 1:
+            headers_u = [str(h).strip().upper() for h in datos_u[0]]
+            idx_usr = next((i for i, h in enumerate(headers_u) if "USUARIO" in h), 0)
+            idx_nom = next((i for i, h in enumerate(headers_u) if "NOMBRE" in h), -1)
+            for fila in datos_u[1:]:
+                u_val = str(fila[idx_usr]).strip() if len(fila) > idx_usr else ""
+                n_val = str(fila[idx_nom]).strip() if (idx_nom >= 0 and len(fila) > idx_nom) else ""
+                mostrar = n_val if n_val else u_val
+                if mostrar and mostrar.lower() != "nan" and mostrar not in usuarios_dropdown:
+                    usuarios_dropdown.append(mostrar)
+                alias = {x.lower() for x in [u_val, n_val] if x and x.lower() != "nan"}
+                if alias:
+                    grupos_identidad.append(alias)
+    except Exception:
+        pass
+    return usuarios_dropdown, grupos_identidad
+
+def es_mismo_usuario(u1, u2, grupos_identidad=None):
+    import re
+    import unicodedata
+    def limpiar_txt(t):
+        s = unicodedata.normalize('NFKD', str(t)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
+        return re.sub(r'[^a-z0-9]', '', s)
+    
+    s1, s2 = str(u1).strip().lower(), str(u2).strip().lower()
+    if not s1 or not s2:
+        return False
+    if s1 == s2:
+        return True
+    if grupos_identidad:
+        for grp in grupos_identidad:
+            grp_clean = {limpiar_txt(x) for x in grp}
+            if (s1 in grp or limpiar_txt(s1) in grp_clean) and (s2 in grp or limpiar_txt(s2) in grp_clean):
+                return True
+    c1, c2 = limpiar_txt(s1), limpiar_txt(s2)
+    if not c1 or not c2:
+        return False
+    if c1 in c2 or c2 in c1:
+        return True
+    for i in range(len(c2) - 4):
+        if c2[i:i+5] in c1:
+            return True
+    return False
+
+def leer_tareas_normalizadas(ws_tareas):
+    """Lee Gestor_Tareas respetando encabezados y rescatando filas desplazadas."""
+    try:
+        datos = ws_tareas.get_all_values()
+        if len(datos) <= 1:
+            return pd.DataFrame(), []
+        headers = [str(h).strip() for h in datos[0]]
+        headers_up = [h.upper().rstrip(':') for h in headers]
+
+        def idx_col(nombres):
+            for n in nombres:
+                if n.upper() in headers_up:
+                    return headers_up.index(n.upper())
+            return -1
+
+        c_id = idx_col(["ID_TAREA", "ID"])
+        c_fec = idx_col(["FECHA_CREACION", "CREATED_AT"])
+        c_emi = idx_col(["EMISOR"])
+        c_rec = idx_col(["RECEPTOR"])
+        c_ref = idx_col(["SINIESTRO / TALLER / PIEZAS", "REFERENCIA"])
+        c_ins = idx_col(["INSTRUCCION", "MENSAJE"])
+        c_sta = idx_col(["STATUS", "ESTATUS"])
+        c_res = idx_col(["RESPUESTA"])
+
+        filas_limpias = []
+        for idx_f, f in enumerate(datos[1:], start=2):
+            if not any(str(x).strip() for x in f):
+                continue
+            f_ext = list(f) + [""] * max(0, len(headers) - len(f))
+            
+            # Detectar si la fila se guardó desplazada 2 columnas a la izquierda (filas 3 y 4)
+            st_normal = str(f_ext[c_sta]).strip() if c_sta >= 0 else ""
+            if not st_normal and len(f_ext) > 6 and str(f_ext[6]).strip().lower() in ["pendiente", "resuelto", "finalizado"]:
+                filas_limpias.append({
+                    'GS_Row': idx_f,
+                    'ID_Tarea': str(f_ext[0]).strip(),
+                    'Fecha_Creacion': str(f_ext[1]).strip(),
+                    'Emisor': str(f_ext[2]).strip(),
+                    'Receptor': str(f_ext[3]).strip(),
+                    'Siniestro / Taller / Piezas': str(f_ext[4]).strip(),
+                    'Instruccion': str(f_ext[5]).strip(),
+                    'Status': str(f_ext[6]).strip(),
+                    'Respuesta': str(f_ext[7]).strip() if len(f_ext) > 7 else ""
+                })
+            else:
+                filas_limpias.append({
+                    'GS_Row': idx_f,
+                    'ID_Tarea': str(f_ext[c_id]).strip() if c_id >= 0 else "",
+                    'Fecha_Creacion': str(f_ext[c_fec]).strip() if c_fec >= 0 else "",
+                    'Emisor': str(f_ext[c_emi]).strip() if c_emi >= 0 else "",
+                    'Receptor': str(f_ext[c_rec]).strip() if c_rec >= 0 else "",
+                    'Siniestro / Taller / Piezas': str(f_ext[c_ref]).strip() if c_ref >= 0 else "",
+                    'Instruccion': str(f_ext[c_ins]).strip() if c_ins >= 0 else "",
+                    'Status': st_normal,
+                    'Respuesta': str(f_ext[c_res]).strip() if c_res >= 0 else ""
+                })
+        return pd.DataFrame(filas_limpias), headers
+    except Exception:
+        return pd.DataFrame(), []
+
+def actualizar_tarea_en_sheet(ws_tareas, headers, row_data, nuevo_status, nuevo_historial):
+    """Actualiza Status y Respuesta en las columnas exactas de la hoja."""
+    headers_up = [str(h).strip().upper().rstrip(':') for h in headers]
+    gs_row = int(row_data['GS_Row'])
+    
+    c_id = next((i for i, h in enumerate(headers_up) if h == "ID_TAREA"), 0)
+    c_fec = next((i for i, h in enumerate(headers_up) if h == "FECHA_CREACION"), 1)
+    c_emi = next((i for i, h in enumerate(headers_up) if h == "EMISOR"), 2)
+    c_rec = next((i for i, h in enumerate(headers_up) if h == "RECEPTOR"), 3)
+    c_ref = next((i for i, h in enumerate(headers_up) if "SINIESTRO" in h), 4)
+    c_ins = next((i for i, h in enumerate(headers_up) if "INSTRUCCION" in h), 5)
+    c_sta = next((i for i, h in enumerate(headers_up) if h in ["STATUS", "ESTATUS"]), 6)
+    c_res = next((i for i, h in enumerate(headers_up) if "RESPUESTA" in h), 7)
+
+    nueva_fila = [""] * len(headers)
+    nueva_fila[c_id] = row_data.get('ID_Tarea', '')
+    nueva_fila[c_fec] = row_data.get('Fecha_Creacion', '')
+    nueva_fila[c_emi] = row_data.get('Emisor', '')
+    nueva_fila[c_rec] = row_data.get('Receptor', '')
+    nueva_fila[c_ref] = row_data.get('Siniestro / Taller / Piezas', '')
+    nueva_fila[c_ins] = row_data.get('Instruccion', '')
+    nueva_fila[c_sta] = nuevo_status
+    nueva_fila[c_res] = nuevo_historial
+
+    celdas = [gspread.Cell(row=gs_row, col=col_i + 1, value=val) for col_i, val in enumerate(nueva_fila)]
+    ws_tareas.update_cells(celdas, value_input_option='USER_ENTERED')
+
+def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
+    """Dibuja el contenedor de mensajes con scroll vertical y auto-scroll al final."""
+    import streamlit.components.v1 as components
+    caja_chat = st.container(height=250, border=True)
+    with caja_chat:
+        emisor_orig = str(row.get('Emisor', 'Usuario')).strip()
+        es_mio_orig = es_mismo_usuario(usuario_activo_real, emisor_orig, grupos_identidad)
+        with st.chat_message("assistant" if es_mio_orig else "user", avatar="🧑‍💻" if es_mio_orig else "👤"):
+            st.markdown(f"**{emisor_orig}** *(Mensaje inicial - {row.get('Fecha_Creacion', '')})*:\n\n{row.get('Instruccion', '')}")
+        
+        historial_raw = str(row.get('Respuesta', '')).strip()
+        if historial_raw and historial_raw.lower() not in ["none", "nan", ""]:
+            # Soportar tanto saltos de línea reales como '\n' escritos en texto
+            lineas = historial_raw.replace('\\n', '\n').split('\n')
+            for linea in lineas:
+                linea_limpia = linea.strip()
+                if linea_limpia:
+                    es_mio_msg = es_mismo_usuario(usuario_activo_real, linea_limpia, grupos_identidad) or (usuario_activo_real.lower() in linea_limpia.lower())
+                    with st.chat_message("assistant" if es_mio_msg else "user", avatar="🧑‍💻" if es_mio_msg else "💬"):
+                        st.markdown(linea_limpia)
+        
+        st.markdown('<div class="fin-hilo-chat"></div>', unsafe_allow_html=True)
+
+    components.html(
+        """
+        <script>
+            setTimeout(() => {
+                const anclas = window.parent.document.querySelectorAll('.fin-hilo-chat');
+                anclas.forEach(ancla => {
+                    let contenedor = ancla.parentElement;
+                    while (contenedor && contenedor !== window.parent.document.body) {
+                        if (contenedor.scrollHeight > contenedor.clientHeight) {
+                            contenedor.scrollTop = contenedor.scrollHeight;
+                        }
+                        contenedor = contenedor.parentElement;
+                    }
+                });
+            }, 120);
+        </script>
+        """,
+        height=0
+    )
+
+@st.cache_data(ttl=15)
+def contar_tareas_pendientes(usuario):
+    try:
+        doc = init_connection()
+        _, grupos_id = obtener_mapa_usuarios(doc)
+        ws_tareas = doc.worksheet("Gestor_Tareas")
+        df_t, _ = leer_tareas_normalizadas(ws_tareas)
+        if df_t.empty:
+            return 0
+        total_alertas = 0
+        for _, r in df_t.iterrows():
+            st_val = str(r.get('Status', '')).strip().lower()
+            if es_mismo_usuario(usuario, r.get('Receptor', ''), grupos_id) and st_val == 'pendiente':
+                total_alertas += 1
+            elif es_mismo_usuario(usuario, r.get('Emisor', ''), grupos_id) and st_val == 'resuelto':
+                total_alertas += 1
+        return total_alertas
+    except Exception:
+        return 0
+
 @st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
 def abrir_centro_tareas():
     doc = init_connection()
     usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
 
-    # 1. Extraer Usuarios
-    try:
-        ws_usuarios = doc.worksheet("Usuarios")
-        usuarios_reales = [str(u).strip() for u in ws_usuarios.col_values(1)[1:] if str(u).strip().lower() != "nan" and str(u).strip()]
-    except:
-        usuarios_reales = []
+    # 1. Extraer Usuarios y Mapa de Identidades
+    usuarios_reales, grupos_identidad = obtener_mapa_usuarios(doc)
 
     # 2. Extraer Tareas (Gestor_Tareas)
     try:
         ws_tareas = doc.worksheet("Gestor_Tareas")
-        datos_tareas = ws_tareas.get_all_records()
-        df_tareas = pd.DataFrame(datos_tareas)
-    except:
-        df_tareas = pd.DataFrame()
+        df_tareas, headers_tareas = leer_tareas_normalizadas(ws_tareas)
+    except Exception:
+        df_tareas, headers_tareas = pd.DataFrame(), []
 
-    # 3. Extraer Siniestros y Refacciones (BD_UNIFICADA)
+    # 3. Extraer ÚNICAMENTE Siniestros y Refacciones ACTIVOS de BD_UNIFICADA
     try:
         ws_uni = doc.worksheet("BD_UNIFICADA")
         datos_uni = ws_uni.get_all_values()
-        df_uni_local = pd.DataFrame(datos_uni[1:], columns=[str(h).strip() for h in datos_uni[0]])
+        df_uni_local = pd.DataFrame(datos_uni[1:], columns=[str(h).strip() for h in datos_uni[0]]) if len(datos_uni) > 1 else pd.DataFrame()
         
-        col_sin_loc = next((c for c in df_uni_local.columns if "SINIESTRO" in str(c).upper()), None)
+        col_sin_loc = next((c for c in df_uni_local.columns if "SINIESTRO" in str(c).upper() or "PEDIDO" in str(c).upper()), None)
         col_marca_loc = next((c for c in df_uni_local.columns if "MARCA" in str(c).upper()), None)
-        col_mod_loc = next((c for c in df_uni_local.columns if "MODELO" in str(c).upper()), None)
+        col_mod_loc = next((c for c in df_uni_local.columns if "MODELO" in str(c).upper() or "VEH" in str(c).upper()), None)
         col_desc_loc = next((c for c in df_uni_local.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+        col_est_loc = next((c for c in df_uni_local.columns if "ESTATUS" in str(c).upper() and "ENV" not in str(c).upper() and "PAGO" not in str(c).upper()), None)
+
+        # Filtrar excluyendo estatus finalizados o históricos
+        estatus_inactivos = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"]
+        if not df_uni_local.empty and col_est_loc:
+            df_uni_local = df_uni_local[~df_uni_local[col_est_loc].astype(str).str.strip().str.upper().isin(estatus_inactivos)].copy()
 
         lista_siniestros = []
-        if col_sin_loc and col_marca_loc and col_mod_loc:
+        if not df_uni_local.empty and col_sin_loc:
             df_unicos = df_uni_local.drop_duplicates(subset=[col_sin_loc])
             for _, r in df_unicos.iterrows():
-                sin_val = str(r[col_sin_loc]).strip()
-                mar_val = str(r[col_marca_loc]).strip()
-                mod_val = str(r[col_mod_loc]).strip()
-                if sin_val:
-                    lista_siniestros.append(f"{sin_val} | {mar_val} {mod_val}")
-    except:
+                sin_val = str(r.get(col_sin_loc, '')).strip()
+                mar_val = str(r.get(col_marca_loc, '')).strip() if col_marca_loc else ""
+                mod_val = str(r.get(col_mod_loc, '')).strip() if col_mod_loc else ""
+                veh_str = mod_val if mod_val.upper().startswith(mar_val.upper()) else f"{mar_val} {mod_val}".strip()
+                if sin_val and sin_val.lower() != "nan":
+                    lista_siniestros.append(f"{sin_val} | {veh_str}" if veh_str else sin_val)
+            lista_siniestros = sorted(lista_siniestros)
+    except Exception:
         df_uni_local = pd.DataFrame()
         lista_siniestros = []
 
-    tabs_tareas = st.tabs(["📥 Pendientes por Atender", "📤 Mis Solicitudes", "➕ Nueva Tarea"])
-
-    # Limpieza de espacios en columnas de la hoja
+    # Contadores para las pestañas internas
+    mis_pendientes = pd.DataFrame()
+    mis_enviados = pd.DataFrame()
     if not df_tareas.empty:
-        df_tareas.columns = [str(c).strip() for c in df_tareas.columns]
+        mis_pendientes = df_tareas[
+            df_tareas.apply(lambda r: es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad) and str(r.get('Status', '')).strip().lower() == 'pendiente', axis=1)
+        ]
+        mis_enviados = df_tareas[
+            df_tareas.apply(lambda r: es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad), axis=1)
+        ]
 
-    u_activo_clean = str(usuario_activo_real).strip().lower()
+    n_pend = len(mis_pendientes)
+    n_resp = len(mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'resuelto']) if not mis_enviados.empty else 0
 
-    import re
-    import unicodedata
-    def coincide_usuario(u1, u2):
-        try:
-            s1 = unicodedata.normalize('NFKD', str(u1)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
-            s2 = unicodedata.normalize('NFKD', str(u2)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
-            if not s1 or not s2: return False
-            c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
-            if c1 in c2 or c2 in c1: return True
-            
-            for i in range(len(c2) - 4):
-                if c2[i:i+5] in c1: return True
-            return False
-        except:
-            return False
+    lbl_tab1 = f"📥 Pendientes por Atender ({n_pend})" if n_pend > 0 else "📥 Pendientes por Atender"
+    lbl_tab2 = f"📤 Mis Solicitudes ({n_resp} Resp.)" if n_resp > 0 else "📤 Mis Solicitudes"
+
+    tabs_tareas = st.tabs([lbl_tab1, lbl_tab2, "➕ Nueva Tarea"])
 
     # --- TAB 1: BANDEJA DE ENTRADA ---
     with tabs_tareas[0]:
         st.subheader("Tareas Asignadas a Mí")
-        if not df_tareas.empty and 'Receptor' in df_tareas.columns:
-            # Filtro inteligente de usuario y estatus pendiente
-            mis_pendientes = df_tareas[
-                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Receptor', '')) and str(r.get('Status', '')).strip().lower() == 'pendiente', axis=1)
-            ]
-            if not mis_pendientes.empty:
-                for idx, row in mis_pendientes.iterrows():
-                    with st.container(border=True):
-                        st.markdown(f"**De:** 👤 {row.get('Emisor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
-                        st.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
-                        st.info(f"**Mensaje:** {row.get('Instruccion', '')}")
-                        
-                        col_r1, col_r2 = st.columns([3, 1])
-                        with col_r1:
-                            txt_respuesta = st.text_input(
-                                "Respuesta / Comentario:", 
-                                key=f"resp_{idx}", 
-                                placeholder="Escribe aquí tu respuesta antes de finalizar..."
-                            )
-                        with col_r2:
-                            st.write("")
-                            st.write("")
-                            if st.button("✅ Marcar Resuelto", key=f"res_{idx}", use_container_width=True):
-                                row_num = idx + 2
-                                if 'Status' in df_tareas.columns:
-                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Resuelto")
-                                if 'Respuesta' in df_tareas.columns:
-                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Respuesta') + 1, txt_respuesta.strip())
-                                st.success("Tarea resuelta y respuesta guardada correctamente.")
-                                st.rerun()
-            else:
-                st.info("No tienes tareas pendientes asignadas por el momento.")
+        if not mis_pendientes.empty:
+            for idx, row in mis_pendientes.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**De:** 👤 {row.get('Emisor', 'N/A')} | **Referencia:** 🚗 `{row.get('Siniestro / Taller / Piezas', 'General')}`")
+                    renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad)
+                    
+                    col_r1, col_r2 = st.columns([3.2, 1.2], vertical_alignment="bottom")
+                    with col_r1:
+                        txt_respuesta = st.text_input(
+                            "Escribir respuesta:", 
+                            key=f"resp_in_{row['GS_Row']}", 
+                            placeholder="Escribe tu mensaje y presiona Enviar Respuesta..."
+                        )
+                    with col_r2:
+                        if st.button("💬 Enviar / Resolver", key=f"btn_res_{row['GS_Row']}", type="primary", use_container_width=True):
+                            tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
+                            ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
+                            hist_prev = str(row.get('Respuesta', '')).strip()
+                            nuevo_msg = f"[{ahora_str}] {usuario_activo_real}: {txt_respuesta.strip()}" if txt_respuesta.strip() else f"[{ahora_str}] {usuario_activo_real}: Enterado / Resuelto"
+                            hist_final = f"{hist_prev}\n{nuevo_msg}".strip() if hist_prev else nuevo_msg
+                            
+                            actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row, "Resuelto", hist_final)
+                            contar_tareas_pendientes.clear()
+                            st.success("Respuesta enviada correctamente.")
+                            st.rerun()
         else:
-            st.info("No hay tareas registradas en el sistema.")
+            st.info("No tienes tareas pendientes asignadas por el momento.")
 
     # --- TAB 2: MIS SOLICITUDES (ENVIADAS) ---
     with tabs_tareas[1]:
         st.subheader("Tareas que he Solicitado")
-        if not df_tareas.empty and 'Emisor' in df_tareas.columns:
-            mis_enviados = df_tareas[
-                df_tareas.apply(lambda r: coincide_usuario(usuario_activo_real, r.get('Emisor', '')), axis=1)
-            ]
-            if not mis_enviados.empty:
-                para_cerrar = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'resuelto']
-                en_espera = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'pendiente']
-                finalizadas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'finalizado']
+        if not mis_enviados.empty:
+            activas_env = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower().isin(['resuelto', 'pendiente'])].copy()
+            finalizadas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'finalizado'].copy()
 
-                # 1. Respuestas listas para confirmar / finalizar
-                if not para_cerrar.empty:
-                    st.markdown("### 💬 Respuestas Recibidas (Por Confirmar / Cierre)")
-                    for idx, row in para_cerrar.iterrows():
-                        with st.container(border=True):
-                            col_c1, col_c2 = st.columns([3.5, 1])
-                            col_c1.markdown(f"**Para:** 👤 {row.get('Receptor', 'N/A')} | 📅 {row.get('Fecha_Creacion', '')}")
-                            col_c1.markdown(f"**Referencia:** 🚗 {row.get('Siniestro / Taller / Piezas', '')}")
-                            col_c1.markdown(f"**Tu Instrucción:** {row.get('Instruccion', '')}")
-                            col_c1.success(f"💬 **Respuesta de {row.get('Receptor', 'N/A')}:** {row.get('Respuesta', 'Sin comentario')}")
-                            
-                            st.write("")
-                            if col_c2.button("🏁 Finalizar Tarea", key=f"fin_{idx}", use_container_width=True):
-                                row_num = idx + 2
-                                if 'Status' in df_tareas.columns:
-                                    ws_tareas.update_cell(row_num, df_tareas.columns.get_loc('Status') + 1, "Finalizado")
-                                st.success("Tarea finalizada y archivada correctamente.")
+            if not activas_env.empty:
+                for idx, row in activas_env.iterrows():
+                    st_actual = str(row.get('Status', '')).strip().upper()
+                    badge_st = "🟢 RESPUESTA RECIBIDA" if st_actual == "RESUELTO" else "⏳ EN ESPERA DE RESPUESTA"
+                    with st.container(border=True):
+                        st.markdown(f"**Para:** 👤 {row.get('Receptor', 'N/A')} | **Estatus:** `{badge_st}` | **Ref:** 🚗 `{row.get('Siniestro / Taller / Piezas', 'General')}`")
+                        renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad)
+                        
+                        c_env1, c_env2, c_env3 = st.columns([2.6, 1.1, 1.1], vertical_alignment="bottom")
+                        with c_env1:
+                            replica_txt = st.text_input(
+                                "Agregar mensaje al hilo:",
+                                key=f"rep_out_{row['GS_Row']}",
+                                placeholder="Escribe aquí si necesitas responder de vuelta..."
+                            )
+                        with c_env2:
+                            if st.button("↩️ Responder", key=f"btn_rep_{row['GS_Row']}", use_container_width=True):
+                                if replica_txt.strip():
+                                    tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
+                                    ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
+                                    hist_prev = str(row.get('Respuesta', '')).strip()
+                                    nuevo_msg = f"[{ahora_str}] {usuario_activo_real}: {replica_txt.strip()}"
+                                    hist_final = f"{hist_prev}\n{nuevo_msg}".strip() if hist_prev else nuevo_msg
+                                    
+                                    actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row, "Pendiente", hist_final)
+                                    contar_tareas_pendientes.clear()
+                                    st.success("Mensaje enviado de vuelta al receptor.")
+                                    st.rerun()
+                                else:
+                                    st.warning("Escribe un mensaje primero.")
+                        with c_env3:
+                            if st.button("🏁 Finalizar Tarea", key=f"fin_{row['GS_Row']}", type="primary", use_container_width=True):
+                                actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row, "Finalizado", str(row.get('Respuesta', '')).strip())
+                                contar_tareas_pendientes.clear()
+                                st.success("Tarea finalizada y archivada.")
                                 st.rerun()
-
-                # 2. En espera
-                if not en_espera.empty:
-                    st.markdown("### ⏳ En Espera de Respuesta")
-                    cols_esp = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Status'] if c in en_espera.columns]
-                    st.dataframe(en_espera[cols_esp], hide_index=True, use_container_width=True)
-
-                # 3. Historial archivado
-                if not finalizadas.empty:
-                    with st.expander("📁 Ver Historial de Tareas Finalizadas"):
-                        cols_fin = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta', 'Status'] if c in finalizadas.columns]
-                        st.dataframe(finalizadas[cols_fin], hide_index=True, use_container_width=True)
             else:
-                st.info("No has enviado solicitudes aún con este usuario.")
+                st.info("No tienes solicitudes activas en este momento.")
+
+            if not finalizadas.empty:
+                with st.expander(f"📁 Ver Historial de Tareas Finalizadas ({len(finalizadas)})"):
+                    cols_fin = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta', 'Status'] if c in finalizadas.columns]
+                    st.dataframe(finalizadas[cols_fin], hide_index=True, use_container_width=True)
         else:
-            st.info("No hay tareas registradas en el sistema.")
+            st.info("No has enviado solicitudes aún con este usuario.")
 
     # --- TAB 3: NUEVA TAREA ---
     with tabs_tareas[2]:
@@ -711,7 +909,7 @@ def abrir_centro_tareas():
         with col_nueva_1:
             usuario_destino = st.selectbox("Asignar a:", ["Seleccionar..."] + usuarios_reales)
         with col_nueva_2:
-            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo:", ["Seleccionar...", "General"] + lista_siniestros)
+            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo (Solo Activos):", ["Seleccionar...", "General"] + lista_siniestros)
         
         piezas_seleccionadas = []
         if siniestro_seleccionado not in ["Seleccionar...", "General"] and not df_uni_local.empty and col_desc_loc:
@@ -723,19 +921,49 @@ def abrir_centro_tareas():
         
         if st.button("📤 Enviar Tarea", type="primary"):
             if usuario_destino != "Seleccionar..." and instruccion_nueva.strip():
-                import datetime
                 import uuid
+                tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
                 id_tarea = str(uuid.uuid4().hex)[:6].upper()
-                fecha_hoy = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                fecha_hoy = datetime.datetime.now(tz_mx_t).strftime("%Y-%m-%d %H:%M")
                 
                 ref_final = siniestro_seleccionado
                 if piezas_seleccionadas:
                     ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
 
-                nueva_fila = [id_tarea, fecha_hoy, usuario_activo_real, usuario_destino, ref_final, instruccion_nueva.strip(), "Pendiente", ""]
                 try:
-                    ws_tareas.append_row(nueva_fila)
+                    if not headers_tareas:
+                        headers_tareas = ["ID_Tarea", "Fecha_Creacion", "Emisor", "Receptor", "Siniestro / Taller / Piezas", "Instruccion", "Status", "Respuesta"]
+                    headers_up = [str(h).strip().upper().rstrip(':') for h in headers_tareas]
+                    nueva_fila = [""] * len(headers_tareas)
+
+                    def pos_col(posibles, default_idx):
+                        for p in posibles:
+                            if p in headers_up:
+                                return headers_up.index(p)
+                        return default_idx if default_idx < len(headers_tareas) else -1
+
+                    i_id = pos_col(["ID_TAREA"], 0)
+                    i_fe = pos_col(["FECHA_CREACION"], 1)
+                    i_em = pos_col(["EMISOR"], 2)
+                    i_re = pos_col(["RECEPTOR"], 3)
+                    i_rf = pos_col(["SINIESTRO / TALLER / PIEZAS", "REFERENCIA"], 4)
+                    i_in = pos_col(["INSTRUCCION"], 5)
+                    i_st = pos_col(["STATUS", "ESTATUS"], 6)
+                    i_rp = pos_col(["RESPUESTA"], 7)
+
+                    if i_id >= 0: nueva_fila[i_id] = id_tarea
+                    if i_fe >= 0: nueva_fila[i_fe] = fecha_hoy
+                    if i_em >= 0: nueva_fila[i_em] = usuario_activo_real
+                    if i_re >= 0: nueva_fila[i_re] = usuario_destino
+                    if i_rf >= 0: nueva_fila[i_rf] = ref_final
+                    if i_in >= 0: nueva_fila[i_in] = instruccion_nueva.strip()
+                    if i_st >= 0: nueva_fila[i_st] = "Pendiente"
+                    if i_rp >= 0: nueva_fila[i_rp] = ""
+
+                    ws_tareas.append_row(nueva_fila, value_input_option='USER_ENTERED')
+                    contar_tareas_pendientes.clear()
                     st.success(f"✅ Tarea enviada a {usuario_destino}")
+                    time.sleep(0.6)
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error al guardar: {e}")
@@ -751,7 +979,6 @@ def abrir_directorio():
         doc = init_connection()
         encontrados = 0
         
-        # Búsqueda real en BD_TALLERES
         try:
             ws_t = doc.worksheet("BD_TALLERES")
             df_t = pd.DataFrame(ws_t.get_all_records())
@@ -764,7 +991,6 @@ def abrir_directorio():
         except Exception:
             pass
 
-        # Búsqueda real en BD_PROVEEDORES
         try:
             ws_p = doc.worksheet("BD_PROVEEDORES")
             df_p = pd.DataFrame(ws_p.get_all_records())
@@ -785,48 +1011,12 @@ with col_btn_dir:
     if st.button("📖 Directorio", use_container_width=True):
         abrir_directorio()
 
-@st.cache_data(ttl=60)
-def contar_tareas_pendientes(usuario):
-    import re
-    import unicodedata
-    def coincide_u(u1, u2):
-        try:
-            # Limpieza de acentos y caracteres especiales
-            s1 = unicodedata.normalize('NFKD', str(u1)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
-            s2 = unicodedata.normalize('NFKD', str(u2)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
-            if not s1 or not s2: return False
-            c1, c2 = re.sub(r'[^a-z0-9]', '', s1), re.sub(r'[^a-z0-9]', '', s2)
-            if c1 in c2 or c2 in c1: return True
-            
-            # Motor de coincidencia de apellidos (ventana de 5 letras)
-            for i in range(len(c2) - 4):
-                if c2[i:i+5] in c1: return True
-            return False
-        except:
-            return False
-
-    try:
-        doc = init_connection()
-        datos = doc.worksheet("Gestor_Tareas").get_all_records()
-        total_alertas = 0
-        for d in datos:
-            rec = str(d.get('Receptor', d.get('Receptor:', '')))
-            emi = str(d.get('Emisor', d.get('Emisor:', '')))
-            st_val = str(d.get('Status', d.get('Status:', ''))).strip().lower()
-            
-            if coincide_u(usuario, rec) and st_val == 'pendiente':
-                total_alertas += 1
-            elif coincide_u(usuario, emi) and st_val == 'resuelto':
-                total_alertas += 1
-        return total_alertas
-    except:
-        return 0
-
 pendientes_badge = contar_tareas_pendientes(usuario_activo)
 label_btn_tareas = f"🔔 Tareas ({pendientes_badge})" if pendientes_badge > 0 else "🔔 Tareas"
+tipo_btn_tareas = "primary" if pendientes_badge > 0 else "secondary"
 
 with col_btn_tar:
-    if st.button(label_btn_tareas, use_container_width=True):
+    if st.button(label_btn_tareas, type=tipo_btn_tareas, use_container_width=True):
         abrir_centro_tareas()
 
 with col_btn_gua:

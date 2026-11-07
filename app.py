@@ -27,22 +27,20 @@ st.markdown("""
         
         /* 1. Aniquilar por completo el padding fantasma superior de Streamlit */
         .main .block-container, div[data-testid="stAppViewBlockContainer"] { 
-            padding-top: 0rem !important; 
-            padding-bottom: 40px !important; 
+            padding-top: 1rem !important; 
+            padding-bottom: 1rem !important; 
             padding-left: 1rem !important; 
             padding-right: 1rem !important; 
             max-width: 100% !important; 
             overflow: visible !important; 
         }
         
-        div[data-testid="stVerticalBlock"] {
-            overflow: visible !important;
-        }
+        div[data-testid="stVerticalBlock"] { overflow: visible !important; }
         
         /* 2. Destruir el espacio reservado del header nativo */
-        header[data-testid="stHeader"] { 
-            display: none !important;
-        }
+        header { visibility: hidden !important; }
+        footer { visibility: hidden !important; }
+        header[data-testid="stHeader"] { display: none !important; }
         
         /* --- 3. CINTURÓN DE SEGURIDAD PARA EL MENÚ SUPERIOR (STICKY) --- */
         div[data-testid="stVerticalBlock"] > div:has([data-testid="stRadio"]) {
@@ -50,7 +48,7 @@ st.markdown("""
             position: sticky !important; 
             top: 0px !important; 
             z-index: 99999 !important; 
-            background-color: #0E1117 !important; 
+            background-color: #000000 !important; 
             padding-top: 10px !important; 
             padding-bottom: 10px !important; 
             border-bottom: 1px solid #333 !important;
@@ -58,43 +56,31 @@ st.markdown("""
             margin-top: -15px !important; 
         }
         
-        div.row-widget.stRadio > div { flex-direction: row; gap: 8px; flex-wrap: wrap; }
+        div.row-widget.stRadio > div { flex-direction: row; gap: 8px; }
         div.row-widget.stRadio > div > label { background-color: #1E1E24; padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid #333; font-size: 0.95rem; transition: all 0.3s ease; }
         div.row-widget.stRadio > div > label:hover { border-color: #F63366; background-color: #2A2A35;}
         div.row-widget.stRadio > div > label[data-checked="true"] { background-color: #F63366; color: white; border-color: #F63366; }
         div.row-widget.stRadio > div > label > div:first-child { display: none; }
         
-        /* ELIMINAR EL PARPADEO GRIS AL EDITAR CELDAS */
+        /* ELIMINAR EL PARPADEO GRIS AL EDITAR CELDAS Y FORZAR FONDO NEGRO */
         [data-testid="stDataGrid"] { opacity: 1 !important; }
         .st-emotion-cache-1kyxreq { display: none !important; }
-        /* Forzar fondo negro puro en toda la aplicación */
         .stApp, div[data-testid="stAppViewContainer"] { 
             transition: none !important; 
             background-color: #000000 !important; 
         }
 
-        header { visibility: hidden !important; }
-        footer { visibility: hidden !important; }
-        .block-container {
-            padding-top: 1rem !important; 
-            padding-bottom: 1rem !important;
-        }
-
-        /* Color rojo vivo para el botón principal (Guardar) */
+        /* --- ESTILOS DE BOTONES --- */
         div.stButton > button[kind="primary"] {
-            background-color: #E50914 !important; /* Rojo intenso */
+            background-color: #E50914 !important;
             border-color: #E50914 !important;
             color: white !important;
             opacity: 1 !important;
         }
-
-        /* Efecto al pasar el mouse por el botón rojo */
         div.stButton > button[kind="primary"]:hover {
             background-color: #B20710 !important;
             border-color: #B20710 !important;
         }
-
-        /* Ajustar los botones pequeños para que no se corten */
         div.stButton > button {
             min-height: 2.75rem !important;
             padding: 0.25rem 0.75rem !important;
@@ -104,22 +90,14 @@ st.markdown("""
             justify-content: center !important;
         }
 
-        /* Forzar el menú de radio a una sola línea y extenderlo a la derecha */
+        /* --- FORZAR MENÚ A UNA SOLA LÍNEA --- */
         div[data-testid="stRadio"] > div[role="radiogroup"] {
             flex-wrap: nowrap !important;
             white-space: nowrap !important;
             overflow: visible !important;
             gap: 0.5rem !important; 
         }
-
-        /* Reducir ligeramente el texto del menú */
-        div[data-testid="stRadio"] p {
-            font-size: 14px !important;
-        }
-        /* 👆 Hasta aquí 👆 */
-
-        </style>
-    """, unsafe_allow_html=True)
+        div[data-testid="stRadio"] p { font-size: 14px !important; }
 
         /* --- ESTILO GLOBAL TERMINAL MATRIX --- */
         @keyframes matrix_pulse {
@@ -158,19 +136,10 @@ st.markdown("""
             display: flex;
             justify-content: space-between;
         }
-        .matrix-katakana {
-            color: rgba(0, 255, 65, 0.22);
-            font-size: 11px;
-            letter-spacing: 3px;
-            user-select: none;
-        }
+        .matrix-katakana { color: rgba(0, 255, 65, 0.22); font-size: 11px; letter-spacing: 3px; user-select: none; }
         .matrix-cursor {
-            display: inline-block;
-            width: 9px;
-            height: 15px;
-            background-color: #00FF41;
-            vertical-align: middle;
-            animation: blink_mtx 0.8s infinite;
+            display: inline-block; width: 9px; height: 15px; background-color: #00FF41;
+            vertical-align: middle; animation: blink_mtx 0.8s infinite;
         }
         @keyframes blink_mtx { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     </style>

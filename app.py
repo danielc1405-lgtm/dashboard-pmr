@@ -25,23 +25,24 @@ st.markdown("""
     <style>
         [data-testid="stDataFrame"] { zoom: 0.95; }
         
-        /* 1. Aniquilar por completo el padding fantasma superior de Streamlit */
-        .main .block-container, div[data-testid="stAppViewBlockContainer"] { 
-            padding-top: 0rem !important; 
-            padding-bottom: 40px !important; 
+        /* 1. Reducir al mínimo el margen superior de la aplicación */
+        header, footer, header[data-testid="stHeader"] { 
+            visibility: hidden !important; 
+            display: none !important; 
+        }
+        .block-container, 
+        div[data-testid="stMainBlockContainer"], 
+        div[data-testid="stAppViewBlockContainer"] { 
+            padding-top: 1rem !important; 
+            padding-bottom: 1rem !important; 
             padding-left: 1rem !important; 
             padding-right: 1rem !important; 
             max-width: 100% !important; 
             overflow: visible !important; 
         }
-                
-        /* 2. Ocultar barra nativa y pie de página */
-        header, footer, header[data-testid="stHeader"] { 
-            display: none !important; 
-            visibility: hidden !important; 
-        }
+        div[data-testid="stVerticalBlock"] { overflow: visible !important; }
         
-        /* 3. Fondo negro puro global y eliminar parpadeo de tablas */
+        /* 2. Fondo negro puro global y eliminar parpadeo gris en tablas */
         [data-testid="stDataGrid"] { opacity: 1 !important; }
         .st-emotion-cache-1kyxreq { display: none !important; }
         .stApp, div[data-testid="stAppViewContainer"] { 
@@ -49,17 +50,22 @@ st.markdown("""
             background-color: #000000 !important; 
         }
 
-        /* 4. Contenedor general del Encabezado Superior */
+        /* 3. Encabezado Superior pegado al tope (sin espacio vacío) y fijo al bajar */
         div[data-testid="stHorizontalBlock"]:has([data-testid="stRadio"]):not(:has([data-testid="stForm"])) {
-            background-color: #0E1117 !important;
-            padding: 10px 14px !important;
+            position: -webkit-sticky !important;
+            position: sticky !important;
+            top: 0px !important;
+            z-index: 99999 !important;
+            background-color: #0B0E14 !important;
+            padding: 8px 14px !important;
             border-radius: 8px !important;
             border: 1px solid #1F2430 !important;
-            box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.7) !important;
-            margin-bottom: 10px !important;
+            box-shadow: 0px 6px 15px rgba(0, 0, 0, 0.85) !important;
+            margin-top: -14px !important;
+            margin-bottom: 8px !important;
         }
 
-        /* 5. Menú de Navegación (st.radio) en una sola línea sin romper palabras */
+        /* 4. Menú de Navegación (st.radio) en una sola línea */
         div[data-testid="stRadio"] > div[role="radiogroup"] {
             display: flex !important;
             flex-direction: row !important;
@@ -67,7 +73,7 @@ st.markdown("""
             gap: 6px !important;
             overflow-x: auto !important;
             overflow-y: hidden !important;
-            padding-bottom: 4px !important;
+            padding-bottom: 2px !important;
             scrollbar-width: none !important;
         }
         div[data-testid="stRadio"] > div[role="radiogroup"]::-webkit-scrollbar {
@@ -76,7 +82,7 @@ st.markdown("""
         div[data-testid="stRadio"] > div[role="radiogroup"] > label {
             flex-shrink: 0 !important;
             white-space: nowrap !important;
-            background-color: #161922 !important;
+            background-color: #141720 !important;
             padding: 4px 10px !important;
             border-radius: 6px !important;
             border: 1px solid #2B303C !important;
@@ -88,14 +94,20 @@ st.markdown("""
             border-color: #E50914 !important;
             background-color: #1F2430 !important;
         }
+        div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) {
+            background-color: #1F2430 !important;
+            border-color: #E50914 !important;
+        }
         div[data-testid="stRadio"] p {
             font-size: 0.82rem !important;
             white-space: nowrap !important;
             margin: 0 !important;
         }
 
-        /* 6. Botones de acción uniformes y botón Guardar en rojo vivo */
-        div.stButton > button {
+        /* 5. Rojo vivo en TODOS los botones primarios (Normales, Formularios y Descargas) */
+        div.stButton > button,
+        div[data-testid="stFormSubmitButton"] > button,
+        div[data-testid="stDownloadButton"] > button {
             min-height: 2.4rem !important;
             height: 2.4rem !important;
             padding: 0.2rem 0.6rem !important;
@@ -104,16 +116,43 @@ st.markdown("""
             justify-content: center !important;
             white-space: nowrap !important;
         }
-        div.stButton > button[kind="primary"] {
+        div.stButton > button[kind="primary"],
+        div[data-testid="stFormSubmitButton"] > button[kind="primary"],
+        div[data-testid="stFormSubmitButton"] > button,
+        div[data-testid="stDownloadButton"] > button[kind="primary"] {
             background-color: #E50914 !important;
             border-color: #E50914 !important;
             color: #FFFFFF !important;
             font-weight: 600 !important;
             opacity: 1 !important;
         }
-        div.stButton > button[kind="primary"]:hover {
+        div.stButton > button[kind="primary"]:hover,
+        div[data-testid="stFormSubmitButton"] > button[kind="primary"]:hover,
+        div[data-testid="stFormSubmitButton"] > button:hover,
+        div[data-testid="stDownloadButton"] > button[kind="primary"]:hover {
             background-color: #B20710 !important;
             border-color: #B20710 !important;
+            color: #FFFFFF !important;
+        }
+
+        /* 6. Eliminar tonos deslavados en Ventanas Emergentes (Pop-ups), Inputs y TextAreas */
+        div[role="dialog"],
+        div[data-testid="stDialog"] > div {
+            background-color: #05070A !important;
+            border: 1px solid #2B303C !important;
+            box-shadow: 0px 12px 35px rgba(0, 0, 0, 0.95) !important;
+        }
+        div[data-baseweb="modal"] > div:first-child,
+        div[data-testid="stModal"] > div:first-child {
+            background-color: rgba(0, 0, 0, 0.85) !important;
+        }
+        div[data-baseweb="select"] > div,
+        div[data-baseweb="input"] > div,
+        div[data-baseweb="textarea"],
+        textarea {
+            background-color: #0D1017 !important;
+            border-color: #2B303C !important;
+            color: #FFFFFF !important;
         }
 
         /* 7. Estilo Global Terminal Matrix */

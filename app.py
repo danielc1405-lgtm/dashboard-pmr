@@ -104,6 +104,23 @@ st.markdown("""
             justify-content: center !important;
         }
 
+        /* Forzar el menú de radio a una sola línea y extenderlo a la derecha */
+        div[data-testid="stRadio"] > div[role="radiogroup"] {
+            flex-wrap: nowrap !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
+            gap: 0.5rem !important; 
+        }
+
+        /* Reducir ligeramente el texto del menú */
+        div[data-testid="stRadio"] p {
+            font-size: 14px !important;
+        }
+        /* 👆 Hasta aquí 👆 */
+
+        </style>
+    """, unsafe_allow_html=True)
+
         /* --- ESTILO GLOBAL TERMINAL MATRIX --- */
         @keyframes matrix_pulse {
             0% { box-shadow: 0 0 10px rgba(0, 255, 65, 0.25), inset 0 0 15px rgba(0, 255, 65, 0.15); }

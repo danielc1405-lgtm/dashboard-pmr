@@ -25,15 +25,16 @@ st.markdown("""
     <style>
         [data-testid="stDataFrame"] { zoom: 0.95; }
         
-        /* 1. Eliminar márgenes muertos superiores de Streamlit */
+        /* 1. Aniquilar por completo el padding fantasma superior de Streamlit */
         .main .block-container, div[data-testid="stAppViewBlockContainer"] { 
-            padding-top: 0.5rem !important; 
+            padding-top: 0rem !important; 
             padding-bottom: 40px !important; 
             padding-left: 1rem !important; 
             padding-right: 1rem !important; 
             max-width: 100% !important; 
+            overflow: visible !important; 
         }
-        
+                
         /* 2. Ocultar barra nativa y pie de página */
         header, footer, header[data-testid="stHeader"] { 
             display: none !important; 

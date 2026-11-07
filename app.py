@@ -73,6 +73,13 @@ st.markdown("""
             background-color: #000000 !important; 
         }
 
+        header { visibility: hidden !important; }
+        footer { visibility: hidden !important; }
+        .block-container {
+            padding-top: 1rem !important; 
+            padding-bottom: 1rem !important;
+        }
+
         /* --- ESTILO GLOBAL TERMINAL MATRIX --- */
         @keyframes matrix_pulse {
             0% { box-shadow: 0 0 10px rgba(0, 255, 65, 0.25), inset 0 0 15px rgba(0, 255, 65, 0.15); }
@@ -152,7 +159,7 @@ if not st.session_state['autenticado']:
     with col_logo2:
         import os
         if os.path.exists("logo.png"):
-            st.image("logo.png", use_container_width=True)
+            st.image("logo.png", width=220)
             
     st.markdown("<h1 style='text-align: center; color: white; font-size: 3.5rem; margin-top: -10px;'>PMR Hub AI</h1>", unsafe_allow_html=True)
     

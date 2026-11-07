@@ -80,6 +80,30 @@ st.markdown("""
             padding-bottom: 1rem !important;
         }
 
+        /* Color rojo vivo para el botón principal (Guardar) */
+        div.stButton > button[kind="primary"] {
+            background-color: #E50914 !important; /* Rojo intenso */
+            border-color: #E50914 !important;
+            color: white !important;
+            opacity: 1 !important;
+        }
+
+        /* Efecto al pasar el mouse por el botón rojo */
+        div.stButton > button[kind="primary"]:hover {
+            background-color: #B20710 !important;
+            border-color: #B20710 !important;
+        }
+
+        /* Ajustar los botones pequeños para que no se corten */
+        div.stButton > button {
+            min-height: 2.75rem !important;
+            padding: 0.25rem 0.75rem !important;
+            line-height: 1.5 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+
         /* --- ESTILO GLOBAL TERMINAL MATRIX --- */
         @keyframes matrix_pulse {
             0% { box-shadow: 0 0 10px rgba(0, 255, 65, 0.25), inset 0 0 15px rgba(0, 255, 65, 0.15); }
@@ -450,7 +474,7 @@ def abrir_popup_monitor():
                 st.warning("No hay datos en la base principal para generar el reporte.")
 
 # El parámetro vertical_alignment="center" alinea todo a la misma altura en una sola fila estructurada.
-col_logo, col_menu, col_aseg, col_btn_ref, col_btn_pop, col_btn_dir, col_btn_tar, col_btn_gua = st.columns([1.2, 4.3, 1.4, 0.3, 0.3, 0.9, 0.9, 1.1], vertical_alignment="center")
+col_logo, col_menu, col_aseg, col_btn_ref, col_btn_pop, col_btn_dir, col_btn_tar, col_btn_gua = st.columns([1.2, 4.3, 1.4, 0.3, 0.3, 0.9, 0.9, 1.1], vertical_alignment="bottom")
 
 with col_logo:
     try: 

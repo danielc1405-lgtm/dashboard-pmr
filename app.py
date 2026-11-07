@@ -27,8 +27,8 @@ st.markdown("""
         
         /* 1. Aniquilar por completo el padding fantasma superior de Streamlit */
         .main .block-container, div[data-testid="stAppViewBlockContainer"] { 
-            padding-top: 1rem !important; 
-            padding-bottom: 1rem !important; 
+            padding-top: 0rem !important;  /* <- CORREGIDO: Elimina el espacio vacío arriba */
+            padding-bottom: 40px !important; 
             padding-left: 1rem !important; 
             padding-right: 1rem !important; 
             max-width: 100% !important; 
@@ -56,12 +56,33 @@ st.markdown("""
             margin-top: -15px !important; 
         }
         
-        div.row-widget.stRadio > div { flex-direction: row; gap: 8px; }
-        div.row-widget.stRadio > div > label { background-color: #1E1E24; padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid #333; font-size: 0.95rem; transition: all 0.3s ease; }
+        /* CORREGIDO: Botones del menú más compactos para que quepan en una línea */
+        div.row-widget.stRadio > div { flex-direction: row; gap: 4px !important; }
+        div.row-widget.stRadio > div > label { 
+            background-color: #1E1E24; 
+            padding: 4px 8px !important; /* Más pequeños */
+            border-radius: 6px; 
+            cursor: pointer; 
+            border: 1px solid #333; 
+            font-size: 0.80rem !important; /* Letra más pequeña */
+            transition: all 0.3s ease; 
+            white-space: nowrap !important;
+        }
         div.row-widget.stRadio > div > label:hover { border-color: #F63366; background-color: #2A2A35;}
         div.row-widget.stRadio > div > label[data-checked="true"] { background-color: #F63366; color: white; border-color: #F63366; }
         div.row-widget.stRadio > div > label > div:first-child { display: none; }
         
+        /* CORREGIDO: Evitar empalme limitando el desbordamiento horizontal */
+        div[data-testid="stRadio"] > div[role="radiogroup"] {
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            overflow-y: hidden !important;
+            scrollbar-width: none; /* Oculta barra en Firefox */
+        }
+        div[data-testid="stRadio"] > div[role="radiogroup"]::-webkit-scrollbar {
+            display: none; /* Oculta barra en Chrome/Edge */
+        }
+
         /* ELIMINAR EL PARPADEO GRIS AL EDITAR CELDAS Y FORZAR FONDO NEGRO */
         [data-testid="stDataGrid"] { opacity: 1 !important; }
         .st-emotion-cache-1kyxreq { display: none !important; }
@@ -70,7 +91,7 @@ st.markdown("""
             background-color: #000000 !important; 
         }
 
-        /* --- ESTILOS DE BOTONES --- */
+        /* --- ESTILOS DE BOTONES (Guardar, Tareas, etc) --- */
         div.stButton > button[kind="primary"] {
             background-color: #E50914 !important;
             border-color: #E50914 !important;
@@ -89,15 +110,6 @@ st.markdown("""
             align-items: center !important;
             justify-content: center !important;
         }
-
-        /* --- FORZAR MENÚ A UNA SOLA LÍNEA --- */
-        div[data-testid="stRadio"] > div[role="radiogroup"] {
-            flex-wrap: nowrap !important;
-            white-space: nowrap !important;
-            overflow: visible !important;
-            gap: 0.5rem !important; 
-        }
-        div[data-testid="stRadio"] p { font-size: 14px !important; }
 
         /* --- ESTILO GLOBAL TERMINAL MATRIX --- */
         @keyframes matrix_pulse {

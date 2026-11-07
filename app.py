@@ -690,9 +690,20 @@ def actualizar_tarea_en_sheet(ws_tareas, headers, row_data, nuevo_status, nuevo_
     ws_tareas.update_cells(celdas, value_input_option='USER_ENTERED')
 
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja el contenedor de mensajes con scroll vertical y auto-scroll al final."""
+    """Dibuja el contenedor de mensajes con scroll vertical controlado y auto-scroll."""
     import streamlit.components.v1 as components
-    caja_chat = st.container(height=250, border=True)
+    
+    # Inyectamos regla CSS para forzar el recorte del desbordamiento en contenedores con altura fija
+    st.markdown("""
+        <style>
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            overflow-y: auto !important;
+            max-height: 260px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    caja_chat = st.container(height=260, border=True)
     with caja_chat:
         emisor_orig = str(row.get('Emisor', 'Usuario')).strip()
         es_mio_orig = es_mismo_usuario(usuario_activo_real, emisor_orig, grupos_identidad)
@@ -701,7 +712,6 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
         
         historial_raw = str(row.get('Respuesta', '')).strip()
         if historial_raw and historial_raw.lower() not in ["none", "nan", ""]:
-            # Soportar tanto saltos de línea reales como '\n' escritos en texto
             lineas = historial_raw.replace('\\n', '\n').split('\n')
             for linea in lineas:
                 linea_limpia = linea.strip()
@@ -713,6 +723,26 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
         st.markdown('<div class="fin-hilo-chat"></div>', unsafe_allow_html=True)
 
     components.html(
+        """
+        <script>
+            setTimeout(() => {
+                const anclas = window.parent.document.querySelectorAll('.fin-hilo-chat');
+                anclas.forEach(ancla => {
+                    let contenedor = ancla.parentElement;
+                    while (contenedor && contenedor !== window.parent.document.body) {
+                        if (contenedor.scrollHeight > contenedor.clientHeight) {
+                            contenedor.scrollTop = contenedor.scrollHeight;
+                            break;
+                        }
+                        contenedor = contenedor.parentElement;
+                    }
+                });
+            }, 150);
+        </script>
+        """,
+        height=0
+    )
+    (
         """
         <script>
             setTimeout(() => {

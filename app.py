@@ -551,11 +551,13 @@ with col_btn_pop:
 # === [SISTEMA DE TAREAS Y DIRECTORIO FUNCIONALES] ===
 # ==============================================================================
 
-def obtener_mapa_usuarios(doc):
-    """Mapea Usuario <-> Nombre Completo para evitar fallos de coincidencia."""
+@st.cache_data(ttl=600)
+def obtener_mapa_usuarios():
+    """Lee Usuarios con caché de 10 min para nunca saturar la cuota de Google Sheets."""
     usuarios_dropdown = []
     grupos_identidad = []
     try:
+        doc = init_connection()
         ws_u = doc.worksheet("Usuarios")
         datos_u = ws_u.get_all_values()
         if len(datos_u) > 1:
@@ -573,6 +575,8 @@ def obtener_mapa_usuarios(doc):
                     grupos_identidad.append(alias)
     except Exception:
         pass
+    if not usuarios_dropdown:
+        usuarios_dropdown = ["Daniel Cantú", "Diana Cantú", "Marco A. Mendoza", "Israel Escamilla", "Cristian Gaona", "Juan Garza", "Dionicio Cantú"]
     return usuarios_dropdown, grupos_identidad
 
 def es_mismo_usuario(u1, u2, grupos_identidad=None):
@@ -602,9 +606,12 @@ def es_mismo_usuario(u1, u2, grupos_identidad=None):
             return True
     return False
 
-def leer_tareas_normalizadas(ws_tareas):
-    """Lee Gestor_Tareas respetando encabezados y rescatando filas desplazadas."""
+@st.cache_data(ttl=20)
+def leer_tareas_normalizadas():
+    """Lee Gestor_Tareas con caché de 20 seg para evitar bloqueos por exceso de consultas (Error 429)."""
     try:
+        doc = init_connection()
+        ws_tareas = doc.worksheet("Gestor_Tareas")
         datos = ws_tareas.get_all_values()
         if len(datos) <= 1:
             return pd.DataFrame(), []
@@ -632,7 +639,6 @@ def leer_tareas_normalizadas(ws_tareas):
                 continue
             f_ext = list(f) + [""] * max(0, len(headers) - len(f))
             
-            # Detectar si la fila se guardó desplazada 2 columnas a la izquierda (filas 3 y 4)
             st_normal = str(f_ext[c_sta]).strip() if c_sta >= 0 else ""
             if not st_normal and len(f_ext) > 6 and str(f_ext[6]).strip().lower() in ["pendiente", "resuelto", "finalizado"]:
                 filas_limpias.append({
@@ -690,7 +696,7 @@ def actualizar_tarea_en_sheet(ws_tareas, headers, row_data, nuevo_status, nuevo_
     ws_tareas.update_cells(celdas, value_input_option='USER_ENTERED')
 
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja una ventana estilo WhatsApp en HTML puro sin activar bloques de código Markdown."""
+    """Dibuja una ventana estilo WhatsApp dentro de un iframe aislado con scroll 100% blindado."""
     import html
     import re
     import streamlit.components.v1 as components
@@ -705,16 +711,13 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
     bg_0 = "#005C4B" if es_mio_orig else "#1F2C34"
     radius_0 = "10px 0px 10px 10px" if es_mio_orig else "0px 10px 10px 10px"
 
-    burbuja_inicial = (
-        f'<div style="display:flex; justify-content:{align_0}; margin-bottom:10px;">'
-        f'<div style="background-color:{bg_0}; color:#E9EDEF; padding:8px 12px; border-radius:{radius_0}; max-width:78%; box-shadow:0 1px 2px rgba(0,0,0,0.5); word-wrap:break-word;">'
-        f'<div style="font-size:0.75rem; color:#53BDEB; font-weight:700; margin-bottom:3px;">'
-        f'{html.escape(emisor_orig)} <span style="color:#8696A0; font-weight:normal; font-size:0.7rem;">• {html.escape(fecha_orig)}</span>'
-        f'</div>'
-        f'<div style="font-size:0.9rem; line-height:1.4;">{instruccion_orig}</div>'
+    burbujas.append(
+        f'<div class="msg-row" style="justify-content:{align_0};">'
+        f'<div class="bubble" style="background-color:{bg_0}; border-radius:{radius_0};">'
+        f'<div class="author" style="color:#53BDEB;">{html.escape(emisor_orig)} <span class="time">• {html.escape(fecha_orig)}</span></div>'
+        f'<div class="txt">{instruccion_orig}</div>'
         f'</div></div>'
     )
-    burbujas.append(burbuja_inicial)
 
     historial_raw = str(row.get('Respuesta', '')).strip()
     if historial_raw and historial_raw.lower() not in ["none", "nan", ""]:
@@ -739,54 +742,75 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
 
             header_html = ""
             if autor_msg:
-                header_html = (
-                    f'<div style="font-size:0.75rem; color:{color_autor}; font-weight:700; margin-bottom:3px;">'
-                    f'{html.escape(autor_msg)} <span style="color:#8696A0; font-weight:normal; font-size:0.7rem;">• {html.escape(f_msg)}</span>'
-                    f'</div>'
-                )
+                header_html = f'<div class="author" style="color:{color_autor};">{html.escape(autor_msg)} <span class="time">• {html.escape(f_msg)}</span></div>'
 
-            burbuja_resp = (
-                f'<div style="display:flex; justify-content:{align_m}; margin-bottom:10px;">'
-                f'<div style="background-color:{bg_m}; color:#E9EDEF; padding:8px 12px; border-radius:{radius_m}; max-width:78%; box-shadow:0 1px 2px rgba(0,0,0,0.5); word-wrap:break-word;">'
+            burbujas.append(
+                f'<div class="msg-row" style="justify-content:{align_m};">'
+                f'<div class="bubble" style="background-color:{bg_m}; border-radius:{radius_m};">'
                 f'{header_html}'
-                f'<div style="font-size:0.9rem; line-height:1.4;">{html.escape(txt_msg)}</div>'
+                f'<div class="txt">{html.escape(txt_msg)}</div>'
                 f'</div></div>'
             )
-            burbujas.append(burbuja_resp)
 
-    id_caja = f"wa_box_{row.get('GS_Row', '0')}"
-    html_completo = (
-        f'<div id="{id_caja}" class="pmr-wa-scrollbox" style="'
-        f'height:310px; max-height:310px; overflow-y:scroll !important; overflow-x:hidden !important; '
-        f'background-color:#0B141A; background-image:radial-gradient(#1F2C34 1px, transparent 1px); '
-        f'background-size:20px 20px; border:1px solid #222E35; border-radius:10px; '
-        f'padding:14px; margin-bottom:10px; display:block !important;">'
-        f'{"".join(burbujas)}'
-        f'</div>'
-    )
-    st.markdown(html_completo, unsafe_allow_html=True)
-
-    components.html(
-        f"""
+    iframe_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+            body {{
+                background-color: transparent;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                overflow: hidden;
+            }}
+            #chat-viewport {{
+                height: 315px;
+                width: 100%;
+                overflow-y: auto;
+                overflow-x: hidden;
+                background-color: #0B141A;
+                background-image: radial-gradient(#1F2C34 1px, transparent 1px);
+                background-size: 20px 20px;
+                border: 1px solid #222E35;
+                border-radius: 10px;
+                padding: 14px;
+            }}
+            #chat-viewport::-webkit-scrollbar {{ width: 7px; }}
+            #chat-viewport::-webkit-scrollbar-track {{ background: #0B141A; border-radius: 10px; }}
+            #chat-viewport::-webkit-scrollbar-thumb {{ background: #374045; border-radius: 10px; }}
+            .msg-row {{ display: flex; margin-bottom: 10px; width: 100%; }}
+            .bubble {{
+                color: #E9EDEF;
+                padding: 8px 12px;
+                max-width: 78%;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.5);
+                word-wrap: break-word;
+            }}
+            .author {{ font-size: 0.75rem; font-weight: 700; margin-bottom: 3px; }}
+            .time {{ color: #8696A0; font-weight: normal; font-size: 0.7rem; }}
+            .txt {{ font-size: 0.9rem; line-height: 1.4; }}
+        </style>
+    </head>
+    <body>
+        <div id="chat-viewport">
+            {''.join(burbujas)}
+        </div>
         <script>
-            setTimeout(() => {{
-                const box = window.parent.document.getElementById('{id_caja}');
-                if (box) {{
-                    box.scrollTop = box.scrollHeight;
-                }}
-            }}, 80);
+            const vp = document.getElementById('chat-viewport');
+            if (vp) {{
+                vp.scrollTop = vp.scrollHeight;
+            }}
         </script>
-        """,
-        height=0
-    )
+    </body>
+    </html>
+    """
+    components.html(iframe_html, height=325, scrolling=False)
 
-@st.cache_data(ttl=15)
 def contar_tareas_pendientes(usuario):
     try:
-        doc = init_connection()
-        _, grupos_id = obtener_mapa_usuarios(doc)
-        ws_tareas = doc.worksheet("Gestor_Tareas")
-        df_t, _ = leer_tareas_normalizadas(ws_tareas)
+        _, grupos_id = obtener_mapa_usuarios()
+        df_t, _ = leer_tareas_normalizadas()
         if df_t.empty:
             return 0
         total_alertas = 0
@@ -805,21 +829,20 @@ def abrir_centro_tareas():
     doc = init_connection()
     usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
 
-    # 1. Extraer Usuarios y Mapa de Identidades
-    usuarios_reales, grupos_identidad = obtener_mapa_usuarios(doc)
+    # 1. Extraer Usuarios desde caché (Cero consumo extra de cuota API)
+    usuarios_reales, grupos_identidad = obtener_mapa_usuarios()
 
-    # 2. Extraer Tareas (Gestor_Tareas)
-    try:
-        ws_tareas = doc.worksheet("Gestor_Tareas")
-        df_tareas, headers_tareas = leer_tareas_normalizadas(ws_tareas)
-    except Exception:
-        df_tareas, headers_tareas = pd.DataFrame(), []
+    # 2. Extraer Tareas desde caché rápida
+    df_tareas, headers_tareas = leer_tareas_normalizadas()
 
-    # 3. Extraer ÚNICAMENTE Siniestros y Refacciones ACTIVOS de BD_UNIFICADA
+    # 3. Extraer Siniestros y Refacciones ACTIVOS reusando la caché de BD_UNIFICADA
     try:
-        ws_uni = doc.worksheet("BD_UNIFICADA")
-        datos_uni = ws_uni.get_all_values()
-        df_uni_local = pd.DataFrame(datos_uni[1:], columns=[str(h).strip() for h in datos_uni[0]]) if len(datos_uni) > 1 else pd.DataFrame()
+        if 'cargar_base_viva' in globals():
+            df_uni_local = cargar_base_viva().copy()
+        else:
+            ws_uni = doc.worksheet("BD_UNIFICADA")
+            datos_uni = ws_uni.get_all_values()
+            df_uni_local = pd.DataFrame(datos_uni[1:], columns=[str(h).strip() for h in datos_uni[0]]) if len(datos_uni) > 1 else pd.DataFrame()
         
         col_sin_loc = next((c for c in df_uni_local.columns if "SINIESTRO" in str(c).upper() or "PEDIDO" in str(c).upper()), None)
         col_marca_loc = next((c for c in df_uni_local.columns if "MARCA" in str(c).upper()), None)
@@ -846,7 +869,7 @@ def abrir_centro_tareas():
         df_uni_local = pd.DataFrame()
         lista_siniestros = []
 
-    # Filtrar chats donde participa el usuario actual (como Receptor o como Emisor)
+    # Filtrar chats donde participa el usuario actual
     chats_activos = pd.DataFrame()
     chats_finalizados = pd.DataFrame()
     n_atencion = 0
@@ -861,7 +884,6 @@ def abrir_centro_tareas():
             chats_activos = df_mios[df_mios['Status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])].copy()
             chats_finalizados = df_mios[df_mios['Status'].astype(str).str.strip().str.lower() == 'finalizado'].copy()
 
-            # Priorizar arriba los que requieren mi acción inmediata
             def requiere_mi_accion(r):
                 st_v = str(r.get('Status', '')).strip().lower()
                 soy_rec = es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad)
@@ -878,51 +900,61 @@ def abrir_centro_tareas():
     lbl_chats = f"💬 Chats por Siniestro / Tema ({n_atencion} nuevos)" if n_atencion > 0 else f"💬 Chats Activos ({len(chats_activos)})"
     tabs_tareas = st.tabs([lbl_chats, "➕ Nuevo Chat / Tarea", f"📁 Finalizados ({len(chats_finalizados)})"])
 
-    # --- TAB 1: INTERFAZ ESTILO WHATSAPP (2 PANELES) ---
+    # --- TAB 1: INTERFAZ ESTILO WHATSAPP (LISTA VERTICAL A LA IZQUIERDA | CHAT A LA DERECHA) ---
     with tabs_tareas[0]:
         if not chats_activos.empty:
-            col_lista, col_ventana = st.columns([1.3, 2.7], gap="medium")
+            col_lista, col_ventana = st.columns([1.35, 2.65], gap="medium")
+
+            opciones_ids = chats_activos['GS_Row'].tolist()
+            if 'chat_activo_gs_row' not in st.session_state or st.session_state['chat_activo_gs_row'] not in opciones_ids:
+                st.session_state['chat_activo_gs_row'] = opciones_ids[0]
 
             with col_lista:
-                st.markdown("##### 📋 Temas / Siniestros")
-                opciones_ids = chats_activos['GS_Row'].tolist()
+                c_tit, c_ref_btn = st.columns([3, 1], vertical_alignment="center")
+                c_tit.markdown(f"##### 📋 Temas ({len(opciones_ids)})")
+                if c_ref_btn.button("🔄", key="btn_ref_wa_list", help="Actualizar mensajes"):
+                    leer_tareas_normalizadas.clear()
+                    st.rerun()
 
-                def formatear_item_chat(gs_r):
-                    fila_c = chats_activos[chats_activos['GS_Row'] == gs_r].iloc[0]
-                    ref_c = str(fila_c.get('Siniestro / Taller / Piezas', 'General')).strip()
-                    ref_corta = ref_c.split(" | ⚙️")[0].strip()
-                    soy_rec = es_mismo_usuario(usuario_activo_real, fila_c.get('Receptor', ''), grupos_identidad)
-                    contraparte = fila_c.get('Emisor', '') if soy_rec else fila_c.get('Receptor', '')
-                    icono = "🔴" if fila_c.get('_prio', 1) == 0 else "🟢"
-                    return f"{icono} {ref_corta} ({contraparte})"
-
-                chat_sel_row = st.radio(
-                    "Selecciona un chat:",
-                    options=opciones_ids,
-                    format_func=formatear_item_chat,
-                    label_visibility="collapsed",
-                    key="radio_wa_chat_sel"
-                )
+                # Lista vertical de botones hacia abajo (inmune al CSS horizontal de st.radio)
+                with st.container(height=360, border=True):
+                    for gs_r in opciones_ids:
+                        fila_c = chats_activos[chats_activos['GS_Row'] == gs_r].iloc[0]
+                        ref_c = str(fila_c.get('Siniestro / Taller / Piezas', 'General')).strip()
+                        ref_corta = ref_c.split(" | ⚙️")[0].strip()
+                        if len(ref_corta) > 25:
+                            ref_corta = ref_corta[:25] + "..."
+                        soy_rec = es_mismo_usuario(usuario_activo_real, fila_c.get('Receptor', ''), grupos_identidad)
+                        contraparte = fila_c.get('Emisor', '') if soy_rec else fila_c.get('Receptor', '')
+                        icono = "🔴" if fila_c.get('_prio', 1) == 0 else "🟢"
+                        es_seleccionado = (st.session_state['chat_activo_gs_row'] == gs_r)
+                        
+                        lbl_boton = f"{icono} {ref_corta} ({contraparte})"
+                        if st.button(
+                            lbl_boton,
+                            key=f"sel_chat_btn_{gs_r}",
+                            type="primary" if es_seleccionado else "secondary",
+                            use_container_width=True
+                        ):
+                            st.session_state['chat_activo_gs_row'] = gs_r
+                            st.rerun()
 
             with col_ventana:
+                chat_sel_row = st.session_state['chat_activo_gs_row']
                 row_activa = chats_activos[chats_activos['GS_Row'] == chat_sel_row].iloc[0]
                 soy_emisor_chat = es_mismo_usuario(usuario_activo_real, row_activa.get('Emisor', ''), grupos_identidad)
                 st_chat = str(row_activa.get('Status', '')).strip().lower()
 
-                # Encabezado superior del chat seleccionado
                 st.markdown(
-                    f"""
-                    <div style="background-color:#1F2C34; padding:10px 14px; border-radius:8px; margin-bottom:8px; border-left:4px solid #00A884;">
-                        <div style="font-size:0.95rem; font-weight:700; color:#E9EDEF;">🚗 {row_activa.get('Siniestro / Taller / Piezas', 'General')}</div>
-                        <div style="font-size:0.78rem; color:#8696A0;">
-                            👤 <b>Emisor:</b> {row_activa.get('Emisor', 'N/A')}  |  🎯 <b>Para:</b> {row_activa.get('Receptor', 'N/A')}  |  📌 <b>Estatus:</b> {st_chat.upper()}
-                        </div>
-                    </div>
-                    """,
+                    f'<div style="background-color:#1F2C34; padding:10px 14px; border-radius:8px; margin-bottom:4px; border-left:4px solid #00A884;">'
+                    f'<div style="font-size:0.95rem; font-weight:700; color:#E9EDEF;">🚗 {row_activa.get("Siniestro / Taller / Piezas", "General")}</div>'
+                    f'<div style="font-size:0.78rem; color:#8696A0;">'
+                    f'👤 <b>Emisor:</b> {row_activa.get("Emisor", "N/A")}  |  🎯 <b>Para:</b> {row_activa.get("Receptor", "N/A")}  |  📌 <b>Estatus:</b> {st_chat.upper()}'
+                    f'</div></div>',
                     unsafe_allow_html=True
                 )
 
-                # Ventana de mensajes con scroll garantizado
+                # Ventana de mensajes aislada en iframe con scroll garantizado
                 renderizar_hilo_chat(row_activa, usuario_activo_real, grupos_identidad)
 
                 # Barra inferior para escribir y responder
@@ -943,17 +975,18 @@ def abrir_centro_tareas():
                             linea_nueva = f"[{ahora_str}] {usuario_activo_real}: {nuevo_texto.strip()}"
                             hist_final = f"{hist_prev}\n{linea_nueva}".strip() if hist_prev else linea_nueva
 
-                            # Si envía el emisor, pasa a 'Pendiente' para notificar al receptor; si responde el receptor, pasa a 'Resuelto' para notificar al emisor
                             prox_status = "Pendiente" if soy_emisor_chat else "Resuelto"
+                            ws_tareas = doc.worksheet("Gestor_Tareas")
                             actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row_activa, prox_status, hist_final)
-                            contar_tareas_pendientes.clear()
+                            leer_tareas_normalizadas.clear()
                             st.rerun()
                         else:
                             st.warning("Escribe un mensaje primero.")
                 with c_fin:
                     if st.button("🏁 Finalizar", key=f"wa_btn_fin_{chat_sel_row}", use_container_width=True, help="Cerrar y archivar este tema"):
+                        ws_tareas = doc.worksheet("Gestor_Tareas")
                         actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row_activa, "Finalizado", str(row_activa.get('Respuesta', '')).strip())
-                        contar_tareas_pendientes.clear()
+                        leer_tareas_normalizadas.clear()
                         st.success("Conversación archivada en Finalizados.")
                         st.rerun()
         else:
@@ -994,6 +1027,9 @@ def abrir_centro_tareas():
                         ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
 
                 try:
+                    ws_tareas = doc.worksheet("Gestor_Tareas")
+                    if not headers_tareas:
+                        headers_tareas = [str(h).strip() for h in ws_tareas.row_values(1)]
                     if not headers_tareas:
                         headers_tareas = ["ID_Tarea", "Fecha_Creacion", "Emisor", "Receptor", "Siniestro / Taller / Piezas", "Instruccion", "Status", "Respuesta"]
                     headers_up = [str(h).strip().upper().rstrip(':') for h in headers_tareas]
@@ -1024,9 +1060,9 @@ def abrir_centro_tareas():
                     if i_rp >= 0: nueva_fila[i_rp] = ""
 
                     ws_tareas.append_row(nueva_fila, value_input_option='USER_ENTERED')
-                    contar_tareas_pendientes.clear()
+                    leer_tareas_normalizadas.clear()
                     st.success(f"✅ Conversación iniciada con {usuario_destino}")
-                    time.sleep(0.5)
+                    time.sleep(0.4)
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error al guardar: {e}")

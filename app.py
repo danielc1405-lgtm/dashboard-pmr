@@ -909,14 +909,19 @@ def abrir_centro_tareas():
             if 'chat_activo_gs_row' not in st.session_state or st.session_state['chat_activo_gs_row'] not in opciones_ids:
                 st.session_state['chat_activo_gs_row'] = opciones_ids[0]
 
+            # Callbacks para cambiar de chat o refrescar SIN usar st.rerun() (evita que el dialog se cierre)
+            def seleccionar_chat_cb(gs_id):
+                st.session_state['chat_activo_gs_row'] = gs_id
+
+            def refrescar_lista_cb():
+                leer_tareas_normalizadas.clear()
+
             with col_lista:
                 c_tit, c_ref_btn = st.columns([3, 1], vertical_alignment="center")
                 c_tit.markdown(f"##### 📋 Temas ({len(opciones_ids)})")
-                if c_ref_btn.button("🔄", key="btn_ref_wa_list", help="Actualizar mensajes"):
-                    leer_tareas_normalizadas.clear()
-                    st.rerun()
+                c_ref_btn.button("🔄", key="btn_ref_wa_list", help="Actualizar mensajes", on_click=refrescar_lista_cb)
 
-                # Lista vertical de botones hacia abajo (inmune al CSS horizontal de st.radio)
+                # Lista vertical de botones hacia abajo con cambio instantáneo sin cerrar el modal
                 with st.container(height=360, border=True):
                     for gs_r in opciones_ids:
                         fila_c = chats_activos[chats_activos['GS_Row'] == gs_r].iloc[0]
@@ -930,14 +935,14 @@ def abrir_centro_tareas():
                         es_seleccionado = (st.session_state['chat_activo_gs_row'] == gs_r)
                         
                         lbl_boton = f"{icono} {ref_corta} ({contraparte})"
-                        if st.button(
+                        st.button(
                             lbl_boton,
                             key=f"sel_chat_btn_{gs_r}",
                             type="primary" if es_seleccionado else "secondary",
-                            use_container_width=True
-                        ):
-                            st.session_state['chat_activo_gs_row'] = gs_r
-                            st.rerun()
+                            use_container_width=True,
+                            on_click=seleccionar_chat_cb,
+                            args=(gs_r,)
+                        )
 
             with col_ventana:
                 chat_sel_row = st.session_state['chat_activo_gs_row']
@@ -957,38 +962,55 @@ def abrir_centro_tareas():
                 # Ventana de mensajes aislada en iframe con scroll garantizado
                 renderizar_hilo_chat(row_activa, usuario_activo_real, grupos_identidad)
 
+                # Callbacks para Enviar y Finalizar manteniendo abierta la ventana
+                key_input_actual = f"wa_msg_input_{chat_sel_row}"
+
+                def enviar_msg_cb(row_act, soy_emi, k_inp):
+                    texto = st.session_state.get(k_inp, "").strip()
+                    if texto:
+                        tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
+                        ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
+                        hist_prev = str(row_act.get('Respuesta', '')).strip()
+                        linea_nueva = f"[{ahora_str}] {usuario_activo_real}: {texto}"
+                        hist_final = f"{hist_prev}\n{linea_nueva}".strip() if hist_prev else linea_nueva
+                        prox_status = "Pendiente" if soy_emi else "Resuelto"
+                        ws_t = doc.worksheet("Gestor_Tareas")
+                        actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, prox_status, hist_final)
+                        leer_tareas_normalizadas.clear()
+                        st.session_state[k_inp] = ""
+
+                def finalizar_chat_cb(row_act):
+                    ws_t = doc.worksheet("Gestor_Tareas")
+                    actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, "Finalizado", str(row_act.get('Respuesta', '')).strip())
+                    leer_tareas_normalizadas.clear()
+
                 # Barra inferior para escribir y responder
                 c_inp, c_send, c_fin = st.columns([2.8, 1.1, 1.1], vertical_alignment="bottom")
                 with c_inp:
-                    nuevo_texto = st.text_input(
+                    st.text_input(
                         "Mensaje:",
-                        key=f"wa_msg_input_{chat_sel_row}",
+                        key=key_input_actual,
                         placeholder="Escribe un mensaje en este hilo...",
                         label_visibility="collapsed"
                     )
                 with c_send:
-                    if st.button("📤 Enviar", key=f"wa_btn_send_{chat_sel_row}", type="primary", use_container_width=True):
-                        if nuevo_texto.strip():
-                            tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
-                            ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
-                            hist_prev = str(row_activa.get('Respuesta', '')).strip()
-                            linea_nueva = f"[{ahora_str}] {usuario_activo_real}: {nuevo_texto.strip()}"
-                            hist_final = f"{hist_prev}\n{linea_nueva}".strip() if hist_prev else linea_nueva
-
-                            prox_status = "Pendiente" if soy_emisor_chat else "Resuelto"
-                            ws_tareas = doc.worksheet("Gestor_Tareas")
-                            actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row_activa, prox_status, hist_final)
-                            leer_tareas_normalizadas.clear()
-                            st.rerun()
-                        else:
-                            st.warning("Escribe un mensaje primero.")
+                    st.button(
+                        "📤 Enviar",
+                        key=f"wa_btn_send_{chat_sel_row}",
+                        type="primary",
+                        use_container_width=True,
+                        on_click=enviar_msg_cb,
+                        args=(row_activa, soy_emisor_chat, key_input_actual)
+                    )
                 with c_fin:
-                    if st.button("🏁 Finalizar", key=f"wa_btn_fin_{chat_sel_row}", use_container_width=True, help="Cerrar y archivar este tema"):
-                        ws_tareas = doc.worksheet("Gestor_Tareas")
-                        actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row_activa, "Finalizado", str(row_activa.get('Respuesta', '')).strip())
-                        leer_tareas_normalizadas.clear()
-                        st.success("Conversación archivada en Finalizados.")
-                        st.rerun()
+                    st.button(
+                        "🏁 Finalizar",
+                        key=f"wa_btn_fin_{chat_sel_row}",
+                        use_container_width=True,
+                        help="Cerrar y archivar este tema",
+                        on_click=finalizar_chat_cb,
+                        args=(row_activa,)
+                    )
         else:
             st.info("🎉 No tienes conversaciones ni tareas activas por el momento.")
 

@@ -742,26 +742,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
         """,
         height=0
     )
-    (
-        """
-        <script>
-            setTimeout(() => {
-                const anclas = window.parent.document.querySelectorAll('.fin-hilo-chat');
-                anclas.forEach(ancla => {
-                    let contenedor = ancla.parentElement;
-                    while (contenedor && contenedor !== window.parent.document.body) {
-                        if (contenedor.scrollHeight > contenedor.clientHeight) {
-                            contenedor.scrollTop = contenedor.scrollHeight;
-                        }
-                        contenedor = contenedor.parentElement;
-                    }
-                });
-            }, 120);
-        </script>
-        """,
-        height=0
-    )
-
+    
 @st.cache_data(ttl=15)
 def contar_tareas_pendientes(usuario):
     try:

@@ -1212,12 +1212,16 @@ if not df_historico.empty:
     if vista_actual in ["🔍 Consultas", "📊 Analítico", "Precios Promedio"]:
         df_completo = pd.concat([df_completo, df_historico], ignore_index=True)
     elif vista_actual in ["⚙️ Panel Operativo", "🚚 Operación del Día", "🚚 Rutas"]:
-        # Rescatamos del histórico los reembolsos o recolecciones que sigan activos
         c_est_h = next((c for c in df_historico.columns if "ESTATUS" in str(c).upper() or "STATUS" in str(c).upper()), None)
         if c_est_h:
             df_hist_activos = df_historico[df_historico[c_est_h].astype(str).str.upper().str.contains("PROCESO DE REEMBOLSO|RECOLECC|ENTREGADO|PAGO A TALLER", na=False)].copy()
             if not df_hist_activos.empty:
                 df_completo = pd.concat([df_completo, df_hist_activos], ignore_index=True)
+                # Evitar que una pieza que esté en ambas hojas se cuente doble:
+                c_id_dedup = next((c for c in df_completo.columns if "SINIESTRO" in str(c).upper()), None)
+                c_desc_dedup = next((c for c in df_completo.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+                if c_id_dedup and c_desc_dedup:
+                    df_completo = df_completo.drop_duplicates(subset=[c_id_dedup, c_desc_dedup], keep='first'). reset_index(drop=True)
 
 # Solo carga compras si la pestaña lo requiere (Incluye Operación del Día y Consultas)
 df_compras = cargar_compras() if vista_actual in ["🛒 Compras", "📊 Analítico", "🚚 Operación del Día", "⚙️ Panel Operativo", "🚚 Rutas", "🔍 Consultas"] else pd.DataFrame()
@@ -2184,9 +2188,29 @@ elif vista_actual == "⚙️ Panel Operativo":
     recolecciones = len(df_recoleccion_total)
     
     excluir_kpi = ["PÉRDIDA TOTAL", "PAGO DE DAÑOS"]
-    por_confirmar_kpi = len(df_proceso[(df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_proceso[col_estatus].astype(str).str.strip() == "")) & (~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi))]) if col_estatus else 0
-    en_proceso = len(df_proceso[~df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") & (~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi)) & (df_proceso[col_estatus].astype(str).str.strip() != "")]) if col_estatus else len(df_proceso)
-    partidas_por_facturar = len(df_trabajo[df_trabajo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"]) if col_estatus else 0
+    regex_excluir_kpi = "CONFIRMAR|ENTREGADO|PAGO A TALLER|RECIBIDO|FACTURADO|CANCELADO|RECOLEC|REEMBOLSO|PÉRDIDA TOTAL|PAGO DE DAÑOS"
+
+    if col_estatus and not df_proceso.empty:
+        est_str = df_proceso[col_estatus].fillna('').astype(str).str.strip()
+        est_up = est_str.str.upper()
+        mask_activos_surtido = (~est_up.str.contains(regex_excluir_kpi)) & (est_str != "")
+    else:
+        mask_activos_surtido = pd.Series(False, index=df_proceso.index)
+
+    if col_vencimiento and not df_proceso.empty:
+        fechas_venc_dt = df_proceso[col_vencimiento].apply(parse_dt_safe_op)
+        vencidas_pasadas_kpi = len(df_proceso[(fechas_venc_dt < hoy_dt) & (df_proceso[col_vencimiento] != '') & mask_activos_surtido])
+        vencen_hoy = len(df_proceso[(df_proceso[col_vencimiento] == hoy_str) & mask_activos_surtido])
+    else:
+        vencidas_pasadas_kpi = 0
+        vencen_hoy = 0
+
+    recolecciones = len(df_recoleccion_total)
+    por_confirmar_kpi = len(df_proceso[(df_proceso[col_estatus].astype(str).str.upper().str.contains("CONFIRMAR") | (df_proceso[col_estatus].astype(str).str.strip() == "")) & (~df_proceso[col_estatus].astype(str).str.upper().isin(excluir_kpi))]) if col_estatus and not df_proceso.empty else 0
+    
+    # Si quieres que "En Proceso" muestre solo las piezas en surtido/tránsito (12), usa mask_activos_surtido:
+    en_proceso = len(df_proceso[mask_activos_surtido]) if col_estatus and not df_proceso.empty else len(df_proceso)
+    partidas_por_facturar = len(df_trabajo[df_trabajo[col_estatus].astype(str).str.strip().str.upper() == "RECIBIDO"]) if col_estatus and not df_trabajo.empty else 0
     
     kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
     kpi1.metric("📦 En Proceso (Piezas)", en_proceso); kpi2.metric("⏳ Por Confirmar", por_confirmar_kpi); kpi3.metric("⚠️ Vencen Hoy", vencen_hoy)

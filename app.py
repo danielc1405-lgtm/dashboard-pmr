@@ -690,7 +690,7 @@ def actualizar_tarea_en_sheet(ws_tareas, headers, row_data, nuevo_status, nuevo_
     ws_tareas.update_cells(celdas, value_input_option='USER_ENTERED')
 
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja una ventana estilo WhatsApp en HTML puro con scroll garantizado."""
+    """Dibuja una ventana estilo WhatsApp en HTML puro sin activar bloques de código Markdown."""
     import html
     import re
     import streamlit.components.v1 as components
@@ -705,16 +705,16 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
     bg_0 = "#005C4B" if es_mio_orig else "#1F2C34"
     radius_0 = "10px 0px 10px 10px" if es_mio_orig else "0px 10px 10px 10px"
 
-    burbujas.append(f"""
-        <div style="display:flex; justify-content:{align_0}; margin-bottom:10px;">
-            <div style="background-color:{bg_0}; color:#E9EDEF; padding:8px 12px; border-radius:{radius_0}; max-width:78%; box-shadow:0 1px 2px rgba(0,0,0,0.5); word-wrap:break-word;">
-                <div style="font-size:0.75rem; color:#53BDEB; font-weight:700; margin-bottom:3px;">
-                    {html.escape(emisor_orig)} <span style="color:#8696A0; font-weight:normal; font-size:0.7rem;">• {html.escape(fecha_orig)}</span>
-                </div>
-                <div style="font-size:0.9rem; line-height:1.4;">{instruccion_orig}</div>
-            </div>
-        </div>
-    """)
+    burbuja_inicial = (
+        f'<div style="display:flex; justify-content:{align_0}; margin-bottom:10px;">'
+        f'<div style="background-color:{bg_0}; color:#E9EDEF; padding:8px 12px; border-radius:{radius_0}; max-width:78%; box-shadow:0 1px 2px rgba(0,0,0,0.5); word-wrap:break-word;">'
+        f'<div style="font-size:0.75rem; color:#53BDEB; font-weight:700; margin-bottom:3px;">'
+        f'{html.escape(emisor_orig)} <span style="color:#8696A0; font-weight:normal; font-size:0.7rem;">• {html.escape(fecha_orig)}</span>'
+        f'</div>'
+        f'<div style="font-size:0.9rem; line-height:1.4;">{instruccion_orig}</div>'
+        f'</div></div>'
+    )
+    burbujas.append(burbuja_inicial)
 
     historial_raw = str(row.get('Respuesta', '')).strip()
     if historial_raw and historial_raw.lower() not in ["none", "nan", ""]:
@@ -724,7 +724,6 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
             if not linea_limpia:
                 continue
             
-            # Separar "[Fecha] Autor: Mensaje" si tiene ese formato
             m = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', linea_limpia)
             if m:
                 f_msg, autor_msg, txt_msg = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
@@ -740,39 +739,33 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
 
             header_html = ""
             if autor_msg:
-                header_html = f'<div style="font-size:0.75rem; color:{color_autor}; font-weight:700; margin-bottom:3px;">{html.escape(autor_msg)} <span style="color:#8696A0; font-weight:normal; font-size:0.7rem;">• {html.escape(f_msg)}</span></div>'
+                header_html = (
+                    f'<div style="font-size:0.75rem; color:{color_autor}; font-weight:700; margin-bottom:3px;">'
+                    f'{html.escape(autor_msg)} <span style="color:#8696A0; font-weight:normal; font-size:0.7rem;">• {html.escape(f_msg)}</span>'
+                    f'</div>'
+                )
 
-            burbujas.append(f"""
-                <div style="display:flex; justify-content:{align_m}; margin-bottom:10px;">
-                    <div style="background-color:{bg_m}; color:#E9EDEF; padding:8px 12px; border-radius:{radius_m}; max-width:78%; box-shadow:0 1px 2px rgba(0,0,0,0.5); word-wrap:break-word;">
-                        {header_html}
-                        <div style="font-size:0.9rem; line-height:1.4;">{html.escape(txt_msg)}</div>
-                    </div>
-                </div>
-            """)
+            burbuja_resp = (
+                f'<div style="display:flex; justify-content:{align_m}; margin-bottom:10px;">'
+                f'<div style="background-color:{bg_m}; color:#E9EDEF; padding:8px 12px; border-radius:{radius_m}; max-width:78%; box-shadow:0 1px 2px rgba(0,0,0,0.5); word-wrap:break-word;">'
+                f'{header_html}'
+                f'<div style="font-size:0.9rem; line-height:1.4;">{html.escape(txt_msg)}</div>'
+                f'</div></div>'
+            )
+            burbujas.append(burbuja_resp)
 
     id_caja = f"wa_box_{row.get('GS_Row', '0')}"
-    html_completo = f"""
-        <div id="{id_caja}" class="pmr-wa-scrollbox" style="
-            height: 310px;
-            max-height: 310px;
-            overflow-y: scroll !important;
-            overflow-x: hidden !important;
-            background-color: #0B141A;
-            background-image: radial-gradient(#1F2C34 1px, transparent 1px);
-            background-size: 20px 20px;
-            border: 1px solid #222E35;
-            border-radius: 10px;
-            padding: 14px;
-            margin-bottom: 10px;
-            display: block !important;
-        ">
-            {''.join(burbujas)}
-        </div>
-    """
+    html_completo = (
+        f'<div id="{id_caja}" class="pmr-wa-scrollbox" style="'
+        f'height:310px; max-height:310px; overflow-y:scroll !important; overflow-x:hidden !important; '
+        f'background-color:#0B141A; background-image:radial-gradient(#1F2C34 1px, transparent 1px); '
+        f'background-size:20px 20px; border:1px solid #222E35; border-radius:10px; '
+        f'padding:14px; margin-bottom:10px; display:block !important;">'
+        f'{"".join(burbujas)}'
+        f'</div>'
+    )
     st.markdown(html_completo, unsafe_allow_html=True)
 
-    # Auto-scroll directo al fondo de la caja de chat
     components.html(
         f"""
         <script>

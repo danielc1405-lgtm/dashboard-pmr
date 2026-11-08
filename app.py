@@ -690,59 +690,103 @@ def actualizar_tarea_en_sheet(ws_tareas, headers, row_data, nuevo_status, nuevo_
     ws_tareas.update_cells(celdas, value_input_option='USER_ENTERED')
 
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja el contenedor de mensajes con scroll vertical controlado y auto-scroll."""
+    """Dibuja una ventana estilo WhatsApp en HTML puro con scroll garantizado."""
+    import html
+    import re
     import streamlit.components.v1 as components
-    
-    # Inyectamos regla CSS para forzar el recorte del desbordamiento en contenedores con altura fija
-    st.markdown("""
-        <style>
-        [data-testid="stVerticalBlockBorderWrapper"] {
-            overflow-y: auto !important;
-            max-height: 260px !important;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-    
-    caja_chat = st.container(height=260, border=True)
-    with caja_chat:
-        emisor_orig = str(row.get('Emisor', 'Usuario')).strip()
-        es_mio_orig = es_mismo_usuario(usuario_activo_real, emisor_orig, grupos_identidad)
-        with st.chat_message("assistant" if es_mio_orig else "user", avatar="🧑‍💻" if es_mio_orig else "👤"):
-            st.markdown(f"**{emisor_orig}** *(Mensaje inicial - {row.get('Fecha_Creacion', '')})*:\n\n{row.get('Instruccion', '')}")
-        
-        historial_raw = str(row.get('Respuesta', '')).strip()
-        if historial_raw and historial_raw.lower() not in ["none", "nan", ""]:
-            lineas = historial_raw.replace('\\n', '\n').split('\n')
-            for linea in lineas:
-                linea_limpia = linea.strip()
-                if linea_limpia:
-                    es_mio_msg = es_mismo_usuario(usuario_activo_real, linea_limpia, grupos_identidad) or (usuario_activo_real.lower() in linea_limpia.lower())
-                    with st.chat_message("assistant" if es_mio_msg else "user", avatar="🧑‍💻" if es_mio_msg else "💬"):
-                        st.markdown(linea_limpia)
-        
-        st.markdown('<div class="fin-hilo-chat"></div>', unsafe_allow_html=True)
 
+    emisor_orig = str(row.get('Emisor', 'Usuario')).strip()
+    fecha_orig = str(row.get('Fecha_Creacion', '')).strip()
+    instruccion_orig = html.escape(str(row.get('Instruccion', '')).strip()).replace('\n', '<br>')
+    es_mio_orig = es_mismo_usuario(usuario_activo_real, emisor_orig, grupos_identidad)
+
+    burbujas = []
+    align_0 = "flex-end" if es_mio_orig else "flex-start"
+    bg_0 = "#005C4B" if es_mio_orig else "#1F2C34"
+    radius_0 = "10px 0px 10px 10px" if es_mio_orig else "0px 10px 10px 10px"
+
+    burbujas.append(f"""
+        <div style="display:flex; justify-content:{align_0}; margin-bottom:10px;">
+            <div style="background-color:{bg_0}; color:#E9EDEF; padding:8px 12px; border-radius:{radius_0}; max-width:78%; box-shadow:0 1px 2px rgba(0,0,0,0.5); word-wrap:break-word;">
+                <div style="font-size:0.75rem; color:#53BDEB; font-weight:700; margin-bottom:3px;">
+                    {html.escape(emisor_orig)} <span style="color:#8696A0; font-weight:normal; font-size:0.7rem;">• {html.escape(fecha_orig)}</span>
+                </div>
+                <div style="font-size:0.9rem; line-height:1.4;">{instruccion_orig}</div>
+            </div>
+        </div>
+    """)
+
+    historial_raw = str(row.get('Respuesta', '')).strip()
+    if historial_raw and historial_raw.lower() not in ["none", "nan", ""]:
+        lineas = historial_raw.replace('\\n', '\n').split('\n')
+        for linea in lineas:
+            linea_limpia = linea.strip()
+            if not linea_limpia:
+                continue
+            
+            # Separar "[Fecha] Autor: Mensaje" si tiene ese formato
+            m = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', linea_limpia)
+            if m:
+                f_msg, autor_msg, txt_msg = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+                es_mio = es_mismo_usuario(usuario_activo_real, autor_msg, grupos_identidad)
+            else:
+                f_msg, autor_msg, txt_msg = "", "", linea_limpia
+                es_mio = es_mismo_usuario(usuario_activo_real, linea_limpia, grupos_identidad) or (usuario_activo_real.lower() in linea_limpia.lower())
+
+            align_m = "flex-end" if es_mio else "flex-start"
+            bg_m = "#005C4B" if es_mio else "#1F2C34"
+            radius_m = "10px 0px 10px 10px" if es_mio else "0px 10px 10px 10px"
+            color_autor = "#53BDEB" if es_mio else "#00A884"
+
+            header_html = ""
+            if autor_msg:
+                header_html = f'<div style="font-size:0.75rem; color:{color_autor}; font-weight:700; margin-bottom:3px;">{html.escape(autor_msg)} <span style="color:#8696A0; font-weight:normal; font-size:0.7rem;">• {html.escape(f_msg)}</span></div>'
+
+            burbujas.append(f"""
+                <div style="display:flex; justify-content:{align_m}; margin-bottom:10px;">
+                    <div style="background-color:{bg_m}; color:#E9EDEF; padding:8px 12px; border-radius:{radius_m}; max-width:78%; box-shadow:0 1px 2px rgba(0,0,0,0.5); word-wrap:break-word;">
+                        {header_html}
+                        <div style="font-size:0.9rem; line-height:1.4;">{html.escape(txt_msg)}</div>
+                    </div>
+                </div>
+            """)
+
+    id_caja = f"wa_box_{row.get('GS_Row', '0')}"
+    html_completo = f"""
+        <div id="{id_caja}" class="pmr-wa-scrollbox" style="
+            height: 310px;
+            max-height: 310px;
+            overflow-y: scroll !important;
+            overflow-x: hidden !important;
+            background-color: #0B141A;
+            background-image: radial-gradient(#1F2C34 1px, transparent 1px);
+            background-size: 20px 20px;
+            border: 1px solid #222E35;
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 10px;
+            display: block !important;
+        ">
+            {''.join(burbujas)}
+        </div>
+    """
+    st.markdown(html_completo, unsafe_allow_html=True)
+
+    # Auto-scroll directo al fondo de la caja de chat
     components.html(
-        """
+        f"""
         <script>
-            setTimeout(() => {
-                const anclas = window.parent.document.querySelectorAll('.fin-hilo-chat');
-                anclas.forEach(ancla => {
-                    let contenedor = ancla.parentElement;
-                    while (contenedor && contenedor !== window.parent.document.body) {
-                        if (contenedor.scrollHeight > contenedor.clientHeight) {
-                            contenedor.scrollTop = contenedor.scrollHeight;
-                            break;
-                        }
-                        contenedor = contenedor.parentElement;
-                    }
-                });
-            }, 150);
+            setTimeout(() => {{
+                const box = window.parent.document.getElementById('{id_caja}');
+                if (box) {{
+                    box.scrollTop = box.scrollHeight;
+                }}
+            }}, 80);
         </script>
         """,
         height=0
     )
-    
+
 @st.cache_data(ttl=15)
 def contar_tareas_pendientes(usuario):
     try:
@@ -763,7 +807,7 @@ def contar_tareas_pendientes(usuario):
     except Exception:
         return 0
 
-@st.dialog("🔔 Centro de Tareas y Mensajería", width="large")
+@st.dialog("🔔 Centro de Tareas y Mensajería (Estilo WhatsApp por Siniestro)", width="large")
 def abrir_centro_tareas():
     doc = init_connection()
     usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
@@ -790,7 +834,6 @@ def abrir_centro_tareas():
         col_desc_loc = next((c for c in df_uni_local.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
         col_est_loc = next((c for c in df_uni_local.columns if "ESTATUS" in str(c).upper() and "ENV" not in str(c).upper() and "PAGO" not in str(c).upper()), None)
 
-        # Filtrar excluyendo estatus finalizados o históricos
         estatus_inactivos = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"]
         if not df_uni_local.empty and col_est_loc:
             df_uni_local = df_uni_local[~df_uni_local[col_est_loc].astype(str).str.strip().str.upper().isin(estatus_inactivos)].copy()
@@ -810,136 +853,152 @@ def abrir_centro_tareas():
         df_uni_local = pd.DataFrame()
         lista_siniestros = []
 
-    # Contadores para las pestañas internas
-    mis_pendientes = pd.DataFrame()
-    mis_enviados = pd.DataFrame()
+    # Filtrar chats donde participa el usuario actual (como Receptor o como Emisor)
+    chats_activos = pd.DataFrame()
+    chats_finalizados = pd.DataFrame()
+    n_atencion = 0
+
     if not df_tareas.empty:
-        mis_pendientes = df_tareas[
-            df_tareas.apply(lambda r: es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad) and str(r.get('Status', '')).strip().lower() == 'pendiente', axis=1)
-        ]
-        mis_enviados = df_tareas[
-            df_tareas.apply(lambda r: es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad), axis=1)
-        ]
+        mask_mios = df_tareas.apply(
+            lambda r: es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad) or es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad),
+            axis=1
+        )
+        df_mios = df_tareas[mask_mios].copy()
+        if not df_mios.empty:
+            chats_activos = df_mios[df_mios['Status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])].copy()
+            chats_finalizados = df_mios[df_mios['Status'].astype(str).str.strip().str.lower() == 'finalizado'].copy()
 
-    n_pend = len(mis_pendientes)
-    n_resp = len(mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'resuelto']) if not mis_enviados.empty else 0
+            # Priorizar arriba los que requieren mi acción inmediata
+            def requiere_mi_accion(r):
+                st_v = str(r.get('Status', '')).strip().lower()
+                soy_rec = es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad)
+                soy_emi = es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad)
+                if (soy_rec and st_v == 'pendiente') or (soy_emi and st_v == 'resuelto'):
+                    return 0
+                return 1
 
-    lbl_tab1 = f"📥 Pendientes por Atender ({n_pend})" if n_pend > 0 else "📥 Pendientes por Atender"
-    lbl_tab2 = f"📤 Mis Solicitudes ({n_resp} Resp.)" if n_resp > 0 else "📤 Mis Solicitudes"
+            if not chats_activos.empty:
+                chats_activos['_prio'] = chats_activos.apply(requiere_mi_accion, axis=1)
+                n_atencion = int((chats_activos['_prio'] == 0).sum())
+                chats_activos = chats_activos.sort_values(by=['_prio', 'GS_Row'], ascending=[True, False])
 
-    tabs_tareas = st.tabs([lbl_tab1, lbl_tab2, "➕ Nueva Tarea"])
+    lbl_chats = f"💬 Chats por Siniestro / Tema ({n_atencion} nuevos)" if n_atencion > 0 else f"💬 Chats Activos ({len(chats_activos)})"
+    tabs_tareas = st.tabs([lbl_chats, "➕ Nuevo Chat / Tarea", f"📁 Finalizados ({len(chats_finalizados)})"])
 
-    # --- TAB 1: BANDEJA DE ENTRADA ---
+    # --- TAB 1: INTERFAZ ESTILO WHATSAPP (2 PANELES) ---
     with tabs_tareas[0]:
-        st.subheader("Tareas Asignadas a Mí")
-        if not mis_pendientes.empty:
-            for idx, row in mis_pendientes.iterrows():
-                with st.container(border=True):
-                    st.markdown(f"**De:** 👤 {row.get('Emisor', 'N/A')} | **Referencia:** 🚗 `{row.get('Siniestro / Taller / Piezas', 'General')}`")
-                    renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad)
-                    
-                    col_r1, col_r2 = st.columns([3.2, 1.2], vertical_alignment="bottom")
-                    with col_r1:
-                        txt_respuesta = st.text_input(
-                            "Escribir respuesta:", 
-                            key=f"resp_in_{row['GS_Row']}", 
-                            placeholder="Escribe tu mensaje y presiona Enviar Respuesta..."
-                        )
-                    with col_r2:
-                        if st.button("💬 Enviar / Resolver", key=f"btn_res_{row['GS_Row']}", type="primary", use_container_width=True):
+        if not chats_activos.empty:
+            col_lista, col_ventana = st.columns([1.3, 2.7], gap="medium")
+
+            with col_lista:
+                st.markdown("##### 📋 Temas / Siniestros")
+                opciones_ids = chats_activos['GS_Row'].tolist()
+
+                def formatear_item_chat(gs_r):
+                    fila_c = chats_activos[chats_activos['GS_Row'] == gs_r].iloc[0]
+                    ref_c = str(fila_c.get('Siniestro / Taller / Piezas', 'General')).strip()
+                    ref_corta = ref_c.split(" | ⚙️")[0].strip()
+                    soy_rec = es_mismo_usuario(usuario_activo_real, fila_c.get('Receptor', ''), grupos_identidad)
+                    contraparte = fila_c.get('Emisor', '') if soy_rec else fila_c.get('Receptor', '')
+                    icono = "🔴" if fila_c.get('_prio', 1) == 0 else "🟢"
+                    return f"{icono} {ref_corta} ({contraparte})"
+
+                chat_sel_row = st.radio(
+                    "Selecciona un chat:",
+                    options=opciones_ids,
+                    format_func=formatear_item_chat,
+                    label_visibility="collapsed",
+                    key="radio_wa_chat_sel"
+                )
+
+            with col_ventana:
+                row_activa = chats_activos[chats_activos['GS_Row'] == chat_sel_row].iloc[0]
+                soy_emisor_chat = es_mismo_usuario(usuario_activo_real, row_activa.get('Emisor', ''), grupos_identidad)
+                st_chat = str(row_activa.get('Status', '')).strip().lower()
+
+                # Encabezado superior del chat seleccionado
+                st.markdown(
+                    f"""
+                    <div style="background-color:#1F2C34; padding:10px 14px; border-radius:8px; margin-bottom:8px; border-left:4px solid #00A884;">
+                        <div style="font-size:0.95rem; font-weight:700; color:#E9EDEF;">🚗 {row_activa.get('Siniestro / Taller / Piezas', 'General')}</div>
+                        <div style="font-size:0.78rem; color:#8696A0;">
+                            👤 <b>Emisor:</b> {row_activa.get('Emisor', 'N/A')}  |  🎯 <b>Para:</b> {row_activa.get('Receptor', 'N/A')}  |  📌 <b>Estatus:</b> {st_chat.upper()}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+
+                # Ventana de mensajes con scroll garantizado
+                renderizar_hilo_chat(row_activa, usuario_activo_real, grupos_identidad)
+
+                # Barra inferior para escribir y responder
+                c_inp, c_send, c_fin = st.columns([2.8, 1.1, 1.1], vertical_alignment="bottom")
+                with c_inp:
+                    nuevo_texto = st.text_input(
+                        "Mensaje:",
+                        key=f"wa_msg_input_{chat_sel_row}",
+                        placeholder="Escribe un mensaje en este hilo...",
+                        label_visibility="collapsed"
+                    )
+                with c_send:
+                    if st.button("📤 Enviar", key=f"wa_btn_send_{chat_sel_row}", type="primary", use_container_width=True):
+                        if nuevo_texto.strip():
                             tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
                             ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
-                            hist_prev = str(row.get('Respuesta', '')).strip()
-                            nuevo_msg = f"[{ahora_str}] {usuario_activo_real}: {txt_respuesta.strip()}" if txt_respuesta.strip() else f"[{ahora_str}] {usuario_activo_real}: Enterado / Resuelto"
-                            hist_final = f"{hist_prev}\n{nuevo_msg}".strip() if hist_prev else nuevo_msg
-                            
-                            actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row, "Resuelto", hist_final)
+                            hist_prev = str(row_activa.get('Respuesta', '')).strip()
+                            linea_nueva = f"[{ahora_str}] {usuario_activo_real}: {nuevo_texto.strip()}"
+                            hist_final = f"{hist_prev}\n{linea_nueva}".strip() if hist_prev else linea_nueva
+
+                            # Si envía el emisor, pasa a 'Pendiente' para notificar al receptor; si responde el receptor, pasa a 'Resuelto' para notificar al emisor
+                            prox_status = "Pendiente" if soy_emisor_chat else "Resuelto"
+                            actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row_activa, prox_status, hist_final)
                             contar_tareas_pendientes.clear()
-                            st.success("Respuesta enviada correctamente.")
                             st.rerun()
+                        else:
+                            st.warning("Escribe un mensaje primero.")
+                with c_fin:
+                    if st.button("🏁 Finalizar", key=f"wa_btn_fin_{chat_sel_row}", use_container_width=True, help="Cerrar y archivar este tema"):
+                        actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row_activa, "Finalizado", str(row_activa.get('Respuesta', '')).strip())
+                        contar_tareas_pendientes.clear()
+                        st.success("Conversación archivada en Finalizados.")
+                        st.rerun()
         else:
-            st.info("No tienes tareas pendientes asignadas por el momento.")
+            st.info("🎉 No tienes conversaciones ni tareas activas por el momento.")
 
-    # --- TAB 2: MIS SOLICITUDES (ENVIADAS) ---
+    # --- TAB 2: NUEVO CHAT / TAREA ---
     with tabs_tareas[1]:
-        st.subheader("Tareas que he Solicitado")
-        if not mis_enviados.empty:
-            activas_env = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower().isin(['resuelto', 'pendiente'])].copy()
-            finalizadas = mis_enviados[mis_enviados['Status'].astype(str).str.strip().str.lower() == 'finalizado'].copy()
-
-            if not activas_env.empty:
-                for idx, row in activas_env.iterrows():
-                    st_actual = str(row.get('Status', '')).strip().upper()
-                    badge_st = "🟢 RESPUESTA RECIBIDA" if st_actual == "RESUELTO" else "⏳ EN ESPERA DE RESPUESTA"
-                    with st.container(border=True):
-                        st.markdown(f"**Para:** 👤 {row.get('Receptor', 'N/A')} | **Estatus:** `{badge_st}` | **Ref:** 🚗 `{row.get('Siniestro / Taller / Piezas', 'General')}`")
-                        renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad)
-                        
-                        c_env1, c_env2, c_env3 = st.columns([2.6, 1.1, 1.1], vertical_alignment="bottom")
-                        with c_env1:
-                            replica_txt = st.text_input(
-                                "Agregar mensaje al hilo:",
-                                key=f"rep_out_{row['GS_Row']}",
-                                placeholder="Escribe aquí si necesitas responder de vuelta..."
-                            )
-                        with c_env2:
-                            if st.button("↩️ Responder", key=f"btn_rep_{row['GS_Row']}", use_container_width=True):
-                                if replica_txt.strip():
-                                    tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
-                                    ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
-                                    hist_prev = str(row.get('Respuesta', '')).strip()
-                                    nuevo_msg = f"[{ahora_str}] {usuario_activo_real}: {replica_txt.strip()}"
-                                    hist_final = f"{hist_prev}\n{nuevo_msg}".strip() if hist_prev else nuevo_msg
-                                    
-                                    actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row, "Pendiente", hist_final)
-                                    contar_tareas_pendientes.clear()
-                                    st.success("Mensaje enviado de vuelta al receptor.")
-                                    st.rerun()
-                                else:
-                                    st.warning("Escribe un mensaje primero.")
-                        with c_env3:
-                            if st.button("🏁 Finalizar Tarea", key=f"fin_{row['GS_Row']}", type="primary", use_container_width=True):
-                                actualizar_tarea_en_sheet(ws_tareas, headers_tareas, row, "Finalizado", str(row.get('Respuesta', '')).strip())
-                                contar_tareas_pendientes.clear()
-                                st.success("Tarea finalizada y archivada.")
-                                st.rerun()
-            else:
-                st.info("No tienes solicitudes activas en este momento.")
-
-            if not finalizadas.empty:
-                with st.expander(f"📁 Ver Historial de Tareas Finalizadas ({len(finalizadas)})"):
-                    cols_fin = [c for c in ['Fecha_Creacion', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta', 'Status'] if c in finalizadas.columns]
-                    st.dataframe(finalizadas[cols_fin], hide_index=True, use_container_width=True)
-        else:
-            st.info("No has enviado solicitudes aún con este usuario.")
-
-    # --- TAB 3: NUEVA TAREA ---
-    with tabs_tareas[2]:
-        st.subheader("Asignar Nueva Tarea")
+        st.subheader("Abrir Nuevo Tema / Siniestro")
         col_nueva_1, col_nueva_2 = st.columns(2)
         with col_nueva_1:
-            usuario_destino = st.selectbox("Asignar a:", ["Seleccionar..."] + usuarios_reales)
+            usuario_destino = st.selectbox("Participante (Asignar a):", ["Seleccionar..."] + usuarios_reales)
         with col_nueva_2:
-            siniestro_seleccionado = st.selectbox("Siniestro / Vehículo (Solo Activos):", ["Seleccionar...", "General"] + lista_siniestros)
+            siniestro_seleccionado = st.selectbox("Tema / Siniestro (Solo Activos):", ["Seleccionar...", "General (Tema Libre)"] + lista_siniestros)
         
+        tema_libre = ""
         piezas_seleccionadas = []
-        if siniestro_seleccionado not in ["Seleccionar...", "General"] and not df_uni_local.empty and col_desc_loc:
+        if siniestro_seleccionado == "General (Tema Libre)":
+            tema_libre = st.text_input("Escribe el Asunto o Siniestro Histórico:", placeholder="Ej. Siniestro Histórico B801122 / Duda de Facturación")
+        elif siniestro_seleccionado != "Seleccionar..." and not df_uni_local.empty and col_desc_loc:
             id_sin_puro = siniestro_seleccionado.split(" | ")[0].strip()
             piezas_del_siniestro = df_uni_local[df_uni_local[col_sin_loc].astype(str).str.strip() == id_sin_puro][col_desc_loc].dropna().unique().tolist()
             piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro)
 
-        instruccion_nueva = st.text_area("Instrucción o Mensaje:")
+        instruccion_nueva = st.text_area("Mensaje inicial:")
         
-        if st.button("📤 Enviar Tarea", type="primary"):
-            if usuario_destino != "Seleccionar..." and instruccion_nueva.strip():
+        if st.button("📤 Iniciar Conversación", type="primary"):
+            if usuario_destino != "Seleccionar..." and siniestro_seleccionado != "Seleccionar..." and instruccion_nueva.strip():
                 import uuid
                 tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
                 id_tarea = str(uuid.uuid4().hex)[:6].upper()
                 fecha_hoy = datetime.datetime.now(tz_mx_t).strftime("%Y-%m-%d %H:%M")
                 
-                ref_final = siniestro_seleccionado
-                if piezas_seleccionadas:
-                    ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
+                if siniestro_seleccionado == "General (Tema Libre)":
+                    ref_final = f"General: {tema_libre.strip()}" if tema_libre.strip() else "General"
+                else:
+                    ref_final = siniestro_seleccionado
+                    if piezas_seleccionadas:
+                        ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
 
                 try:
                     if not headers_tareas:
@@ -973,13 +1032,21 @@ def abrir_centro_tareas():
 
                     ws_tareas.append_row(nueva_fila, value_input_option='USER_ENTERED')
                     contar_tareas_pendientes.clear()
-                    st.success(f"✅ Tarea enviada a {usuario_destino}")
-                    time.sleep(0.6)
+                    st.success(f"✅ Conversación iniciada con {usuario_destino}")
+                    time.sleep(0.5)
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error al guardar: {e}")
             else:
-                st.warning("⚠️ Faltan datos obligatorios (Usuario e Instrucción).")
+                st.warning("⚠️ Selecciona el participante, el tema/siniestro y escribe el mensaje inicial.")
+
+    # --- TAB 3: HISTORIAL DE FINALIZADOS ---
+    with tabs_tareas[2]:
+        if not chats_finalizados.empty:
+            cols_fin = [c for c in ['Fecha_Creacion', 'Emisor', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta'] if c in chats_finalizados.columns]
+            st.dataframe(chats_finalizados[cols_fin], hide_index=True, use_container_width=True)
+        else:
+            st.info("No hay conversaciones finalizadas en el archivo.")
 
 @st.dialog("📖 Directorio Operativo", width="large")
 def abrir_directorio():

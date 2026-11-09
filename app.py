@@ -4959,57 +4959,58 @@ elif vista_actual == "🛠️ Cuartel General":
         with col_m1:
             st.markdown("#### 💾 Respaldo y Limpieza de Rutas")
             with st.container(border=True):
-            st.markdown("**🔐 Credenciales y Diccionario (Cotizador)**")
-            doc_cfg = init_connection()
-            try:
-                ws_cfg = doc_cfg.worksheet("BD_CONFIG_BOTS")
-                filas_cfg = ws_cfg.get_all_values()
-            except Exception:
-                ws_cfg = doc_cfg.add_worksheet(title="BD_CONFIG_BOTS", rows=200, cols=3)
-                ws_cfg.append_rows([
-                    ["Clave", "Valor", "Notas"],
-                    ["MULTI_USER", "PMA5816", "Usuario Portal Multiasistencia"],
-                    ["MULTI_PASS", "Pmroct1.", "Contraseña Portal Multiasistencia"],
-                    ["TC_USD", "20.50", "Tipo de cambio USD a MXN para eBay"]
-                ], value_input_option='USER_ENTERED')
-                filas_cfg = ws_cfg.get_all_values()
+                st.markdown("**🔐 Credenciales y Diccionario (Cotizador)**")
+                doc_cfg = init_connection()
+                try:
+                    ws_cfg = doc_cfg.worksheet("BD_CONFIG_BOTS")
+                    filas_cfg = ws_cfg.get_all_values()
+                except Exception:
+                    ws_cfg = doc_cfg.add_worksheet(title="BD_CONFIG_BOTS", rows=200, cols=3)
+                    ws_cfg.append_rows([
+                        ["Clave", "Valor", "Notas"],
+                        ["MULTI_USER", "PMA5816", "Usuario Portal Multiasistencia"],
+                        ["MULTI_PASS", "Pmroct1.", "Contraseña Portal Multiasistencia"],
+                        ["TC_USD", "20.50", "Tipo de cambio USD a MXN para eBay"]
+                    ], value_input_option='USER_ENTERED')
+                    filas_cfg = ws_cfg.get_all_values()
 
-            mapa_cfg_ui = {}
-            abrev_lista_ui = []
-            for r_c in filas_cfg[1:]:
-                if len(r_c) >= 2:
-                    k_c, v_c = str(r_c[0]).strip().upper(), str(r_c[1]).strip()
-                    if k_c.startswith("ABREV_"):
-                        abrev_lista_ui.append({"Abreviatura Portal": k_c.replace("ABREV_", ""), "Significado Completo": v_c})
-                    else:
-                        mapa_cfg_ui[k_c] = v_c
+                mapa_cfg_ui = {}
+                abrev_lista_ui = []
+                for r_c in filas_cfg[1:]:
+                    if len(r_c) >= 2:
+                        k_c, v_c = str(r_c[0]).strip().upper(), str(r_c[1]).strip()
+                        if k_c.startswith("ABREV_"):
+                            abrev_lista_ui.append({"Abreviatura Portal": k_c.replace("ABREV_", ""), "Significado Completo": v_c})
+                        else:
+                            mapa_cfg_ui[k_c] = v_c
 
-            usr_m_in = st.text_input("Usuario Multiasistencia:", value=mapa_cfg_ui.get("MULTI_USER", "PMA5816"))
-            pwd_m_in = st.text_input("Contraseña Multiasistencia:", value=mapa_cfg_ui.get("MULTI_PASS", "Pmroct1."), type="password")
-            tc_usd_in = st.number_input("Tipo de Cambio USD -> MXN (eBay):", min_value=15.0, max_value=35.0, value=float(mapa_cfg_ui.get("TC_USD", 20.50)), step=0.25)
+                usr_m_in = st.text_input("Usuario Multiasistencia:", value=mapa_cfg_ui.get("MULTI_USER", "PMA5816"))
+                pwd_m_in = st.text_input("Contraseña Multiasistencia:", value=mapa_cfg_ui.get("MULTI_PASS", "Pmroct1."), type="password")
+                tc_usd_in = st.number_input("Tipo de Cambio USD -> MXN (eBay):", min_value=15.0, max_value=35.0, value=float(mapa_cfg_ui.get("TC_USD", 20.50)), step=0.25)
 
-            st.caption("Diccionario de abreviaturas del portal (ej. `ANITIN.` -> `ANTINIEBLA`):")
-            df_abrev_base = pd.DataFrame(abrev_lista_ui) if abrev_lista_ui else pd.DataFrame([{"Abreviatura Portal": "ANITIN.", "Significado Completo": "ANTINIEBLA"}])
-            ed_abrev_ui = st.data_editor(df_abrev_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_diccionario_bot")
+                st.caption("Diccionario de abreviaturas del portal (ej. `ANITIN.` -> `ANTINIEBLA`):")
+                df_abrev_base = pd.DataFrame(abrev_lista_ui) if abrev_lista_ui else pd.DataFrame([{"Abreviatura Portal": "ANITIN.", "Significado Completo": "ANTINIEBLA"}])
+                ed_abrev_ui = st.data_editor(df_abrev_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_diccionario_bot")
 
-            if st.button("💾 Guardar Cambios de Configuración", type="primary", key="btn_save_cfg_bot"):
-                nuevas_filas_cfg = [
-                    ["Clave", "Valor", "Notas"],
-                    ["MULTI_USER", usr_m_in.strip(), "Usuario Portal Multiasistencia"],
-                    ["MULTI_PASS", pwd_m_in.strip(), "Contraseña Portal Multiasistencia"],
-                    ["TC_USD", str(tc_usd_in), "Tipo de cambio USD a MXN para eBay"]
-                ]
-                for _, r_ab in ed_abrev_ui.iterrows():
-                    ab_k = str(r_ab.get("Abreviatura Portal", "")).strip().upper()
-                    ab_v = str(r_ab.get("Significado Completo", "")).strip().upper()
-                    if ab_k and ab_v and ab_k != "NAN":
-                        nuevas_filas_cfg.append([f"ABREV_{ab_k}", ab_v, "Diccionario usuario"])
+                if st.button("💾 Guardar Cambios de Configuración", type="primary", key="btn_save_cfg_bot"):
+                    nuevas_filas_cfg = [
+                        ["Clave", "Valor", "Notas"],
+                        ["MULTI_USER", usr_m_in.strip(), "Usuario Portal Multiasistencia"],
+                        ["MULTI_PASS", pwd_m_in.strip(), "Contraseña Portal Multiasistencia"],
+                        ["TC_USD", str(tc_usd_in), "Tipo de cambio USD a MXN para eBay"]
+                    ]
+                    for _, r_ab in ed_abrev_ui.iterrows():
+                        ab_k = str(r_ab.get("Abreviatura Portal", "")).strip().upper()
+                        ab_v = str(r_ab.get("Significado Completo", "")).strip().upper()
+                        if ab_k and ab_v and ab_k != "NAN":
+                            nuevas_filas_cfg.append([f"ABREV_{ab_k}", ab_v, "Diccionario usuario"])
 
-                ws_cfg.clear()
-                ws_cfg.update(range_name='A1', values=nuevas_filas_cfg, value_input_option='USER_ENTERED')
-                st.success("✅ Configuración guardada correctamente.")
-                time.sleep(0.6)
-                st.rerun()
+                    ws_cfg.clear()
+                    ws_cfg.update(range_name='A1', values=nuevas_filas_cfg, value_input_option='USER_ENTERED')
+                    st.success("✅ Configuración guardada correctamente.")
+                    time.sleep(0.6)
+                    st.rerun()
+
             with st.container(border=True):
                 st.markdown("**1. Descargar Historial Local (Plan B)**")
                 st.caption("Descarga un archivo Excel con todas las rutas registradas.")

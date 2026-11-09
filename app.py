@@ -4958,21 +4958,28 @@ elif vista_actual == "🛠️ Cuartel General":
         
         with col_m1:
             st.markdown("#### 💾 Respaldo y Limpieza de Rutas")
-            with st.container(border=True):
-                st.markdown("**🔐 Credenciales y Diccionario (Cotizador)**")
-                doc_cfg = init_connection()
+            @st.cache_data(ttl=300)
+            def leer_config_bots_seguro():
+                doc_c = init_connection()
                 try:
-                    ws_cfg = doc_cfg.worksheet("BD_CONFIG_BOTS")
-                    filas_cfg = ws_cfg.get_all_values()
-                except Exception:
-                    ws_cfg = doc_cfg.add_worksheet(title="BD_CONFIG_BOTS", rows=200, cols=3)
-                    ws_cfg.append_rows([
+                    ws_c = doc_c.worksheet("BD_CONFIG_BOTS")
+                    return ws_c.get_all_values()
+                except gspread.exceptions.WorksheetNotFound:
+                    ws_c = doc_c.add_worksheet(title="BD_CONFIG_BOTS", rows=200, cols=3)
+                    filas_ini = [
                         ["Clave", "Valor", "Notas"],
                         ["MULTI_USER", "PMA5816", "Usuario Portal Multiasistencia"],
                         ["MULTI_PASS", "Pmroct1.", "Contraseña Portal Multiasistencia"],
                         ["TC_USD", "20.50", "Tipo de cambio USD a MXN para eBay"]
-                    ], value_input_option='USER_ENTERED')
-                    filas_cfg = ws_cfg.get_all_values()
+                    ]
+                    ws_c.append_rows(filas_ini, value_input_option='USER_ENTERED')
+                    return filas_ini
+                except Exception:
+                    return []
+
+            with st.container(border=True):
+                st.markdown("**🔐 Credenciales y Diccionario (Cotizador)**")
+                filas_cfg = leer_config_bots_seguro()
 
                 mapa_cfg_ui = {}
                 abrev_lista_ui = []
@@ -4993,23 +5000,29 @@ elif vista_actual == "🛠️ Cuartel General":
                 ed_abrev_ui = st.data_editor(df_abrev_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_diccionario_bot")
 
                 if st.button("💾 Guardar Cambios de Configuración", type="primary", key="btn_save_cfg_bot"):
-                    nuevas_filas_cfg = [
-                        ["Clave", "Valor", "Notas"],
-                        ["MULTI_USER", usr_m_in.strip(), "Usuario Portal Multiasistencia"],
-                        ["MULTI_PASS", pwd_m_in.strip(), "Contraseña Portal Multiasistencia"],
-                        ["TC_USD", str(tc_usd_in), "Tipo de cambio USD a MXN para eBay"]
-                    ]
-                    for _, r_ab in ed_abrev_ui.iterrows():
-                        ab_k = str(r_ab.get("Abreviatura Portal", "")).strip().upper()
-                        ab_v = str(r_ab.get("Significado Completo", "")).strip().upper()
-                        if ab_k and ab_v and ab_k != "NAN":
-                            nuevas_filas_cfg.append([f"ABREV_{ab_k}", ab_v, "Diccionario usuario"])
+                    try:
+                        doc_cfg = init_connection()
+                        ws_cfg = doc_cfg.worksheet("BD_CONFIG_BOTS")
+                        nuevas_filas_cfg = [
+                            ["Clave", "Valor", "Notas"],
+                            ["MULTI_USER", usr_m_in.strip(), "Usuario Portal Multiasistencia"],
+                            ["MULTI_PASS", pwd_m_in.strip(), "Contraseña Portal Multiasistencia"],
+                            ["TC_USD", str(tc_usd_in), "Tipo de cambio USD a MXN para eBay"]
+                        ]
+                        for _, r_ab in ed_abrev_ui.iterrows():
+                            ab_k = str(r_ab.get("Abreviatura Portal", "")).strip().upper()
+                            ab_v = str(r_ab.get("Significado Completo", "")).strip().upper()
+                            if ab_k and ab_v and ab_k != "NAN":
+                                nuevas_filas_cfg.append([f"ABREV_{ab_k}", ab_v, "Diccionario usuario"])
 
-                    ws_cfg.clear()
-                    ws_cfg.update(range_name='A1', values=nuevas_filas_cfg, value_input_option='USER_ENTERED')
-                    st.success("✅ Configuración guardada correctamente.")
-                    time.sleep(0.6)
-                    st.rerun()
+                        ws_cfg.clear()
+                        ws_cfg.update(range_name='A1', values=nuevas_filas_cfg, value_input_option='USER_ENTERED')
+                        leer_config_bots_seguro.clear()
+                        st.success("✅ Configuración guardada correctamente.")
+                        time.sleep(0.6)
+                        st.rerun()
+                    except Exception as e_cfg:
+                        st.error(f"Error al guardar configuración: {e_cfg}")
 
             with st.container(border=True):
                 st.markdown("**1. Descargar Historial Local (Plan B)**")

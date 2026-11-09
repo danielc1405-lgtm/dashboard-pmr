@@ -4959,6 +4959,58 @@ elif vista_actual == "🛠️ Cuartel General":
         with col_m1:
             st.markdown("#### 💾 Respaldo y Limpieza de Rutas")
             with st.container(border=True):
+            st.markdown("**🔐 Credenciales y Diccionario (Cotizador)**")
+            doc_cfg = init_connection()
+            try:
+                ws_cfg = doc_cfg.worksheet("BD_CONFIG_BOTS")
+                filas_cfg = ws_cfg.get_all_values()
+            except Exception:
+                ws_cfg = doc_cfg.add_worksheet(title="BD_CONFIG_BOTS", rows=200, cols=3)
+                ws_cfg.append_rows([
+                    ["Clave", "Valor", "Notas"],
+                    ["MULTI_USER", "PMA5816", "Usuario Portal Multiasistencia"],
+                    ["MULTI_PASS", "Pmroct1.", "Contraseña Portal Multiasistencia"],
+                    ["TC_USD", "20.50", "Tipo de cambio USD a MXN para eBay"]
+                ], value_input_option='USER_ENTERED')
+                filas_cfg = ws_cfg.get_all_values()
+
+            mapa_cfg_ui = {}
+            abrev_lista_ui = []
+            for r_c in filas_cfg[1:]:
+                if len(r_c) >= 2:
+                    k_c, v_c = str(r_c[0]).strip().upper(), str(r_c[1]).strip()
+                    if k_c.startswith("ABREV_"):
+                        abrev_lista_ui.append({"Abreviatura Portal": k_c.replace("ABREV_", ""), "Significado Completo": v_c})
+                    else:
+                        mapa_cfg_ui[k_c] = v_c
+
+            usr_m_in = st.text_input("Usuario Multiasistencia:", value=mapa_cfg_ui.get("MULTI_USER", "PMA5816"))
+            pwd_m_in = st.text_input("Contraseña Multiasistencia:", value=mapa_cfg_ui.get("MULTI_PASS", "Pmroct1."), type="password")
+            tc_usd_in = st.number_input("Tipo de Cambio USD -> MXN (eBay):", min_value=15.0, max_value=35.0, value=float(mapa_cfg_ui.get("TC_USD", 20.50)), step=0.25)
+
+            st.caption("Diccionario de abreviaturas del portal (ej. `ANITIN.` -> `ANTINIEBLA`):")
+            df_abrev_base = pd.DataFrame(abrev_lista_ui) if abrev_lista_ui else pd.DataFrame([{"Abreviatura Portal": "ANITIN.", "Significado Completo": "ANTINIEBLA"}])
+            ed_abrev_ui = st.data_editor(df_abrev_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_diccionario_bot")
+
+            if st.button("💾 Guardar Cambios de Configuración", type="primary", key="btn_save_cfg_bot"):
+                nuevas_filas_cfg = [
+                    ["Clave", "Valor", "Notas"],
+                    ["MULTI_USER", usr_m_in.strip(), "Usuario Portal Multiasistencia"],
+                    ["MULTI_PASS", pwd_m_in.strip(), "Contraseña Portal Multiasistencia"],
+                    ["TC_USD", str(tc_usd_in), "Tipo de cambio USD a MXN para eBay"]
+                ]
+                for _, r_ab in ed_abrev_ui.iterrows():
+                    ab_k = str(r_ab.get("Abreviatura Portal", "")).strip().upper()
+                    ab_v = str(r_ab.get("Significado Completo", "")).strip().upper()
+                    if ab_k and ab_v and ab_k != "NAN":
+                        nuevas_filas_cfg.append([f"ABREV_{ab_k}", ab_v, "Diccionario usuario"])
+
+                ws_cfg.clear()
+                ws_cfg.update(range_name='A1', values=nuevas_filas_cfg, value_input_option='USER_ENTERED')
+                st.success("✅ Configuración guardada correctamente.")
+                time.sleep(0.6)
+                st.rerun()
+            with st.container(border=True):
                 st.markdown("**1. Descargar Historial Local (Plan B)**")
                 st.caption("Descarga un archivo Excel con todas las rutas registradas.")
                 if st.button("📥 Generar Respaldo de Rutas", use_container_width=True, key="btn_respaldo_rutas"):
@@ -5172,82 +5224,11 @@ elif vista_actual == "🛠️ Cuartel General":
             st.error(f"No se pudo cargar el resumen de gastos: {e}")
 
     # =========================================================================
-    # PESTAÑA 4: MESA DE COTIZACIONES (IA) - MULTIASISTENCIA + CONFIGURACIÓN
+    # PESTAÑA 4: MESA DE COTIZACIONES (IA) - MULTIASISTENCIA
     # =========================================================================
     with tab_cotizador:
         st.markdown("#### ⚡ Mesa de Decisión y Cotizador Automático (Multiasistencia)")
         st.caption("1️⃣ Extrae cotizaciones y precios (Mercado Libre + eBay EE.UU.) • 2️⃣ Ajusta margen o Precio Libre y marca **Validar** • 3️⃣ Inyecta al portal a 7 días hábiles.")
-
-        # --- PANEL DESPLEGABLE PARA CONTRASEÑA, TIPO DE CAMBIO Y DICCIONARIO ---
-        with st.expander("🔑 Configurar Contraseña de Portal, Tipo de Cambio (eBay USD) y Diccionario de Abreviaturas", expanded=False):
-            doc_cfg = init_connection()
-            try:
-                ws_cfg = doc_cfg.worksheet("BD_CONFIG_BOTS")
-                filas_cfg = ws_cfg.get_all_values()
-            except Exception:
-                ws_cfg = doc_cfg.add_worksheet(title="BD_CONFIG_BOTS", rows=200, cols=3)
-                ws_cfg.append_rows([
-                    ["Clave", "Valor", "Notas"],
-                    ["MULTI_USER", "PMA5816", "Usuario Portal Multiasistencia"],
-                    ["MULTI_PASS", "Pmroct1.", "Contraseña Portal Multiasistencia"],
-                    ["TC_USD", "20.50", "Tipo de cambio USD a MXN para eBay"]
-                ], value_input_option='USER_ENTERED')
-                filas_cfg = ws_cfg.get_all_values()
-
-            mapa_cfg_ui = {}
-            abrev_lista_ui = []
-            for r_c in filas_cfg[1:]:
-                if len(r_c) >= 2:
-                    k_c, v_c = str(r_c[0]).strip().upper(), str(r_c[1]).strip()
-                    if k_c.startswith("ABREV_"):
-                        abrev_lista_ui.append({"Abreviatura Portal": k_c.replace("ABREV_", ""), "Significado Completo": v_c})
-                    else:
-                        mapa_cfg_ui[k_c] = v_c
-
-            col_cfg1, col_cfg2 = st.columns([1.2, 1.8], gap="large")
-            with col_cfg1:
-                st.markdown("**🔐 Credenciales Multiasistencia y Dólar**")
-                usr_m_in = st.text_input("Usuario Multiasistencia:", value=mapa_cfg_ui.get("MULTI_USER", "PMA5816"))
-                pwd_m_in = st.text_input("Contraseña Multiasistencia:", value=mapa_cfg_ui.get("MULTI_PASS", "Pmroct1."))
-                tc_usd_in = st.number_input("Tipo de Cambio USD -> MXN (eBay):", min_value=15.0, max_value=35.0, value=float(mapa_cfg_ui.get("TC_USD", 20.50)), step=0.25)
-
-            with col_cfg2:
-                st.markdown("**📖 Diccionario Personalizado de Abreviaturas**")
-                st.caption("Agrega aquí cualquier palabra recortada nueva que veas en el portal (ej. `BIE.` -> `BIELETA`).")
-                df_abrev_base = pd.DataFrame(abrev_lista_ui) if abrev_lista_ui else pd.DataFrame([{"Abreviatura Portal": "ANITIN.", "Significado Completo": "ANTINIEBLA"}])
-                ed_abrev_ui = st.data_editor(df_abrev_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_diccionario_bot")
-
-            if st.button("💾 Guardar Contraseña y Diccionario", type="primary", key="btn_save_cfg_bot"):
-                nuevas_filas_cfg = [
-                    ["Clave", "Valor", "Notas"],
-                    ["MULTI_USER", usr_m_in.strip(), "Usuario Portal Multiasistencia"],
-                    ["MULTI_PASS", pwd_m_in.strip(), "Contraseña Portal Multiasistencia"],
-                    ["TC_USD", str(tc_usd_in), "Tipo de cambio USD a MXN para eBay"]
-                ]
-                for _, r_ab in ed_abrev_ui.iterrows():
-                    ab_k = str(r_ab.get("Abreviatura Portal", "")).strip().upper()
-                    ab_v = str(r_ab.get("Significado Completo", "")).strip().upper()
-                    if ab_k and ab_v and ab_k != "NAN":
-                        nuevas_filas_cfg.append([f"ABREV_{ab_k}", ab_v, "Diccionario usuario"])
-
-                ws_cfg.clear()
-                ws_cfg.update(range_name='A1', values=nuevas_filas_cfg, value_input_option='USER_ENTERED')
-
-                # También actualizamos en caliente sincronizador_multiasistencia.py si existe localmente
-                if os.path.exists("sincronizador_multiasistencia.py"):
-                    try:
-                        with open("sincronizador_multiasistencia.py", "r", encoding="utf-8") as f_sync:
-                            txt_sync = f_sync.read()
-                        txt_sync = re.sub(r'USUARIO_PORTAL\s*=\s*["\'].*?["\']', f'USUARIO_PORTAL = "{usr_m_in.strip()}"', txt_sync)
-                        txt_sync = re.sub(r'PASSWORD_PORTAL\s*=\s*["\'].*?["\']', f'PASSWORD_PORTAL = "{pwd_m_in.strip()}"', txt_sync)
-                        with open("sincronizador_multiasistencia.py", "w", encoding="utf-8") as f_sync:
-                            f_sync.write(txt_sync)
-                    except Exception:
-                        pass
-
-                st.success("✅ Contraseña, tipo de cambio y diccionario actualizados en la nube.")
-                time.sleep(0.6)
-                st.rerun()
 
         col_btn_ext, col_btn_env, col_modo_cot = st.columns([1.4, 1.4, 1.2], vertical_alignment="center")
         with col_modo_cot:
@@ -5316,7 +5297,8 @@ elif vista_actual == "🛠️ Cuartel General":
                 siniestros_disp = df_pend_cot['Siniestro'].unique().tolist()
                 sin_cot_sel = st.selectbox(
                     "🚗 Selecciona el Siniestro a revisar:",
-                    options=["Todos"] + siniestros_disp
+                    options=["Todos"] + siniestros_disp,
+                    key="sel_siniestro_cot_ui"
                 )
                 if sin_cot_sel != "Todos":
                     df_pend_cot = df_pend_cot[df_pend_cot['Siniestro'] == sin_cot_sel].copy()
@@ -5420,7 +5402,7 @@ elif vista_actual == "🛠️ Cuartel General":
                 with st.expander(f"📊 Historial de Cotizaciones Enviadas al Portal ({len(df_hist_cot)} partidas)", expanded=False):
                     st.dataframe(df_hist_cot.drop(columns=['_GS_Row'], errors='ignore'), hide_index=True, use_container_width=True)
         else:
-            st.info("Aún no existen registros en `BD_COTIZACIONES`. Si dejaste la hoja completamente vacía en Google Sheets, presiona **🔎 1. Extraer Cotizaciones y Buscar Precios** y el robot creará los encabezados y llenará los datos automáticamente.")
+            st.info("Aún no existen registros en `BD_COTIZACIONES`. Presiona **🔎 1. Extraer Cotizaciones y Buscar Precios** para inicializar la hoja automáticamente.")
 
 # ==============================================================================
 # === [BLOQUE 10: MOTOR DE GUARDADO Y SINCRONIZACIÓN] ===

@@ -4684,7 +4684,7 @@ elif vista_actual == "🛠️ Cuartel General":
     st.markdown("### 🛠️ Cuartel General PMR (Sala de Máquinas)")
     
     # --- SUB-PESTAÑAS ESTILO DIRECTORIO (100% ANCHO PARA CADA MÓDULO) ---
-    tab_bots, tab_mant, tab_prestamos = st.tabs(["🤖 Centro de Bots y Alertas", "💾 Mantenimiento y Pendientes", "💸 Préstamos a Empleados"])
+    tab_bots, tab_cotizador, tab_mant, tab_prestamos = st.tabs(["🤖 Centro de Bots y Alertas", "⚡ Mesa de Cotizaciones (IA)", "💾 Mantenimiento y Pendientes", "💸 Préstamos a Empleados"])
 
     # =========================================================================
     # PESTAÑA 1: CENTRO DE BOTS Y ALERTAS (PANTALLA COMPLETA)
@@ -5171,6 +5171,256 @@ elif vista_actual == "🛠️ Cuartel General":
         except Exception as e:
             st.error(f"No se pudo cargar el resumen de gastos: {e}")
 
+    # =========================================================================
+    # PESTAÑA 4: MESA DE COTIZACIONES (IA) - MULTIASISTENCIA + CONFIGURACIÓN
+    # =========================================================================
+    with tab_cotizador:
+        st.markdown("#### ⚡ Mesa de Decisión y Cotizador Automático (Multiasistencia)")
+        st.caption("1️⃣ Extrae cotizaciones y precios (Mercado Libre + eBay EE.UU.) • 2️⃣ Ajusta margen o Precio Libre y marca **Validar** • 3️⃣ Inyecta al portal a 7 días hábiles.")
+
+        # --- PANEL DESPLEGABLE PARA CONTRASEÑA, TIPO DE CAMBIO Y DICCIONARIO ---
+        with st.expander("🔑 Configurar Contraseña de Portal, Tipo de Cambio (eBay USD) y Diccionario de Abreviaturas", expanded=False):
+            doc_cfg = init_connection()
+            try:
+                ws_cfg = doc_cfg.worksheet("BD_CONFIG_BOTS")
+                filas_cfg = ws_cfg.get_all_values()
+            except Exception:
+                ws_cfg = doc_cfg.add_worksheet(title="BD_CONFIG_BOTS", rows=200, cols=3)
+                ws_cfg.append_rows([
+                    ["Clave", "Valor", "Notas"],
+                    ["MULTI_USER", "PMA5816", "Usuario Portal Multiasistencia"],
+                    ["MULTI_PASS", "Pmroct1.", "Contraseña Portal Multiasistencia"],
+                    ["TC_USD", "20.50", "Tipo de cambio USD a MXN para eBay"]
+                ], value_input_option='USER_ENTERED')
+                filas_cfg = ws_cfg.get_all_values()
+
+            mapa_cfg_ui = {}
+            abrev_lista_ui = []
+            for r_c in filas_cfg[1:]:
+                if len(r_c) >= 2:
+                    k_c, v_c = str(r_c[0]).strip().upper(), str(r_c[1]).strip()
+                    if k_c.startswith("ABREV_"):
+                        abrev_lista_ui.append({"Abreviatura Portal": k_c.replace("ABREV_", ""), "Significado Completo": v_c})
+                    else:
+                        mapa_cfg_ui[k_c] = v_c
+
+            col_cfg1, col_cfg2 = st.columns([1.2, 1.8], gap="large")
+            with col_cfg1:
+                st.markdown("**🔐 Credenciales Multiasistencia y Dólar**")
+                usr_m_in = st.text_input("Usuario Multiasistencia:", value=mapa_cfg_ui.get("MULTI_USER", "PMA5816"))
+                pwd_m_in = st.text_input("Contraseña Multiasistencia:", value=mapa_cfg_ui.get("MULTI_PASS", "Pmroct1."))
+                tc_usd_in = st.number_input("Tipo de Cambio USD -> MXN (eBay):", min_value=15.0, max_value=35.0, value=float(mapa_cfg_ui.get("TC_USD", 20.50)), step=0.25)
+
+            with col_cfg2:
+                st.markdown("**📖 Diccionario Personalizado de Abreviaturas**")
+                st.caption("Agrega aquí cualquier palabra recortada nueva que veas en el portal (ej. `BIE.` -> `BIELETA`).")
+                df_abrev_base = pd.DataFrame(abrev_lista_ui) if abrev_lista_ui else pd.DataFrame([{"Abreviatura Portal": "ANITIN.", "Significado Completo": "ANTINIEBLA"}])
+                ed_abrev_ui = st.data_editor(df_abrev_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_diccionario_bot")
+
+            if st.button("💾 Guardar Contraseña y Diccionario", type="primary", key="btn_save_cfg_bot"):
+                nuevas_filas_cfg = [
+                    ["Clave", "Valor", "Notas"],
+                    ["MULTI_USER", usr_m_in.strip(), "Usuario Portal Multiasistencia"],
+                    ["MULTI_PASS", pwd_m_in.strip(), "Contraseña Portal Multiasistencia"],
+                    ["TC_USD", str(tc_usd_in), "Tipo de cambio USD a MXN para eBay"]
+                ]
+                for _, r_ab in ed_abrev_ui.iterrows():
+                    ab_k = str(r_ab.get("Abreviatura Portal", "")).strip().upper()
+                    ab_v = str(r_ab.get("Significado Completo", "")).strip().upper()
+                    if ab_k and ab_v and ab_k != "NAN":
+                        nuevas_filas_cfg.append([f"ABREV_{ab_k}", ab_v, "Diccionario usuario"])
+
+                ws_cfg.clear()
+                ws_cfg.update(range_name='A1', values=nuevas_filas_cfg, value_input_option='USER_ENTERED')
+
+                # También actualizamos en caliente sincronizador_multiasistencia.py si existe localmente
+                if os.path.exists("sincronizador_multiasistencia.py"):
+                    try:
+                        with open("sincronizador_multiasistencia.py", "r", encoding="utf-8") as f_sync:
+                            txt_sync = f_sync.read()
+                        txt_sync = re.sub(r'USUARIO_PORTAL\s*=\s*["\'].*?["\']', f'USUARIO_PORTAL = "{usr_m_in.strip()}"', txt_sync)
+                        txt_sync = re.sub(r'PASSWORD_PORTAL\s*=\s*["\'].*?["\']', f'PASSWORD_PORTAL = "{pwd_m_in.strip()}"', txt_sync)
+                        with open("sincronizador_multiasistencia.py", "w", encoding="utf-8") as f_sync:
+                            f_sync.write(txt_sync)
+                    except Exception:
+                        pass
+
+                st.success("✅ Contraseña, tipo de cambio y diccionario actualizados en la nube.")
+                time.sleep(0.6)
+                st.rerun()
+
+        col_btn_ext, col_btn_env, col_modo_cot = st.columns([1.4, 1.4, 1.2], vertical_alignment="center")
+        with col_modo_cot:
+            modo_bot_cot = st.radio("Vista Chrome:", ["Oculto (Rápido)", "Visual (Ver Chrome)"], horizontal=True, key="rad_modo_cot")
+        arg_vis_cot = "--oculto" if "Oculto" in modo_bot_cot else "--visual"
+
+        with col_btn_ext:
+            if st.button("🔎 1. Extraer Cotizaciones y Buscar Precios", type="primary", use_container_width=True):
+                with st.spinner("Entrando a Multiasistencia y buscando precios en Mercado Libre, eBay EE.UU. e Historial..."):
+                    try:
+                        with open("credentials.json", "w", encoding="utf-8") as f:
+                            f.write(st.secrets["google_credentials"])
+                        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+                        res_ext = subprocess.run(
+                            [sys.executable, "-u", "cotizador_multiasistencia.py", "--extraer", arg_vis_cot],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace"
+                        )
+                        st.session_state['log_cotizador_ai'] = res_ext.stdout
+                        st.cache_data.clear()
+                        st.rerun()
+                    finally:
+                        if os.path.exists("credentials.json"):
+                            os.remove("credentials.json")
+
+        with col_btn_env:
+            if st.button("🚀 3. Inyectar Validadas al Portal (7 Días Hábiles)", use_container_width=True):
+                with st.spinner("Inyectando partidas validadas en Multiasistencia y presionando Grabar..."):
+                    try:
+                        with open("credentials.json", "w", encoding="utf-8") as f:
+                            f.write(st.secrets["google_credentials"])
+                        res_env = subprocess.run(
+                            [sys.executable, "-u", "cotizador_multiasistencia.py", "--enviar", arg_vis_cot],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace"
+                        )
+                        st.session_state['log_cotizador_ai'] = res_env.stdout
+                        st.cache_data.clear()
+                        st.rerun()
+                    finally:
+                        if os.path.exists("credentials.json"):
+                            os.remove("credentials.json")
+
+        if st.session_state.get('log_cotizador_ai'):
+            with st.expander("🖥️ Ver Bitácora de Ejecución del Robot Cotizador", expanded=False):
+                st.code(st.session_state['log_cotizador_ai'])
+
+        try:
+            doc_cot = init_connection()
+            ws_cot_ui = doc_cot.worksheet("BD_COTIZACIONES")
+            datos_cot_ui = ws_cot_ui.get_all_values()
+            df_cot_ui = pd.DataFrame(datos_cot_ui[1:], columns=[str(h).strip() for h in datos_cot_ui[0]]) if len(datos_cot_ui) > 1 else pd.DataFrame()
+        except Exception:
+            df_cot_ui = pd.DataFrame()
+
+        if not df_cot_ui.empty and 'Estatus_Cotizacion' in df_cot_ui.columns:
+            df_cot_ui['_GS_Row'] = df_cot_ui.index + 2
+            df_pend_cot = df_cot_ui[df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() == 'PENDIENTE'].copy()
+            df_hist_cot = df_cot_ui[df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() != 'PENDIENTE'].copy()
+
+            if not df_pend_cot.empty:
+                for col_num in ['Precio_Original', 'Precio_No_Original', 'Precio_Generica', 'Precio_Historial', 'Flete_Estimado', 'Costo_Base', 'Margen_Pct', 'Precio_Sugerido', 'Precio_Libre', 'Precio_Final_Enviar']:
+                    if col_num in df_pend_cot.columns:
+                        df_pend_cot[col_num] = pd.to_numeric(df_pend_cot[col_num].astype(str).str.replace('$', '').str.replace(',', ''), errors='coerce').fillna(0.0)
+
+                df_pend_cot['Validar_Bool'] = df_pend_cot['Validar_Envio'].astype(str).str.upper().isin(['TRUE', 'SI', '1', 'VERDADERO'])
+
+                siniestros_disp = df_pend_cot['Siniestro'].unique().tolist()
+                sin_cot_sel = st.selectbox(
+                    "🚗 Selecciona el Siniestro a revisar:",
+                    options=["Todos"] + siniestros_disp
+                )
+                if sin_cot_sel != "Todos":
+                    df_pend_cot = df_pend_cot[df_pend_cot['Siniestro'] == sin_cot_sel].copy()
+
+                primera = df_pend_cot.iloc[0]
+                st.info(
+                    f"🚘 **Vehículo:** {primera.get('Marca','')} {primera.get('Vehiculo','')} {primera.get('Modelo_Ano','')} | "
+                    f"🔢 **VIN:** `{primera.get('VIN','')}` | 🏢 **Taller:** {primera.get('Taller','')} ({primera.get('Ciudad','')}, {primera.get('Estado','')}) | "
+                    f"⏰ **Cierre Subasta:** {primera.get('Fecha_Fin','')}"
+                )
+
+                cols_tabla_cot = [
+                    c for c in [
+                        'Siniestro', 'Partida_Idx', 'Cantidad', 'Descripcion_Portal',
+                        'Precio_Original', 'Precio_No_Original', 'Precio_Generica', 'Precio_Historial',
+                        'Flete_Estimado', 'Fuente_Seleccionada', 'Origen_Portal',
+                        'Costo_Base', 'Margen_Pct', 'Precio_Sugerido', 'Precio_Libre',
+                        'Codigo_Hub', 'Link_ML', 'Link_eBay', 'Validar_Bool'
+                    ] if c in df_pend_cot.columns
+                ]
+
+                ed_cot_df = st.data_editor(
+                    df_pend_cot[cols_tabla_cot],
+                    hide_index=True,
+                    use_container_width=True,
+                    column_config={
+                        'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"),
+                        'Partida_Idx': st.column_config.NumberColumn("#", disabled=True, width="small"),
+                        'Cantidad': st.column_config.TextColumn("Cant", disabled=True, width="small"),
+                        'Descripcion_Portal': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
+                        'Precio_Original': st.column_config.NumberColumn("1. ORIGINAL", format="$ %.0f", disabled=True, width="small"),
+                        'Precio_No_Original': st.column_config.NumberColumn("2. NO ORIG (Semi)", format="$ %.0f", disabled=True, width="small"),
+                        'Precio_Generica': st.column_config.NumberColumn("3. GENÉRICA", format="$ %.0f", disabled=True, width="small"),
+                        'Precio_Historial': st.column_config.NumberColumn("Hist. PMR", format="$ %.0f", disabled=True, width="small"),
+                        'Flete_Estimado': st.column_config.NumberColumn("🚚 Flete (Mín $300)", format="$ %.0f", width="small"),
+                        'Fuente_Seleccionada': st.column_config.SelectboxColumn("Dónde Comprar", options=["ML", "EB", "INV", "LOC", "AGENCIA", "MAN"], width="small"),
+                        'Origen_Portal': st.column_config.SelectboxColumn("Origen Portal", options=["ORIGINAL", "NO ORIGINAL", "SEMINUEVA"], width="small"),
+                        'Costo_Base': st.column_config.NumberColumn("Costo Base", format="$ %.0f", width="small"),
+                        'Margen_Pct': st.column_config.SelectboxColumn("% Utilidad", options=[15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 100], width="small"),
+                        'Precio_Sugerido': st.column_config.NumberColumn("💡 Sugerido", format="$ %.0f", disabled=True, width="small"),
+                        'Precio_Libre': st.column_config.NumberColumn("✍️ Precio Libre", format="$ %.0f", help="Si escribes un monto > 0 aquí, este se enviará al portal en lugar del sugerido.", width="small"),
+                        'Codigo_Hub': st.column_config.TextColumn("Código Portal", width="small"),
+                        'Link_ML': st.column_config.LinkColumn("🇲🇽 ML", display_text="Ver ML", width="small"),
+                        'Link_eBay': st.column_config.LinkColumn("🇺🇸 eBay", display_text="Ver eBay", width="small"),
+                        'Validar_Bool': st.column_config.CheckboxColumn("✅ Validar", default=False, width="small")
+                    },
+                    key="editor_mesa_cotizador"
+                )
+
+                if st.button("💾 2. Recalcular Precios y Guardar Selección", type="primary", key="btn_save_mesa_cot"):
+                    with st.spinner("Actualizando cálculos y códigos HUB en BD_COTIZACIONES..."):
+                        headers_c = [str(h).strip() for h in datos_cot_ui[0]]
+                        celdas_cot_upd = []
+                        import random
+
+                        for idx_r in ed_cot_df.index:
+                            gs_r = int(df_pend_cot.loc[idx_r, '_GS_Row'])
+                            fila_ed = ed_cot_df.loc[idx_r]
+
+                            costo_b = float(fila_ed['Costo_Base'])
+                            flete_b = float(fila_ed['Flete_Estimado'])
+                            margen_b = float(fila_ed['Margen_Pct'])
+                            libre_b = float(fila_ed['Precio_Libre'])
+                            fuente_b = str(fila_ed['Fuente_Seleccionada']).strip().upper()
+                            origen_b = str(fila_ed['Origen_Portal']).strip().upper()
+                            validar_b = "TRUE" if fila_ed['Validar_Bool'] else "FALSE"
+
+                            nuevo_sug = round((costo_b + flete_b) * (1.0 + margen_b / 100.0)) if costo_b > 0 else 0
+                            precio_final_env = round(libre_b) if libre_b > 0 else nuevo_sug
+
+                            cod_actual = str(fila_ed['Codigo_Hub']).strip().upper()
+                            sufijo_num = re.findall(r'\d{3}$', cod_actual)
+                            num_3 = sufijo_num[0] if sufijo_num else str(random.randint(100, 999))
+                            nuevo_cod_hub = f"HUB{fuente_b}{num_3}"
+
+                            cambios_fila = {
+                                'Flete_Estimado': flete_b,
+                                'Fuente_Seleccionada': fuente_b,
+                                'Origen_Portal': origen_b,
+                                'Costo_Base': costo_b,
+                                'Margen_Pct': margen_b,
+                                'Precio_Sugerido': nuevo_sug,
+                                'Precio_Libre': libre_b,
+                                'Precio_Final_Enviar': precio_final_env,
+                                'Codigo_Hub': nuevo_cod_hub,
+                                'Validar_Envio': validar_b
+                            }
+                            for col_k, val_k in cambios_fila.items():
+                                if col_k in headers_c:
+                                    celdas_cot_upd.append(gspread.Cell(row=gs_r, col=headers_c.index(col_k) + 1, value=val_k))
+
+                        if celdas_cot_upd:
+                            ws_cot_ui.update_cells(celdas_cot_upd, value_input_option='USER_ENTERED')
+                            st.success("✅ Cálculos, precios finales y códigos HUB actualizados. Ya puedes presionar el botón 3 para inyectar al portal.")
+                            time.sleep(0.8)
+                            st.rerun()
+            else:
+                st.info("No hay cotizaciones pendientes en la mesa. Presiona **🔎 1. Extraer Cotizaciones y Buscar Precios** para traer las del portal.")
+
+            if not df_hist_cot.empty:
+                with st.expander(f"📊 Historial de Cotizaciones Enviadas al Portal ({len(df_hist_cot)} partidas)", expanded=False):
+                    st.dataframe(df_hist_cot.drop(columns=['_GS_Row'], errors='ignore'), hide_index=True, use_container_width=True)
+        else:
+            st.info("Aún no existen registros en `BD_COTIZACIONES`. Si dejaste la hoja completamente vacía en Google Sheets, presiona **🔎 1. Extraer Cotizaciones y Buscar Precios** y el robot creará los encabezados y llenará los datos automáticamente.")
 
 # ==============================================================================
 # === [BLOQUE 10: MOTOR DE GUARDADO Y SINCRONIZACIÓN] ===

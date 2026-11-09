@@ -5236,40 +5236,50 @@ elif vista_actual == "🛠️ Cuartel General":
             modo_bot_cot = st.radio("Vista Chrome:", ["Oculto (Rápido)", "Visual (Ver Chrome)"], horizontal=True, key="rad_modo_cot")
         arg_vis_cot = "--oculto" if "Oculto" in modo_bot_cot else "--visual"
 
-        with col_btn_ext:
-            if st.button("🔎 1. Extraer Cotizaciones y Buscar Precios", type="primary", use_container_width=True):
-                with st.spinner("Entrando a Multiasistencia y buscando precios en Mercado Libre, eBay EE.UU. e Historial..."):
-                    try:
-                        with open("credentials.json", "w", encoding="utf-8") as f:
-                            f.write(st.secrets["google_credentials"])
-                        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
-                        res_ext = subprocess.run(
-                            [sys.executable, "-u", "cotizador_multiasistencia.py", "--extraer", arg_vis_cot],
-                            capture_output=True, text=True, encoding="utf-8", errors="replace"
-                        )
-                        st.session_state['log_cotizador_ai'] = res_ext.stdout
-                        st.cache_data.clear()
-                        st.rerun()
-                    finally:
-                        if os.path.exists("credentials.json"):
-                            os.remove("credentials.json")
+        btn_run_ext = col_btn_ext.button("🔎 1. Extraer Cotizaciones y Buscar Precios", type="primary", use_container_width=True)
+        btn_run_env = col_btn_env.button("🚀 3. Inyectar Validadas al Portal (7 Días Hábiles)", use_container_width=True)
 
-        with col_btn_env:
-            if st.button("🚀 3. Inyectar Validadas al Portal (7 Días Hábiles)", use_container_width=True):
-                with st.spinner("Inyectando partidas validadas en Multiasistencia y presionando Grabar..."):
-                    try:
-                        with open("credentials.json", "w", encoding="utf-8") as f:
-                            f.write(st.secrets["google_credentials"])
-                        res_env = subprocess.run(
-                            [sys.executable, "-u", "cotizador_multiasistencia.py", "--enviar", arg_vis_cot],
-                            capture_output=True, text=True, encoding="utf-8", errors="replace"
-                        )
-                        st.session_state['log_cotizador_ai'] = res_env.stdout
-                        st.cache_data.clear()
-                        st.rerun()
-                    finally:
-                        if os.path.exists("credentials.json"):
-                            os.remove("credentials.json")
+        with st.expander("🖥️ Ver Bitácora de Ejecución en Vivo del Robot Cotizador", expanded=True):
+            consola_cot_vivo = st.empty()
+            consola_cot_vivo.code(st.session_state.get('log_cotizador_ai', 'Esperando orden de ejecución...'))
+
+        if btn_run_ext or btn_run_env:
+            accion_flag = "--extraer" if btn_run_ext else "--enviar"
+            with st.spinner("Ejecutando robot cotizador en vivo..."):
+                try:
+                    with open("credentials.json", "w", encoding="utf-8") as f:
+                        f.write(st.secrets["google_credentials"])
+                    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+
+                    env_cot = os.environ.copy()
+                    env_cot["PYTHONIOENCODING"] = "utf-8"
+                    env_cot["PYTHONUNBUFFERED"] = "1"
+
+                    proc_cot = subprocess.Popen(
+                        [sys.executable, "-u", "cotizador_multiasistencia.py", accion_flag, arg_vis_cot],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        env=env_cot,
+                        encoding="utf-8",
+                        errors="replace"
+                    )
+                    lineas_cot = []
+                    for linea_c in iter(proc_cot.stdout.readline, ''):
+                        if not linea_c:
+                            break
+                        lineas_cot.append(linea_c)
+                        consola_cot_vivo.code("".join(lineas_cot))
+
+                    proc_cot.stdout.close()
+                    proc_cot.wait()
+                    st.session_state['log_cotizador_ai'] = "".join(lineas_cot)
+                    st.cache_data.clear()
+                    st.rerun()
+                finally:
+                    if os.path.exists("credentials.json"):
+                        os.remove("credentials.json")
 
         if st.session_state.get('log_cotizador_ai'):
             with st.expander("🖥️ Ver Bitácora de Ejecución del Robot Cotizador", expanded=False):

@@ -4,6 +4,7 @@ import sys
 import time
 import random
 import datetime
+import traceback
 import urllib.parse
 import requests
 from playwright.sync_api import sync_playwright
@@ -178,14 +179,73 @@ def cargar_mapa_historial(doc):
     except: pass
     return mapa
 
+def abrir_menu_cotizaciones(page):
+    """Busca y ejecuta la apertura de 'Cotizaciones' en la página o en cualquiera de sus frames."""
+    # 1. Intentar llamar submitForm en cualquier frame donde exista la función
+    for f in [page.main_frame] + page.frames:
+        try:
+            tiene_fn = f.evaluate("() => typeof submitForm === 'function'")
+            if tiene_fn:
+                print(f"   [OK] Ejecutando submitForm en frame '{f.name or 'principal'}'...")
+                f.evaluate("submitForm('main_action.do','quotation_list_action.do')")
+                return True
+        except Exception:
+            pass
+
+    # 2. Intentar hacer clic en el enlace/texto 'Cotizaciones' en cualquier frame
+    for f in [page.main_frame] + page.frames:
+        try:
+            loc = f.locator("a:has-text('Cotizaciones'), td:has-text('Cotizaciones'), [onclick*='quotation_list_action']")
+            if loc.count() > 0:
+                print(f"   [OK] Haciendo clic en 'Cotizaciones' dentro del frame '{f.name or 'principal'}'...")
+                loc.first.click(timeout=5000)
+                return True
+        except Exception:
+            pass
+
+    raise RuntimeError("No se encontró el menú 'Cotizaciones' ni la función submitForm. Verifica usuario/contraseña del portal.")
+
+def obtener_frame_derecho(page, espera_seg=10):
+    """Busca el frame middleFrameRight esperando a que cargue."""
+    fin = time.time() + espera_seg
+    while time.time() < fin:
+        f = page.frame(name="middleFrameRight")
+        if f:
+            return f
+        for cand in page.frames:
+            try:
+                if "middleFrameRight" in (cand.name or "") or cand.locator("a.cvi, select[name='statusPart']").count() > 0:
+                    return cand
+            except Exception:
+                pass
+        time.sleep(0.5)
+    return page.main_frame
+
+def verificar_headless_seguro(modo_headless):
+    """En Linux/Streamlit Cloud sin pantalla ($DISPLAY), fuerza modo oculto para evitar crash."""
+    if not modo_headless and sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        print("⚠️ [AVISO] Servidor en la nube detectado (sin monitor físico). Cambiando automáticamente a modo Oculto (Headless)...")
+        return True
+    return modo_headless
+
 def ejecutar_extraccion_cotizaciones(modo_headless=True):
     print("=== INICIANDO EXTRACCIÓN DE COTIZACIONES ===")
-    doc = conectar_sheets()
-    cfg = cargar_configuracion_dinamica(doc)
-    ws_cot = obtener_ws_cotizaciones(doc)
-    mapa_hist = cargar_mapa_historial(doc)
+    modo_headless = verificar_headless_seguro(modo_headless)
 
-    existentes = {f"{r[2]}_{r[12]}_{r[14]}" for r in ws_cot.get_all_values()[1:] if len(r) > 14}
+    try:
+        print("-> Conectando con Google Sheets...")
+        doc = conectar_sheets()
+        cfg = cargar_configuracion_dinamica(doc)
+        ws_cot = obtener_ws_cotizaciones(doc)
+        mapa_hist = cargar_mapa_historial(doc)
+
+        existentes = {f"{r[2]}_{r[12]}_{r[14]}" for r in ws_cot.get_all_values()[1:] if len(r) > 14}
+        print(f"-> Partidas ya registradas en BD_COTIZACIONES: {len(existentes)}")
+    except Exception as e_sh:
+        print(f"❌ [ERROR GOOGLE SHEETS]: {e_sh}")
+        traceback.print_exc()
+        return
+
     nuevas = []
 
     with sync_playwright() as p:
@@ -198,37 +258,54 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
             page.goto(PORTAL_URL, timeout=45000)
             page.fill("input[type='text']", cfg["MULTI_USER"])
             page.fill("input[type='password']", cfg["MULTI_PASS"])
-            page.click("input[value='Aceptar'], button:has-text('Aceptar')")
-            time.sleep(2)
-
-            print("-> Abriendo menú de Cotizaciones...")
-            page.evaluate("submitForm('main_action.do','quotation_list_action.do')")
+            page.click("input[value='Aceptar'], button:has-text('Aceptar'), input[type='submit']")
             time.sleep(3)
 
-            frame = page.frame(name="middleFrameRight") or page.frame_locator("iframe[name='middleFrameRight']")
-            
+            frames_nombres = [f.name or f.url for f in page.frames]
+            print(f"-> Sesión iniciada. Frames detectados en portal: {frames_nombres}")
+
+            print("-> Abriendo menú de Cotizaciones...")
+            abrir_menu_cotizaciones(page)
+            time.sleep(3.5)
+
+            frame = obtener_frame_derecho(page, espera_seg=12)
+            print(f"-> Leyendo tabla de siniestros desde frame: '{frame.name or 'main'}'")
+
             siniestros = frame.evaluate("""
-                () => Array.from(document.querySelectorAll('a.cvi'))
-                    .filter(a => (a.getAttribute('href')||'').includes('showDetail') && a.textContent.trim().length >= 6)
+                () => Array.from(document.querySelectorAll('a.cvi, a[href*="showDetail"]'))
+                    .filter(a => (a.getAttribute('href')||'').includes('showDetail') && a.textContent.trim().length >= 5)
                     .map(a => ({ siniestro: a.textContent.trim(), js: a.getAttribute('href') }))
             """)
-            print(f"-> Siniestros detectados: {len(siniestros)}")
+            print(f"-> Siniestros pendientes detectados en bandeja: {len(siniestros)}")
+
+            if len(siniestros) == 0:
+                txt_debug = frame.evaluate("() => document.body ? document.body.innerText.slice(0, 400).replace(/\\s+/g, ' ') : ''")
+                print(f"   [INFO] Texto visible en bandeja: {txt_debug}")
 
             for idx, item in enumerate(siniestros):
                 num_sin = item['siniestro']
-                print(f"[{idx+1}/{len(siniestros)}] Procesando Siniestro {num_sin}...")
+                print(f"\n[{idx+1}/{len(siniestros)}] Entrando al Siniestro {num_sin}...")
                 try:
-                    frame = page.frame(name="middleFrameRight")
+                    frame = obtener_frame_derecho(page)
                     frame.evaluate(item['js'].replace("javascript:", ""))
-                    time.sleep(2)
-
-                    frame = page.frame(name="middleFrameRight")
-                    sub_js = frame.evaluate("() => { let a = document.querySelector('a.cvi'); return a ? a.getAttribute('href') : ''; }")
-                    if not sub_js: continue
-                    frame.evaluate(sub_js.replace("javascript:", ""))
                     time.sleep(2.5)
 
-                    frame = page.frame(name="middleFrameRight")
+                    frame = obtener_frame_derecho(page)
+                    sub_js = frame.evaluate("""
+                        () => {
+                            let a = document.querySelector('a.cvi, a[href*="showDetail"]');
+                            return a ? a.getAttribute('href') : '';
+                        }
+                    """)
+                    if not sub_js:
+                        print(f"  [!] No se encontró enlace de cotización (1) dentro de {num_sin}.")
+                        continue
+
+                    print(f"  -> Abriendo pliego de piezas de {num_sin}...")
+                    frame.evaluate(sub_js.replace("javascript:", ""))
+                    time.sleep(2.8)
+
+                    frame = obtener_frame_derecho(page)
                     detalle = frame.evaluate(r"""
                         () => {
                             function fullTxt(el) {
@@ -262,10 +339,18 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                         }
                     """)
 
+                    piezas_lista = detalle.get('piezas', [])
+                    print(f"  -> Vehículo: {detalle.get('marca','')} {detalle.get('vehiculo','')} {detalle.get('modelo','')} | Piezas leídas: {len(piezas_lista)}")
+
                     ahora = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-6))).strftime("%Y-%m-%d %H:%M")
-                    for pza in detalle.get('piezas', []):
-                        if f"{num_sin}_{pza['idx']}_{pza['descripcion']}" in existentes: continue
+                    for pza in piezas_lista:
+                        llave_u = f"{num_sin}_{pza['idx']}_{pza['descripcion']}"
+                        if llave_u in existentes:
+                            print(f"     [Omitida] Partida #{pza['idx']+1} ({pza['descripcion']}) ya existe en BD_COTIZACIONES.")
+                            continue
+
                         q = expandir_descripcion(pza['descripcion'], detalle.get('marca',''), detalle.get('vehiculo',''), detalle.get('modelo',''), cfg.get("DICCIONARIO_EXTRA", {}))
+                        print(f"     🔎 Buscando Partida #{pza['idx']+1}: '{q}' en ML y eBay...")
                         p_orig, p_noorig, p_gen, l_ml, l_eb = buscar_precios_mercado(q, cfg.get("TC_USD", 20.50))
                         p_hist = mapa_hist.get(f"{pza['descripcion'][:12].upper()}_{detalle.get('vehiculo','')[:10].upper()}", 0.0)
                         flete = estimar_flete(pza['descripcion'], detalle.get('ciudad',''), detalle.get('estado',''))
@@ -284,12 +369,18 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                             f"HUB{fuente}{random.randint(100,999)}", l_ml, l_eb, "FALSE", "PENDIENTE"
                         ])
 
-                    page.evaluate("submitForm('main_action.do','quotation_list_action.do')")
-                    time.sleep(2)
-                except Exception as e:
-                    print(f"  [!] Error en siniestro {num_sin}: {e}")
-                    try: page.evaluate("submitForm('main_action.do','quotation_list_action.do')")
-                    except: pass
+                    abrir_menu_cotizaciones(page)
+                    time.sleep(2.5)
+                except Exception as e_sin:
+                    print(f"  ❌ [ERROR en Siniestro {num_sin}]: {e_sin}")
+                    try:
+                        abrir_menu_cotizaciones(page)
+                        time.sleep(2)
+                    except:
+                        pass
+        except Exception as e_gen:
+            print(f"\n❌ [ERROR CRÍTICO DURANTE LA EXTRACCIÓN]: {e_gen}")
+            traceback.print_exc()
         finally:
             browser.close()
 
@@ -297,15 +388,23 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
         ws_cot.append_rows(nuevas, value_input_option='USER_ENTERED')
         print(f"\n✅ {len(nuevas)} partidas extraídas y guardadas exitosamente en BD_COTIZACIONES.")
     else:
-        print("\n✅ Sin partidas nuevas.")
+        print("\nℹ️ Proceso finalizado sin partidas nuevas por agregar.")
 
 def ejecutar_envio_cotizaciones(modo_headless=True):
     print("=== INICIANDO ENVÍO DE COTIZACIONES AL PORTAL ===")
-    doc = conectar_sheets()
-    cfg = cargar_configuracion_dinamica(doc)
-    ws_cot = obtener_ws_cotizaciones(doc)
-    datos = ws_cot.get_all_values()
-    if len(datos) <= 1: return
+    modo_headless = verificar_headless_seguro(modo_headless)
+
+    try:
+        doc = conectar_sheets()
+        cfg = cargar_configuracion_dinamica(doc)
+        ws_cot = obtener_ws_cotizaciones(doc)
+        datos = ws_cot.get_all_values()
+        if len(datos) <= 1:
+            print("⚠️ BD_COTIZACIONES está vacía.")
+            return
+    except Exception as e_sh:
+        print(f"❌ [ERROR GOOGLE SHEETS]: {e_sh}")
+        return
 
     headers = [str(h).strip() for h in datos[0]]
     idx_sin = headers.index("Siniestro")
@@ -330,7 +429,7 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                 })
 
     if not por_enviar:
-        print("⚠️ No hay partidas validadas para enviar.")
+        print("⚠️ No hay partidas validadas con precio mayor a $0 para enviar.")
         return
 
     fecha_7d = calcular_fecha_habiles(7)
@@ -343,27 +442,32 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
         page.on("dialog", lambda d: d.accept())
 
         try:
+            print(f"-> Iniciando sesión en portal con {cfg['MULTI_USER']}...")
             page.goto(PORTAL_URL, timeout=45000)
             page.fill("input[type='text']", cfg["MULTI_USER"])
             page.fill("input[type='password']", cfg["MULTI_PASS"])
-            page.click("input[value='Aceptar'], button:has-text('Aceptar')")
-            time.sleep(2)
-            page.evaluate("submitForm('main_action.do','quotation_list_action.do')")
+            page.click("input[value='Aceptar'], button:has-text('Aceptar'), input[type='submit']")
             time.sleep(3)
+
+            abrir_menu_cotizaciones(page)
+            time.sleep(3.5)
 
             for sin, items in por_enviar.items():
                 try:
-                    frame = page.frame(name="middleFrameRight")
-                    link = frame.locator(f"a.cvi:has-text('{sin}')")
-                    if link.count() == 0: continue
+                    print(f"-> Abriendo Siniestro {sin} para inyectar {len(items)} partida(s)...")
+                    frame = obtener_frame_derecho(page)
+                    link = frame.locator(f"a.cvi:has-text('{sin}'), a[href*='showDetail']:has-text('{sin}')")
+                    if link.count() == 0:
+                        print(f"  [!] Siniestro {sin} no encontrado en bandeja.")
+                        continue
                     frame.evaluate(link.first.get_attribute("href").replace("javascript:", ""))
-                    time.sleep(2)
-
-                    frame = page.frame(name="middleFrameRight")
-                    frame.evaluate(frame.locator("a.cvi").first.get_attribute("href").replace("javascript:", ""))
                     time.sleep(2.5)
 
-                    frame = page.frame(name="middleFrameRight")
+                    frame = obtener_frame_derecho(page)
+                    frame.evaluate(frame.locator("a.cvi, a[href*='showDetail']").first.get_attribute("href").replace("javascript:", ""))
+                    time.sleep(2.8)
+
+                    frame = obtener_frame_derecho(page)
                     for it in items:
                         frame.evaluate("""
                             (args) => {
@@ -380,18 +484,24 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                                 if(o[i]) { o[i].value = args.origen; if(typeof o[i].onchange==='function') o[i].onchange(); }
                             }
                         """, {"idx": it['partida_idx'], "fecha": fecha_7d, "codigo": it['codigo_hub'], "precio": it['precio_int'], "origen": mapa_orig.get(it['origen_txt'], "42008")})
+                        print(f"   ✔ Partida #{it['partida_idx']+1} inyectada (${it['precio_int']} - {it['codigo_hub']})")
                         time.sleep(0.2)
 
                     btn = frame.locator("input[name='btnSubmit'][value='Grabar']")
                     if btn.count() > 0:
                         btn.first.click()
                         time.sleep(3)
-                        for it in items: actualizar.append(gspread.Cell(row=it['gs_row'], col=idx_est + 1, value="ENVIADA PORTAL"))
+                        print(f"   💾 Siniestro {sin} grabado en el portal.")
+                        for it in items:
+                            actualizar.append(gspread.Cell(row=it['gs_row'], col=idx_est + 1, value="ENVIADA PORTAL"))
 
-                    page.evaluate("submitForm('main_action.do','quotation_list_action.do')")
-                    time.sleep(2)
+                    abrir_menu_cotizaciones(page)
+                    time.sleep(2.5)
                 except Exception as e:
-                    print(f"[!] Error enviando {sin}: {e}")
+                    print(f"❌ [!] Error enviando {sin}: {e}")
+        except Exception as e_gen:
+            print(f"❌ [ERROR CRÍTICO EN ENVÍO]: {e_gen}")
+            traceback.print_exc()
         finally:
             browser.close()
 
@@ -401,5 +511,7 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
 
 if __name__ == "__main__":
     oculto = False if "--visual" in sys.argv else True
-    if "--enviar" in sys.argv: ejecutar_envio_cotizaciones(modo_headless=oculto)
-    else: ejecutar_extraccion_cotizaciones(modo_headless=oculto)
+    if "--enviar" in sys.argv:
+        ejecutar_envio_cotizaciones(modo_headless=oculto)
+    else:
+        ejecutar_extraccion_cotizaciones(modo_headless=oculto)

@@ -50,33 +50,10 @@ DICCIONARIO_BASE = {
     "DIRECC.": "DIRECCIONAL", "DIRECC": "DIRECCIONAL",
     "LIMPIAPARAB.": "LIMPIAPARABRISAS", "LIMPIAPARAB": "LIMPIAPARABRISAS",
     "TRAVES.": "TRAVESANO", "TRAVES": "TRAVESANO",
-    "FRONT.": "FRONTAL", "FRONT": "FRONTAL"
+    "FRONT.": "FRONTAL", "FRONT": "FRONTAL",
+    "EMBL.": "EMBLEMA", "CERRAD.": "CERRADURA", "REVEST.": "REVESTIMIENTO"
 }
 
-TRADUCTOR_EBAY_EN = {
-    "FASCIA": "BUMPER COVER", "FACIA": "BUMPER COVER",
-    "DELANTERA": "FRONT", "TRASERA": "REAR",
-    "IZQUIERDA": "LEFT DRIVER SIDE", "DERECHA": "RIGHT PASSENGER SIDE",
-    "SUPERIOR": "UPPER", "INFERIOR": "LOWER", "CENTRAL": "CENTER",
-    "EXTERIOR": "OUTER", "INTERIOR": "INNER",
-    "SALPICADERA": "FENDER", "GUARDAFANGO": "FENDER LINER",
-    "COFRE": "HOOD PANEL", "PUERTA": "DOOR SHELL",
-    "PARRILLA": "GRILLE", "REJILLA": "LOWER GRILLE BEZEL",
-    "FARO": "HEADLIGHT LAMP", "ANTINIEBLA": "FOG LIGHT", "NIEBLA": "FOG LIGHT",
-    "CALAVERA": "TAIL LIGHT LAMP", "RADIADOR": "RADIATOR", "CONDENSADOR": "AC CONDENSER",
-    "MARCO": "RADIATOR SUPPORT", "ALMA": "BUMPER REINFORCEMENT",
-    "ABSORBEDOR": "BUMPER ABSORBER", "SOPORTE": "BRACKET RETAINER",
-    "MOLDURA": "MOLDING TRIM", "COSTADO": "QUARTER PANEL",
-    "BISAGRA": "HINGE", "CERRADURA": "LATCH LOCK", "ESPEJO": "SIDE MIRROR",
-    "CAJUELA": "TRUNK LID", "PARABRISAS": "WINDSHIELD", "MEDALLON": "REAR GLASS",
-    "AMORTIGUADOR": "SHOCK STRUT", "BRAZO": "CONTROL ARM", "SUSPENSION": "SUSPENSION",
-    "MANGUETA": "STEERING KNUCKLE", "RODAMIENTO": "WHEEL HUB BEARING",
-    "BUJE": "BUSHING", "RIN": "WHEEL RIM", "LLANTA": "TIRE",
-    "TAPON": "WHEEL CAP", "ESTRIBO": "ROCKER PANEL", "SPOILER": "SPOILER VALANCE",
-    "TOLVA": "SPLASH SHIELD"
-}
-
-# Cadena de catálogos OEM americanos (PartsGiant / PartsNow / PartsDeal)
 CATALOGOS_OEM_USA = {
     "KIA": "kiapartsnow.com",
     "HYUNDAI": "hyundaipartsdeal.com",
@@ -165,6 +142,15 @@ def es_siniestro_excluido(ciudad, estado, taller, cfg):
 
     return False, ""
 
+def es_pieza_convenio_excluida(desc_raw):
+    """Excluye llantas y parabrisas que van por convenio de aseguradora."""
+    d = str(desc_raw).upper().strip()
+    if "PARABRISAS" in d and "LIMPIA" not in d and "TOLVA" not in d and "DEPOSITO" not in d:
+        return True
+    if re.search(r'\bLLANTA\b|\bLLANTAS\b|\bNEUMATICO\b', d):
+        return True
+    return False
+
 def limpiar_modelo_comercial(marca, vehiculo_raw, ano):
     v = str(vehiculo_raw).upper()
     m = str(marca).upper().strip()
@@ -177,7 +163,6 @@ def limpiar_modelo_comercial(marca, vehiculo_raw, ano):
             pass
         return "SEDAN"
 
-    # Eliminar códigos entre paréntesis como (H) LUJO
     v = re.sub(r'\([^\)]*\)', ' ', v)
     v = re.sub(r'\b\d+\.\d+\s*[LT]?\b', ' ', v)
     v = re.sub(r'["\'\.\(\)]', ' ', v)
@@ -222,18 +207,6 @@ def expandir_descripcion(desc_raw, marca, vehiculo, ano, dicc_extra=None):
     marca_clean = str(marca).upper().strip()
     mod_clean = limpiar_modelo_comercial(marca_clean, vehiculo, ano)
     return f"{frase_pieza} {marca_clean} {mod_clean} {ano}".strip()
-
-def construir_query_ebay_ingles(frase_es, marca, modelo, ano):
-    palabras_en = []
-    for w in frase_es.upper().split():
-        if w in [marca.upper(), modelo.upper(), str(ano)]:
-            continue
-        if w in TRADUCTOR_EBAY_EN:
-            palabras_en.append(TRADUCTOR_EBAY_EN[w])
-    pieza_en = " ".join(palabras_en[:4]).strip()
-    if not pieza_en:
-        pieza_en = frase_es
-    return f"{ano} {marca} {modelo} {pieza_en}".strip()
 
 def calcular_fecha_habiles(dias_habiles=7):
     meses_p = {1:'ENE', 2:'FEB', 3:'MAR', 4:'ABR', 5:'MAY', 6:'JUN', 7:'JUL', 8:'AGO', 9:'SEP', 10:'OCT', 11:'NOV', 12:'DIC'}
@@ -306,185 +279,57 @@ def buscar_en_historial(registros_hist, desc_raw, query_limpia, modelo_limpio):
         return round(sum(precios_modelo[:5]) / len(precios_modelo[:5]))
     return 0.0
 
-def buscar_precios_multimotor(page_buscador, query, query_ebay_en, marca, desc_raw, vin, tc_usd=20.50, gemini_key=""):
+def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc_usd, gemini_key):
     """
-    Busca precios en:
-    1) Gemini Search Grounding (si hay API Key configurada)
-    2) Catálogos OEM USA (PartsGiant / PartsNow / PartsDeal)
-    3) Mercado Libre México (Directo + Metabuscador Web anti-bloqueo Cloud)
-    4) eBay Motors EE.UU. (en inglés)
+    Consulta en lote a Gemini con Google Search para obtener los 3 precios de mercado
+    (Original/PartsGiant/PartsNow, Seminueva/eBay/ML y Genérica/TYC/Depo) sin bloqueos de IP.
     """
-    precios_orig, precios_noorig, precios_gen = [], [], []
+    resultados_ia = {}
+    if not gemini_key or not lista_partidas_query:
+        return resultados_ia
 
-    d_up = str(desc_raw).upper()
-    palabras_excluir = []
-    if ("PUERTA" in d_up or "PTA" in d_up) and not any(x in d_up for x in ["MOLD", "BISAG", "MANIJA"]):
-        palabras_excluir = ["MANIJA", "MOLDURA", "EMPAQUE", "HULE", "BISAGRA", "CERRADURA", "CHAPA", "ELEVADOR", "BOCINA"]
-    elif "FACIA" in d_up and not any(x in d_up for x in ["SOP", "GUIA", "REJILLA", "MOLD", "TAPA", "ALMA", "ABSORB"]):
-        palabras_excluir = ["SOPORTE", "GUIA", "GRAPA", "TAPA", "MOLDURA", "REFLEJANTE", "CUARTO", "CHISGUETERO"]
-    elif "COFRE" in d_up and not any(x in d_up for x in ["BISAG", "CERRADURA", "JUNTA"]):
-        palabras_excluir = ["BISAGRA", "CHAPA", "CERRADURA", "AMORTIGUADOR", "VARILLA", "EMBLEMA"]
-    elif "FARO" in d_up and "NIEBLA" not in query:
-        palabras_excluir = ["FOCO", "BULBO", "BALASTRA", "CONECTOR", "ARNES", "SOPORTE"]
+    sitio_oem = CATALOGOS_OEM_USA.get(marca.upper(), "partsgiant.com / partsnow.com")
+    url_gem = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
 
-    def clasificar_item(titulo_up, precio_val, url_item, fuente_tag, forzar_origen=None):
-        if precio_val < 220 or precio_val > 85000:
-            return
-        if any(ex in titulo_up for ex in palabras_excluir):
-            return
-        if forzar_origen == "ORIGINAL":
-            precios_orig.append((precio_val, url_item, fuente_tag))
-            return
-        es_usado = any(k in titulo_up for k in ["USADO", "USADA", "SEMINUEV", "YONKE", "DESHUESO", "PRE-OWNED", "USED"])
-        es_orig = any(k in titulo_up for k in ["ORIGINAL", "OEM", "GENUIN", "AGENCIA", "FACTORY", "PARTSGIANT", "PARTSNOW", "PARTSDEAL"])
-        if es_usado:
-            precios_noorig.append((precio_val, url_item, fuente_tag))
-        elif es_orig:
-            precios_orig.append((precio_val, url_item, fuente_tag))
-        else:
-            precios_gen.append((precio_val, url_item, fuente_tag))
-
-    # --- CAPA 1: GEMINI AI SEARCH GROUNDING (SI HAY API KEY) ---
-    if gemini_key:
+    # Procesar en bloques de hasta 8 piezas por llamada para máxima velocidad y precisión
+    for i in range(0, len(lista_partidas_query), 8):
+        lote = lista_partidas_query[i:i+8]
+        lineas_prompt = "\n".join([f"- ID {item['idx']}: {item['q']} (Portal: {item['desc']})" for item in lote])
+        prompt = (
+            f"Actúa como cotizador experto de refacciones automotrices en México y EE.UU.\n"
+            f"Vehículo: {marca} {modelo} {ano} | VIN: {vin}\n"
+            f"Tipo de cambio USD a MXN: {tc_usd}\n"
+            f"Busca precios reales actuales en Mercado Libre México, eBay Motors y catálogos OEM americanos ({sitio_oem}) para estas piezas:\n"
+            f"{lineas_prompt}\n\n"
+            f"Devuelve ÚNICAMENTE un arreglo JSON válido (sin texto adicional) donde cada elemento tenga:\n"
+            f'[{{"idx": numero_id, "orig": precio_mxn_original_agencia_entero, "semi": precio_mxn_usada_seminueva_entero, "gen": precio_mxn_generica_aftermarket_entero, "fuente": "ML o EB o AGENCIA", "link": "url_directa_o_busqueda"}}]'
+        )
         try:
-            sitio_oem = CATALOGOS_OEM_USA.get(marca.upper(), "partsgiant.com")
-            url_gem = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-            prompt_g = (
-                f"Busca precios reales actuales para la refacción automotriz: '{query}' / '{query_ebay_en}' (VIN: {vin}). "
-                f"Revisa Mercado Libre México, eBay Motors y catálogos OEM como {sitio_oem} (convierte USD a MXN usando {tc_usd}). "
-                f"Devuelve ÚNICAMENTE un objeto JSON válido con este formato exacto: "
-                f'{{"orig": precio_mxn_original_entero, "semi": precio_mxn_usada_entero, "gen": precio_mxn_generica_entero, "link": "url_directa_del_producto"}}'
-            )
             payload = {
-                "contents": [{"parts": [{"text": prompt_g}]}],
+                "contents": [{"parts": [{"text": prompt}]}],
                 "tools": [{"google_search": {}}]
             }
-            r_g = requests.post(url_gem, json=payload, timeout=14)
-            if r_g.status_code == 200:
-                txt_g = r_g.json()["candidates"][0]["content"]["parts"][0]["text"]
-                m_j = re.search(r'\{.*\}', txt_g, re.DOTALL)
-                if m_j:
-                    d_j = json.loads(m_j.group(0))
-                    lnk_g = d_j.get("link", "")
-                    if float(d_j.get("orig", 0) or 0) > 0:
-                        precios_orig.append((float(d_j["orig"]), lnk_g, "AGENCIA"))
-                    if float(d_j.get("semi", 0) or 0) > 0:
-                        precios_noorig.append((float(d_j["semi"]), lnk_g, "ML"))
-                    if float(d_j.get("gen", 0) or 0) > 0:
-                        precios_gen.append((float(d_j["gen"]), lnk_g, "ML"))
-        except Exception:
-            pass
-
-    # --- CAPA 2: CATÁLOGOS OEM USA (PARTSGIANT / PARTSNOW / PARTSDEAL) ---
-    sitio_oem_marca = CATALOGOS_OEM_USA.get(marca.upper(), "")
-    if sitio_oem_marca and len(precios_orig) == 0:
-        try:
-            q_oem = f"site:{sitio_oem_marca} {query_ebay_en}"
-            url_oem_search = f"https://search.yahoo.com/search?p={urllib.parse.quote(q_oem)}"
-            page_buscador.goto(url_oem_search, timeout=10000, wait_until="domcontentloaded")
-            time.sleep(0.8)
-            bloques_oem = page_buscador.evaluate("""
-                () => Array.from(document.querySelectorAll('div.algo, li'))
-                    .map(b => ({ txt: (b.innerText || '').toUpperCase(), href: (b.querySelector('a') ? b.querySelector('a').href : '') }))
-                    .filter(x => x.txt.includes('$'))
-                    .slice(0, 8)
-            """)
-            for bo in bloques_oem:
-                lnk_o = bo['href']
-                m_ru = re.search(r'/RU=([^/]+)/', lnk_o)
-                if m_ru:
-                    lnk_o = urllib.parse.unquote(m_ru.group(1))
-                for m_usd in re.findall(r'\$\s*([0-9]{1,4}\.[0-9]{2})', bo['txt']):
-                    val_usd = float(m_usd)
-                    if 15 <= val_usd <= 2500:
-                        clasificar_item(bo['txt'], round(val_usd * tc_usd), lnk_o, "AGENCIA", forzar_origen="ORIGINAL")
-        except Exception:
-            pass
-
-    # --- CAPA 3: MERCADO LIBRE MÉXICO (DIRECTO + METABUSCADOR WEB) ---
-    try:
-        q_ml_web = f"site:mercadolibre.com.mx {query}"
-        url_yahoo_ml = f"https://mx.search.yahoo.com/search?p={urllib.parse.quote(q_ml_web)}"
-        page_buscador.goto(url_yahoo_ml, timeout=11000, wait_until="domcontentloaded")
-        time.sleep(0.9)
-        resultados_ml = page_buscador.evaluate("""
-            () => Array.from(document.querySelectorAll('div.algo, li'))
-                .map(b => {
-                    let a = b.querySelector('a');
-                    return { txt: (b.innerText || '').replace(/\\s+/g, ' ').toUpperCase(), href: a ? a.href : '' };
-                })
-                .filter(x => x.href.includes('mercadolibre.com.mx') || x.txt.includes('$'))
-                .slice(0, 12)
-        """)
-        for rw in resultados_ml:
-            link_real = rw['href']
-            m_ru = re.search(r'/RU=([^/]+)/', link_real)
-            if m_ru:
-                link_real = urllib.parse.unquote(m_ru.group(1))
-            for ph in re.findall(r'\$\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,5})', rw['txt']):
-                clasificar_item(rw['txt'], float(ph.replace(',', '')), link_real, "ML")
-    except Exception:
-        pass
-
-    # --- CAPA 4: EBAY MOTORS EE.UU. (EN INGLÉS) ---
-    try:
-        url_eb = f"https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote(query_ebay_en)}&_sacat=6030"
-        page_buscador.goto(url_eb, timeout=11000, wait_until="domcontentloaded")
-        time.sleep(0.9)
-        items_eb = page_buscador.evaluate("""
-            () => {
-                let res = [];
-                let cards = Array.from(document.querySelectorAll('li.s-item, div.s-item__wrapper'));
-                for (let it of cards.slice(0, 10)) {
-                    let titEl = it.querySelector('.s-item__title');
-                    let priceEl = it.querySelector('.s-item__price');
-                    let linkEl = it.querySelector('a.s-item__link, a');
-                    if (titEl && priceEl && linkEl) {
-                        let tit = titEl.textContent.trim();
-                        if (tit.toLowerCase().includes('shop on ebay')) continue;
-                        res.push({
-                            tit: (it.innerText || '').toUpperCase(),
-                            rawPrice: priceEl.textContent.trim(),
-                            link: (linkEl.getAttribute('href') || '').split('?')[0]
-                        });
-                    }
-                }
-                return res;
-            }
-        """)
-        for it in items_eb:
-            m_num = re.search(r'([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]{2})?)', it['rawPrice'])
-            if m_num:
-                val = float(m_num.group(1).replace(',', ''))
-                es_mxn = ("MXN" in it['rawPrice'].upper() or "MEX" in it['rawPrice'].upper() or val > 950)
-                p_mxn = round(val) if es_mxn else round(val * tc_usd)
-                clasificar_item(it['tit'], p_mxn, it['link'], "EB")
-    except Exception:
-        pass
-
-    def procesar_bucket(lista_tuplas):
-        if not lista_tuplas:
-            return 0, "", ""
-        ordenadas = sorted(lista_tuplas, key=lambda x: x[0])
-        top = ordenadas[:3]
-        prom = round(sum(x[0] for x in top) / len(top))
-        return prom, ordenadas[0][1], ordenadas[0][2]
-
-    p_orig, url_orig, src_orig = procesar_bucket(precios_orig)
-    p_noorig, url_noorig, src_noorig = procesar_bucket(precios_noorig)
-    p_gen, url_gen, src_gen = procesar_bucket(precios_gen)
-
-    if p_gen > 0:
-        mejor_link, fuente_ganadora = url_gen, src_gen
-    elif p_noorig > 0:
-        mejor_link, fuente_ganadora = url_noorig, src_noorig
-    elif p_orig > 0:
-        mejor_link, fuente_ganadora = url_orig, src_orig
-    else:
-        mejor_link = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(query.replace(' ', '-'))}"
-        fuente_ganadora = "MAN"
-
-    return p_orig, p_noorig, p_gen, mejor_link, fuente_ganadora
+            resp = requests.post(url_gem, json=payload, timeout=25)
+            if resp.status_code == 200:
+                cand = resp.json().get("candidates", [])
+                if cand:
+                    partes_txt = cand[0].get("content", {}).get("parts", [])
+                    texto_completo = "".join([p.get("text", "") for p in partes_txt])
+                    m_arr = re.search(r'\[.*\]', texto_completo, re.DOTALL)
+                    if m_arr:
+                        arr_json = json.loads(m_arr.group(0))
+                        for obj in arr_json:
+                            idx_k = int(obj.get("idx", -1))
+                            resultados_ia[idx_k] = {
+                                "orig": round(float(obj.get("orig", 0) or 0)),
+                                "semi": round(float(obj.get("semi", 0) or 0)),
+                                "gen": round(float(obj.get("gen", 0) or 0)),
+                                "fuente": str(obj.get("fuente", "ML")).upper(),
+                                "link": str(obj.get("link", ""))
+                            }
+        except Exception as e_g:
+            print(f"     ⚠️ Aviso en lote Gemini Search: {e_g}")
+    return resultados_ia
 
 def obtener_ws_cotizaciones(doc):
     try:
@@ -498,6 +343,15 @@ def obtener_ws_cotizaciones(doc):
     return ws
 
 def abrir_menu_cotizaciones(page):
+    """Hace clic directamente en el menú lateral izquierdo 'Cotizaciones' sin perder el frameset."""
+    for f in page.frames:
+        try:
+            loc = f.locator("a:text-is('Cotizaciones'), a:has-text('Cotizaciones')").first
+            if loc.count() > 0:
+                loc.click(timeout=6000)
+                return True
+        except Exception:
+            pass
     for f in [page.main_frame] + page.frames:
         try:
             if f.evaluate("() => typeof submitForm === 'function'"):
@@ -505,15 +359,24 @@ def abrir_menu_cotizaciones(page):
                 return True
         except Exception:
             pass
-    for f in [page.main_frame] + page.frames:
-        try:
-            loc = f.locator("a:has-text('Cotizaciones'), td:has-text('Cotizaciones'), [onclick*='quotation_list_action']")
-            if loc.count() > 0:
-                loc.first.click(timeout=5000)
-                return True
-        except Exception:
-            pass
-    raise RuntimeError("No se encontró el menú 'Cotizaciones'.")
+    return False
+
+def regresar_a_lista_siniestros(page, frame):
+    """Usa el botón Regresar del portal o reabre Cotizaciones esperando a que cargue la tabla."""
+    try:
+        for _ in range(2):
+            f_der = obtener_frame_derecho(page, espera_seg=5)
+            btn_reg = f_der.locator("input[value='Regresar'], button:has-text('Regresar')")
+            if btn_reg.count() > 0:
+                btn_reg.first.click(timeout=6000)
+                time.sleep(1.8)
+    except Exception:
+        pass
+
+    f_der = obtener_frame_derecho(page, espera_seg=5)
+    if f_der.locator("td:has-text('Listado de Cotizaciones')").count() == 0:
+        abrir_menu_cotizaciones(page)
+        time.sleep(2.5)
 
 def obtener_frame_derecho(page, espera_seg=10):
     fin = time.time() + espera_seg
@@ -527,7 +390,7 @@ def obtener_frame_derecho(page, espera_seg=10):
                     return cand
             except Exception:
                 pass
-        time.sleep(0.5)
+        time.sleep(0.4)
     return page.main_frame
 
 def verificar_headless_seguro(modo_headless):
@@ -546,7 +409,11 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
         ws_cot = obtener_ws_cotizaciones(doc)
         registros_hist = cargar_mapa_historial_completo(doc)
 
-        # Limpiar duplicados y filas de talleres excluidos
+        if cfg.get("GEMINI_API_KEY"):
+            print("🤖 Motor IA Gemini Search (Mercado Libre + eBay + PartsGiant/PartsNow): ACTIVO ✅")
+        else:
+            print("ℹ️ Motor IA Gemini Search: SIN API KEY (Solo cruzará con Historial Local. Agrega tu GEMINI_API_KEY en Mantenimiento para precios web).")
+
         filas_todas = ws_cot.get_all_values()
         filas_sanas = [ENCABEZADOS_COT]
         existentes = set()
@@ -556,14 +423,15 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                     est_cot = str(r[31]).strip().upper()
                     ciu_r, edo_r, tal_r = str(r[9]), str(r[10]), str(r[8])
                     excluido, _ = es_siniestro_excluido(ciu_r, edo_r, tal_r, cfg)
+                    es_llanta_parab = es_pieza_convenio_excluida(r[14])
                     llave_unica = f"{str(r[2]).strip()}_{str(r[12]).strip()}"
-                    if not excluido and est_cot in ["PENDIENTE", "ENVIADA PORTAL"] and llave_unica not in existentes:
+                    if not excluido and not es_llanta_parab and est_cot in ["PENDIENTE", "ENVIADA PORTAL"] and llave_unica not in existentes:
                         filas_sanas.append(r[:32])
                         existentes.add(llave_unica)
             if len(filas_sanas) != len(filas_todas):
                 ws_cot.clear()
                 ws_cot.update(range_name='A1', values=filas_sanas, value_input_option='USER_ENTERED')
-                print(f"🧹 Se eliminaron {len(filas_todas) - len(filas_sanas)} filas duplicadas o de talleres excluidos.")
+                print(f"🧹 Se depuraron {len(filas_todas) - len(filas_sanas)} filas (duplicadas, llantas/parabrisas o talleres excluidos).")
     except Exception as e_sh:
         print(f"❌ [ERROR GOOGLE SHEETS]: {e_sh}")
         traceback.print_exc()
@@ -572,17 +440,9 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
     nuevas = []
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=modo_headless,
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-        )
-        ctx = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            locale="es-MX",
-            viewport={"width": 1366, "height": 900}
-        )
+        browser = p.chromium.launch(headless=modo_headless, args=["--no-sandbox"])
+        ctx = browser.new_context(viewport={"width": 1366, "height": 900})
         page = ctx.new_page()
-        page_buscador = ctx.new_page()
         page.on("dialog", lambda d: d.accept())
 
         try:
@@ -597,47 +457,37 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
             time.sleep(3.5)
 
             frame = obtener_frame_derecho(page, espera_seg=12)
+            enlaces_txt = frame.locator("a.cvi").all_inner_texts()
+            lista_siniestros = [t.strip() for t in enlaces_txt if len(t.strip()) >= 5]
+            print(f"-> Siniestros en bandeja: {len(lista_siniestros)}")
 
-            siniestros = frame.evaluate("""
-                () => {
-                    let lista = [];
-                    let links = Array.from(document.querySelectorAll('a.cvi, a[href*="showDetail"]'));
-                    for (let a of links) {
-                        let href = a.getAttribute('href') || '';
-                        let txt = a.textContent.trim();
-                        if (href.includes('showDetail') && txt.length >= 5) {
-                            lista.push({ siniestro: txt, js: href });
-                        }
-                    }
-                    return lista;
-                }
-            """)
-            print(f"-> Siniestros en bandeja: {len(siniestros)}")
-
-            for idx, item in enumerate(siniestros):
-                num_sin = item['siniestro']
-                print(f"\n[{idx+1}/{len(siniestros)}] Revisando interior del Siniestro {num_sin}...")
+            for idx, num_sin in enumerate(lista_siniestros):
+                print(f"\n[{idx+1}/{len(lista_siniestros)}] Revisando interior del Siniestro {num_sin}...")
                 try:
-                    frame = obtener_frame_derecho(page)
-                    frame.evaluate(item['js'].replace("javascript:", ""))
+                    frame = obtener_frame_derecho(page, espera_seg=8)
+                    loc_sin = frame.locator(f"a.cvi:has-text('{num_sin}')")
+                    if loc_sin.count() == 0:
+                        abrir_menu_cotizaciones(page)
+                        time.sleep(2.5)
+                        frame = obtener_frame_derecho(page, espera_seg=8)
+                        loc_sin = frame.locator(f"a.cvi:has-text('{num_sin}')")
+                        if loc_sin.count() == 0:
+                            continue
+
+                    # Clic nativo sobre el enlace del siniestro (evita ReferenceError: showDetail is not defined)
+                    loc_sin.first.click(timeout=10000)
                     time.sleep(2.2)
 
-                    frame = obtener_frame_derecho(page)
-                    sub_js = frame.evaluate("""
-                        () => {
-                            let a = document.querySelector('a.cvi, a[href*="showDetail"]');
-                            return a ? a.getAttribute('href') : '';
-                        }
-                    """)
-                    if not sub_js:
-                        abrir_menu_cotizaciones(page)
-                        time.sleep(2)
+                    frame = obtener_frame_derecho(page, espera_seg=8)
+                    loc_cot1 = frame.locator("a.cvi")
+                    if loc_cot1.count() == 0:
+                        regresar_a_lista_siniestros(page, frame)
                         continue
 
-                    frame.evaluate(sub_js.replace("javascript:", ""))
+                    loc_cot1.first.click(timeout=10000)
                     time.sleep(2.5)
 
-                    frame = obtener_frame_derecho(page)
+                    frame = obtener_frame_derecho(page, espera_seg=8)
                     detalle = frame.evaluate(r"""
                         () => {
                             function fullTxt(el) {
@@ -679,8 +529,7 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                     ex_det, motivo_det = es_siniestro_excluido(ciudad_real, estado_real, taller_real, cfg)
                     if ex_det:
                         print(f"  ⏭️ Saltando {num_sin} | Taller: {taller_real} ({ciudad_real}, {estado_real}) -> {motivo_det}.")
-                        abrir_menu_cotizaciones(page)
-                        time.sleep(2.2)
+                        regresar_a_lista_siniestros(page, frame)
                         continue
 
                     piezas_lista = detalle.get('piezas', [])
@@ -688,72 +537,87 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                     mod_comercial = limpiar_modelo_comercial(marca_clean, detalle.get('vehiculo', ''), detalle.get('modelo', ''))
                     ano_clean = detalle.get('modelo', '').strip()
 
-                    print(f"  ✅ Cotizable | Auto: {marca_clean} {mod_comercial} ({ano_clean}) | Taller: {taller_real} ({ciudad_real}, {estado_real}) | {len(piezas_lista)} pieza(s)")
+                    # Filtrar partidas nuevas y omitir llantas y parabrisas por convenio
+                    partidas_a_cotizar = []
+                    for pza in piezas_lista:
+                        if es_pieza_convenio_excluida(pza['descripcion']):
+                            print(f"     ⏭️ Omitiendo por convenio (Llanta/Parabrisas): {pza['descripcion']}")
+                            continue
+                        if f"{num_sin}_{pza['idx']}" in existentes:
+                            continue
+                        q = expandir_descripcion(pza['descripcion'], marca_clean, detalle.get('vehiculo', ''), ano_clean, cfg.get("DICCIONARIO_EXTRA", {}))
+                        partidas_a_cotizar.append({
+                            "idx": pza['idx'],
+                            "cantidad": pza['cantidad'],
+                            "desc": pza['descripcion'],
+                            "q": q
+                        })
+
+                    if not partidas_a_cotizar:
+                        print(f"  ℹ️ Todas las piezas cotizables de {num_sin} ya están en tu mesa.")
+                        regresar_a_lista_siniestros(page, frame)
+                        continue
+
+                    print(f"  ✅ Cotizando {len(partidas_a_cotizar)} pieza(s) | Auto: {marca_clean} {mod_comercial} ({ano_clean}) | Taller: {taller_real}")
+
+                    # Consultar precios web en lote con Gemini Search Grounding (si hay API Key)
+                    precios_ia_lote = cotizar_lote_con_gemini_ai(
+                        marca_clean, mod_comercial, ano_clean, detalle.get('vin', ''),
+                        partidas_a_cotizar, cfg.get("TC_USD", 20.50), cfg.get("GEMINI_API_KEY", "")
+                    )
 
                     ahora = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-6))).strftime("%Y-%m-%d %H:%M")
-                    for pza in piezas_lista:
-                        llave_u = f"{num_sin}_{pza['idx']}"
-                        if llave_u in existentes:
-                            print(f"     [Ya en bandeja] Partida #{pza['idx']+1}: {pza['descripcion']}")
-                            continue
+                    for item_p in partidas_a_cotizar:
+                        idx_p = item_p['idx']
+                        desc_p = item_p['desc']
+                        q = item_p['q']
 
-                        q = expandir_descripcion(
-                            pza['descripcion'], marca_clean, detalle.get('vehiculo', ''), ano_clean, cfg.get("DICCIONARIO_EXTRA", {})
-                        )
-                        q_ebay = construir_query_ebay_ingles(q, marca_clean, mod_comercial, ano_clean)
-                        print(f"     🔎 [{pza['idx']+1}/{len(piezas_lista)}] MX: '{q}' | US: '{q_ebay}'...")
+                        datos_ia = precios_ia_lote.get(idx_p, {})
+                        p_orig = datos_ia.get("orig", 0)
+                        p_noorig = datos_ia.get("semi", 0)
+                        p_gen = datos_ia.get("gen", 0)
+                        link_directo = datos_ia.get("link", "") or f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q.replace(' ', '-'))}"
+                        fuente_ia = datos_ia.get("fuente", "ML")
 
-                        p_orig, p_noorig, p_gen, link_directo, fuente_det = buscar_precios_multimotor(
-                            page_buscador, q, q_ebay, marca_clean, pza['descripcion'], detalle.get('vin', ''), cfg.get("TC_USD", 20.50), cfg.get("GEMINI_API_KEY", "")
-                        )
-                        p_hist = buscar_en_historial(registros_hist, pza['descripcion'], q, mod_comercial)
-                        flete = estimar_flete(pza['descripcion'], ciudad_real, estado_real)
+                        p_hist = buscar_en_historial(registros_hist, desc_p, q, mod_comercial)
+                        flete = estimar_flete(desc_p, ciudad_real, estado_real)
 
                         if p_gen > 0:
-                            costo = p_gen
-                            origen = "NO ORIGINAL"
+                            costo, origen, fuente_det = p_gen, "NO ORIGINAL", fuente_ia
                         elif p_noorig > 0:
-                            costo = p_noorig
-                            origen = "SEMINUEVA"
+                            costo, origen, fuente_det = p_noorig, "SEMINUEVA", fuente_ia
                         elif p_orig > 0:
-                            costo = p_orig
-                            origen = "ORIGINAL"
+                            costo, origen, fuente_det = p_orig, "ORIGINAL", "AGENCIA"
+                        elif p_hist > 0:
+                            costo, origen, fuente_det = p_hist, "NO ORIGINAL", "LOC"
                         else:
-                            costo = p_hist
-                            origen = "NO ORIGINAL"
-                            if p_hist > 0:
-                                fuente_det = "LOC"
+                            costo, origen, fuente_det = 0, "NO ORIGINAL", "MAN"
 
                         sug = round((costo + flete) * 1.35) if costo > 0 else 0
-                        print(f"        💰 Orig: ${p_orig} | Semi: ${p_noorig} | Gen: ${p_gen} | Hist: ${p_hist} ➔ Sugerido: ${sug} ({fuente_det})")
+                        print(f"     💰 #{idx_p+1} {desc_p} ➔ Orig: ${p_orig} | Semi: ${p_noorig} | Gen: ${p_gen} | Hist: ${p_hist} ➔ Sug: ${sug} ({fuente_det})")
 
                         nuevas.append([
-                            f"COT-{num_sin}-{pza['idx']+1}", ahora, num_sin, "1",
+                            f"COT-{num_sin}-{idx_p+1}", ahora, num_sin, "1",
                             marca_clean, f"{marca_clean} {mod_comercial}".strip(), ano_clean, detalle.get('vin', ''),
                             taller_real, ciudad_real, estado_real, detalle.get('fecha_fin', ''),
-                            pza['idx'], pza['cantidad'], pza['descripcion'], q,
+                            idx_p, item_p['cantidad'], desc_p, q,
                             p_orig, p_noorig, p_gen, p_hist,
                             flete, fuente_det, origen, costo,
                             35, sug, 0, sug,
                             f"HUB{fuente_det}{random.randint(100,999)}", link_directo, "FALSE", "PENDIENTE"
                         ])
-                        existentes.add(llave_u)
+                        existentes.add(f"{num_sin}_{idx_p}")
 
-                    abrir_menu_cotizaciones(page)
-                    time.sleep(2.2)
+                    regresar_a_lista_siniestros(page, frame)
                 except Exception as e_sin:
                     print(f"  ❌ [ERROR en Siniestro {num_sin}]: {e_sin}")
-                    try:
-                        abrir_menu_cotizaciones(page)
-                        time.sleep(2)
-                    except Exception:
-                        pass
+                    regresar_a_lista_siniestros(page, frame)
         finally:
             browser.close()
 
     if nuevas:
         ws_cot.append_rows(nuevas, value_input_option='USER_ENTERED')
-        print(f"\n✅ {len(nuevas)} partidas cotizadas con éxito en BD_COTIZACIONES.")
+        print(f"\n✅ {len(nuevas)} partidas nuevas agregadas a BD_COTIZACIONES.")
     else:
         print("\nℹ️ Proceso finalizado sin partidas nuevas por agregar.")
 
@@ -793,7 +657,6 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                 if col_i < 0 or col_i >= len(r): return 0
                 try: return int(round(float(str(r[col_i]).replace('$', '').replace(',', '').strip())))
                 except: return 0
-            # Si Precio_Libre > 0 manda sobre cualquier otro campo
             p_libre = parse_m(idx_lib)
             p_final = parse_m(idx_fin)
             p_suger = parse_m(idx_sug)
@@ -834,75 +697,59 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
 
             for sin, dict_partidas in por_enviar.items():
                 try:
-                    print(f"-> Abriendo Siniestro {sin} para inyectar {len(dict_partidas)} partida(s)...")
-                    frame = obtener_frame_derecho(page)
-                    link = frame.locator(f"a.cvi:has-text('{sin}'), a[href*='showDetail']:has-text('{sin}')")
+                    print(f"-> Abriendo Siniestro {sin} para inyectar {len(dict_partidas)} partida(s) validadas...")
+                    frame = obtener_frame_derecho(page, espera_seg=8)
+                    link = frame.locator(f"a.cvi:has-text('{sin}')")
                     if link.count() == 0:
-                        print(f"  ⚠️ El siniestro {sin} ya no está disponible en la bandeja de Cotizaciones.")
+                        print(f"  ⚠️ El siniestro {sin} ya no está disponible en la bandeja.")
                         continue
-                    frame.evaluate(link.first.get_attribute("href").replace("javascript:", ""))
+                    link.first.click(timeout=10000)
+                    time.sleep(2.2)
+
+                    frame = obtener_frame_derecho(page, espera_seg=8)
+                    frame.locator("a.cvi").first.click(timeout=10000)
                     time.sleep(2.5)
 
-                    frame = obtener_frame_derecho(page)
-                    frame.evaluate(frame.locator("a.cvi, a[href*='showDetail']").first.get_attribute("href").replace("javascript:", ""))
-                    time.sleep(2.8)
+                    frame = obtener_frame_derecho(page, espera_seg=8)
 
-                    frame = obtener_frame_derecho(page)
-                    total_filas_portal = frame.locator("select[name='statusPart']").count()
-                    print(f"   📋 Total de partidas en el pliego del portal: {total_filas_portal}")
-
-                    # Recorrer TODAS las filas del pliego: las validadas se Aceptan ('133002') y las no validadas se Rechazan ('133003')
-                    # para que validateStatus() del portal permita grabar sin bloquear el formulario.
-                    for idx_fila in range(total_filas_portal):
+                    # SOLO tocamos las partidas que marcaste con Validar (las demás se quedan en "Sel. una opción")
+                    for idx_fila, it in sorted(dict_partidas.items()):
+                        cod_origen = mapa_orig.get(it['origen_txt'], "42008")
                         sel_status = frame.locator("select[name='statusPart']").nth(idx_fila)
-                        if idx_fila in dict_partidas:
-                            it = dict_partidas[idx_fila]
-                            cod_origen = mapa_orig.get(it['origen_txt'], "42008")
-                            sel_status.select_option("133002")  # Aceptar (dispara reviewSelect nativo)
-                            time.sleep(0.25)
+                        sel_status.select_option("133002")  # Aceptar
+                        time.sleep(0.25)
 
-                            # Inyectar fecha en campo visible (readonly) y oculto
-                            frame.evaluate(
-                                """(args) => {
-                                    let fv = document.getElementById('promiseDatePart' + args.i);
-                                    let fh = document.getElementById('promiseDateValue' + args.i);
-                                    if (fv) { fv.removeAttribute('readonly'); fv.value = args.f; }
-                                    if (fh) { fh.value = args.f; }
-                                }""",
-                                {"i": idx_fila, "f": fecha_7d}
-                            )
+                        frame.evaluate(
+                            """(args) => {
+                                let fv = document.getElementById('promiseDatePart' + args.i);
+                                let fh = document.getElementById('promiseDateValue' + args.i);
+                                if (fv) { fv.removeAttribute('readonly'); fv.value = args.f; }
+                                if (fh) { fh.value = args.f; }
+                            }""",
+                            {"i": idx_fila, "f": fecha_7d}
+                        )
 
-                            inp_code = frame.locator("input[name='codePart']").nth(idx_fila)
-                            inp_price = frame.locator("input[name='price']").nth(idx_fila)
-                            sel_orig = frame.locator("select[name='origin']").nth(idx_fila)
-
-                            inp_code.fill(it['codigo_hub'])
-                            inp_price.fill(it['precio_int'])
-                            sel_orig.select_option(cod_origen)  # Dispara getValueSelected nativo
-                            print(f"   ✔ Partida #{idx_fila+1} ACEPTADA (${it['precio_int']} | {it['codigo_hub']} | Fecha: {fecha_7d})")
-                        else:
-                            sel_status.select_option("133003")  # Rechazar partida no seleccionada
-                            print(f"   ⏭️ Partida #{idx_fila+1} marcada como RECHAZAR (no validada en mesa).")
+                        frame.locator("input[name='codePart']").nth(idx_fila).fill(it['codigo_hub'])
+                        frame.locator("input[name='price']").nth(idx_fila).fill(it['precio_int'])
+                        frame.locator("select[name='origin']").nth(idx_fila).select_option(cod_origen)
+                        print(f"   ✔ Partida #{idx_fila+1} llenada: ${it['precio_int']} | {it['origen_txt']} | {it['codigo_hub']} | {fecha_7d}")
                         time.sleep(0.15)
 
-                    # Tomar foto de evidencia ANTES de presionar Grabar
                     page.screenshot(path="evidencia_antes_grabar.png", full_page=True)
 
                     btn = frame.locator("input[name='btnSubmit'][value='Grabar']")
                     if btn.count() > 0:
                         btn.first.click()
                         time.sleep(3.5)
-                        # Tomar foto de evidencia DESPUÉS de presionar Grabar
                         page.screenshot(path="evidencia_despues_grabar.png", full_page=True)
-                        print(f"   💾 Siniestro {sin} enviado y grabado en el portal (Revisa las capturas de evidencia abajo).")
+                        print(f"   💾 Siniestro {sin} enviado al portal.")
                         for it in dict_partidas.values():
                             actualizar.append(gspread.Cell(row=it['gs_row'], col=idx_est + 1, value="ENVIADA PORTAL"))
 
-                    abrir_menu_cotizaciones(page)
-                    time.sleep(2.5)
+                    regresar_a_lista_siniestros(page, frame)
                 except Exception as e:
                     print(f"❌ [!] Error enviando {sin}: {e}")
-                    traceback.print_exc()
+                    regresar_a_lista_siniestros(page, frame)
         finally:
             browser.close()
 

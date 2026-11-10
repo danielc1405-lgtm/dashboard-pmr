@@ -4978,7 +4978,7 @@ elif vista_actual == "🛠️ Cuartel General":
                     return []
 
             with st.container(border=True):
-                st.markdown("**🔐 Credenciales y Diccionario (Cotizador)**")
+                st.markdown("**🔐 Credenciales, IA Key y Diccionario (Cotizador)**")
                 filas_cfg = leer_config_bots_seguro()
 
                 mapa_cfg_ui = {}
@@ -4993,7 +4993,8 @@ elif vista_actual == "🛠️ Cuartel General":
 
                 usr_m_in = st.text_input("Usuario Multiasistencia:", value=mapa_cfg_ui.get("MULTI_USER", "PMA5816"))
                 pwd_m_in = st.text_input("Contraseña Multiasistencia:", value=mapa_cfg_ui.get("MULTI_PASS", "Pmroct1."), type="password")
-                tc_usd_in = st.number_input("Tipo de Cambio USD -> MXN (eBay):", min_value=15.0, max_value=35.0, value=float(mapa_cfg_ui.get("TC_USD", 20.50)), step=0.25)
+                gem_key_in = st.text_input("🤖 Gemini API Key (Para búsqueda de precios en Google/ML/eBay/PartsNow):", value=mapa_cfg_ui.get("GEMINI_API_KEY", ""), type="password")
+                tc_usd_in = st.number_input("Tipo de Cambio USD -> MXN (eBay / PartsGiant):", min_value=15.0, max_value=35.0, value=float(mapa_cfg_ui.get("TC_USD", 20.50)), step=0.25)
 
                 st.caption("Diccionario de abreviaturas del portal (ej. `ANITIN.` -> `ANTINIEBLA`):")
                 df_abrev_base = pd.DataFrame(abrev_lista_ui) if abrev_lista_ui else pd.DataFrame([{"Abreviatura Portal": "ANITIN.", "Significado Completo": "ANTINIEBLA"}])
@@ -5007,6 +5008,7 @@ elif vista_actual == "🛠️ Cuartel General":
                             ["Clave", "Valor", "Notas"],
                             ["MULTI_USER", usr_m_in.strip(), "Usuario Portal Multiasistencia"],
                             ["MULTI_PASS", pwd_m_in.strip(), "Contraseña Portal Multiasistencia"],
+                            ["GEMINI_API_KEY", gem_key_in.strip(), "API Key de Google AI Studio para buscador web"],
                             ["TC_USD", str(tc_usd_in), "Tipo de cambio USD a MXN para eBay"]
                         ]
                         for _, r_ab in ed_abrev_ui.iterrows():
@@ -5018,7 +5020,7 @@ elif vista_actual == "🛠️ Cuartel General":
                         ws_cfg.clear()
                         ws_cfg.update(range_name='A1', values=nuevas_filas_cfg, value_input_option='USER_ENTERED')
                         leer_config_bots_seguro.clear()
-                        st.success("✅ Configuración guardada correctamente.")
+                        st.success("✅ Configuración y API Key guardadas correctamente.")
                         time.sleep(0.6)
                         st.rerun()
                     except Exception as e_cfg:
@@ -5242,31 +5244,39 @@ elif vista_actual == "🛠️ Cuartel General":
     # =========================================================================
     with tab_cotizador:
         st.markdown("#### ⚡ Mesa de Decisión y Cotizador Automático (Multiasistencia)")
-        st.caption("1️⃣ Extrae cotizaciones activas • 2️⃣ Captura tu Precio Libre o Costo Base, marca **✅ Validar** y presiona **🚀 Guardar y Enviar al Portal** (un solo paso).")
+        st.caption("1️⃣ Extrae cotizaciones activas • 2️⃣ Edita precios/orígenes con calma en la tabla (no se recarga al editar) • 3️⃣ Guarda o Envía al Portal.")
 
-        col_btn_ext, col_btn_env, col_modo_cot = st.columns([1.4, 1.6, 1.0], vertical_alignment="center")
+        @st.cache_data(ttl=180)
+        def leer_cotizaciones_cache():
+            doc_c = init_connection()
+            ws_c = doc_c.worksheet("BD_COTIZACIONES")
+            return ws_c.get_all_values()
+
+        col_btn_ext, col_btn_ref_c, col_modo_cot = st.columns([1.8, 0.8, 1.4], vertical_alignment="center")
         with col_modo_cot:
             modo_bot_cot = st.radio("Vista Chrome:", ["Oculto (Rápido)", "Visual (PC Local)"], horizontal=True, key="rad_modo_cot")
         arg_vis_cot = "--oculto" if "Oculto" in modo_bot_cot else "--visual"
 
-        btn_run_ext = col_btn_ext.button("🔎 1. Extraer Cotizaciones y Buscar Precios", type="primary", use_container_width=True)
-        btn_run_env = col_btn_env.button("🚀 2. Guardar Selección y Enviar Validadas al Portal (7 Días)", type="primary", use_container_width=True)
+        btn_run_ext = col_btn_ext.button("🔎 1. Extraer Nuevas Cotizaciones del Portal", type="primary", use_container_width=True)
+        if col_btn_ref_c.button("🔄 Refrescar Tabla", use_container_width=True):
+            leer_cotizaciones_cache.clear()
+            st.rerun()
 
         with st.expander("🖥️ Ver Bitácora de Ejecución en Vivo del Robot Cotizador", expanded=False):
             consola_cot_vivo = st.empty()
             consola_cot_vivo.code(st.session_state.get('log_cotizador_ai', 'Esperando orden de ejecución...'))
 
         try:
-            doc_cot = init_connection()
-            ws_cot_ui = doc_cot.worksheet("BD_COTIZACIONES")
-            datos_cot_ui = ws_cot_ui.get_all_values()
+            datos_cot_ui = leer_cotizaciones_cache()
             df_cot_ui = pd.DataFrame(datos_cot_ui[1:], columns=[str(h).strip() for h in datos_cot_ui[0]]) if len(datos_cot_ui) > 1 else pd.DataFrame()
         except Exception:
+            datos_cot_ui = []
             df_cot_ui = pd.DataFrame()
+
+        btn_run_env = False
 
         if not df_cot_ui.empty and 'Estatus_Cotizacion' in df_cot_ui.columns:
             df_cot_ui['_GS_Row'] = df_cot_ui.index + 2
-            # Eliminar duplicados visuales por Siniestro + Partida_Idx conservando el más reciente
             df_cot_ui = df_cot_ui.drop_duplicates(subset=['Siniestro', 'Partida_Idx'], keep='last').copy()
 
             df_pend_cot = df_cot_ui[df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() == 'PENDIENTE'].copy()
@@ -5279,24 +5289,19 @@ elif vista_actual == "🛠️ Cuartel General":
 
                 df_pend_cot['Validar_Bool'] = df_pend_cot['Validar_Envio'].astype(str).str.upper().isin(['TRUE', 'SI', '1', 'VERDADERO'])
 
-                # Construir etiqueta "B82548962 CHEVROLET CAVALIER 2019 AUTOPRIME"
-                mapa_etiquetas_sin = {"Todos": "📋 Todos los Siniestros Pendientes"}
+                mapa_etiquetas_sin = {"Todos": f"📋 Todos los Siniestros Pendientes ({df_pend_cot['Siniestro'].nunique()})"}
                 for sin_k, grp_s in df_pend_cot.groupby('Siniestro', sort=False):
                     r0 = grp_s.iloc[0]
                     marca_s = str(r0.get('Marca', '')).strip()
                     veh_s = str(r0.get('Vehiculo', '')).strip()
-                    if veh_s.upper().startswith(marca_s.upper()):
-                        auto_str = veh_s
-                    else:
-                        auto_str = f"{marca_s} {veh_s}".strip()
+                    auto_str = veh_s if veh_s.upper().startswith(marca_s.upper()) else f"{marca_s} {veh_s}".strip()
                     ano_s = str(r0.get('Modelo_Ano', '')).strip()
                     tal_s = str(r0.get('Taller', '')).strip()
                     mapa_etiquetas_sin[sin_k] = f"{sin_k} {auto_str} {ano_s} {tal_s}".strip()
 
-                siniestros_disp = list(mapa_etiquetas_sin.keys())
                 sin_cot_sel = st.selectbox(
                     "🚗 Selecciona el Siniestro a revisar:",
-                    options=siniestros_disp,
+                    options=list(mapa_etiquetas_sin.keys()),
                     format_func=lambda x: mapa_etiquetas_sin.get(x, x),
                     key="sel_siniestro_cot_ui"
                 )
@@ -5320,95 +5325,98 @@ elif vista_actual == "🛠️ Cuartel General":
                     ] if c in df_pend_cot.columns
                 ]
 
-                ed_cot_df = st.data_editor(
-                    df_pend_cot[cols_tabla_cot],
-                    hide_index=True,
-                    use_container_width=True,
-                    column_config={
-                        'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"),
-                        'Partida_Idx': st.column_config.NumberColumn("#", disabled=True, width="small"),
-                        'Cantidad': st.column_config.TextColumn("Cant", disabled=True, width="small"),
-                        'Descripcion_Portal': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
-                        'Precio_Original': st.column_config.NumberColumn("1. ORIGINAL", format="$ %.0f", disabled=True, width="small"),
-                        'Precio_No_Original': st.column_config.NumberColumn("2. NO ORIG (Semi)", format="$ %.0f", disabled=True, width="small"),
-                        'Precio_Generica': st.column_config.NumberColumn("3. GENÉRICA", format="$ %.0f", disabled=True, width="small"),
-                        'Precio_Historial': st.column_config.NumberColumn("Hist. PMR", format="$ %.0f", disabled=True, width="small"),
-                        'Flete_Estimado': st.column_config.NumberColumn("🚚 Flete", format="$ %.0f", width="small"),
-                        'Fuente_Seleccionada': st.column_config.SelectboxColumn("Dónde Comprar", options=["ML", "EB", "INV", "LOC", "AGENCIA", "MAN"], width="small"),
-                        'Origen_Portal': st.column_config.SelectboxColumn("Origen Portal", options=["ORIGINAL", "NO ORIGINAL", "SEMINUEVA"], width="small"),
-                        'Costo_Base': st.column_config.NumberColumn("Costo Base", format="$ %.0f", width="small"),
-                        'Margen_Pct': st.column_config.SelectboxColumn("% Utilidad", options=[15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 100], width="small"),
-                        'Precio_Sugerido': st.column_config.NumberColumn("💡 Sugerido", format="$ %.0f", disabled=True, width="small"),
-                        'Precio_Libre': st.column_config.NumberColumn("✍️ Precio Libre", format="$ %.0f", help="Si escribes un monto > 0 aquí, este se enviará al portal en lugar del sugerido.", width="small"),
-                        'Codigo_Hub': st.column_config.TextColumn("Código Portal", width="small"),
-                        'Link_Referencia': st.column_config.LinkColumn("🔗 Producto", display_text="Ver Producto", width="small"),
-                        'Validar_Bool': st.column_config.CheckboxColumn("✅ Validar", default=False, width="small")
-                    },
-                    key="editor_mesa_cotizador"
-                )
+                # FORMULARIO AISLADO: Permite editar Origen, Costo, Precio Libre y Validar sin que la tabla se cierre ni parpadee
+                with st.form("form_mesa_cotizador_estable", clear_on_submit=False):
+                    ed_cot_df = st.data_editor(
+                        df_pend_cot[cols_tabla_cot],
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            'Siniestro': st.column_config.TextColumn("Siniestro", disabled=True, width="small"),
+                            'Partida_Idx': st.column_config.NumberColumn("#", disabled=True, width="small"),
+                            'Cantidad': st.column_config.TextColumn("Cant", disabled=True, width="small"),
+                            'Descripcion_Portal': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
+                            'Precio_Original': st.column_config.NumberColumn("1. ORIGINAL", format="$ %.0f", disabled=True, width="small"),
+                            'Precio_No_Original': st.column_config.NumberColumn("2. NO ORIG (Semi)", format="$ %.0f", disabled=True, width="small"),
+                            'Precio_Generica': st.column_config.NumberColumn("3. GENÉRICA", format="$ %.0f", disabled=True, width="small"),
+                            'Precio_Historial': st.column_config.NumberColumn("Hist. PMR", format="$ %.0f", disabled=True, width="small"),
+                            'Flete_Estimado': st.column_config.NumberColumn("🚚 Flete", format="$ %.0f", width="small"),
+                            'Fuente_Seleccionada': st.column_config.SelectboxColumn("Dónde Comprar", options=["ML", "EB", "INV", "LOC", "AGENCIA", "MAN"], width="small"),
+                            'Origen_Portal': st.column_config.SelectboxColumn("Origen Portal", options=["ORIGINAL", "NO ORIGINAL", "SEMINUEVA"], width="small"),
+                            'Costo_Base': st.column_config.NumberColumn("Costo Base", format="$ %.0f", width="small"),
+                            'Margen_Pct': st.column_config.SelectboxColumn("% Utilidad", options=[15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 100], width="small"),
+                            'Precio_Sugerido': st.column_config.NumberColumn("💡 Sugerido", format="$ %.0f", disabled=True, width="small"),
+                            'Precio_Libre': st.column_config.NumberColumn("✍️ Precio Libre", format="$ %.0f", help="Si escribes un monto > 0 aquí, este se enviará al portal en lugar del sugerido.", width="small"),
+                            'Codigo_Hub': st.column_config.TextColumn("Código Portal", width="small"),
+                            'Link_Referencia': st.column_config.LinkColumn("🔗 Producto", display_text="Ver Producto", width="small"),
+                            'Validar_Bool': st.column_config.CheckboxColumn("✅ Validar", default=False, width="small")
+                        },
+                        key="editor_mesa_cotizador"
+                    )
 
-                def guardar_cambios_mesa_en_sheet():
-                    headers_c = [str(h).strip() for h in datos_cot_ui[0]]
-                    celdas_cot_upd = []
-                    import random
-                    for idx_r in ed_cot_df.index:
-                        gs_r = int(df_pend_cot.loc[idx_r, '_GS_Row'])
-                        fila_ed = ed_cot_df.loc[idx_r]
-                        costo_b = float(fila_ed['Costo_Base'])
-                        flete_b = float(fila_ed['Flete_Estimado'])
-                        margen_b = float(fila_ed['Margen_Pct'])
-                        libre_b = float(fila_ed['Precio_Libre'])
-                        fuente_b = str(fila_ed['Fuente_Seleccionada']).strip().upper()
-                        origen_b = str(fila_ed['Origen_Portal']).strip().upper()
-                        validar_b = "TRUE" if fila_ed['Validar_Bool'] else "FALSE"
+                    c_f1, c_f2 = st.columns(2)
+                    btn_save_borrador = c_f1.form_submit_button("💾 Guardar Cambios / Recalcular Sugeridos", use_container_width=True)
+                    btn_run_env = c_f2.form_submit_button("🚀 Guardar Selección y Enviar Validadas al Portal (7 Días)", type="primary", use_container_width=True)
 
-                        nuevo_sug = round((costo_b + flete_b) * (1.0 + margen_b / 100.0)) if costo_b > 0 else 0
-                        precio_final_env = round(libre_b) if libre_b > 0 else nuevo_sug
+                if btn_save_borrador or btn_run_env:
+                    with st.spinner("Guardando cambios en BD_COTIZACIONES..."):
+                        doc_save = init_connection()
+                        ws_save = doc_save.worksheet("BD_COTIZACIONES")
+                        headers_c = [str(h).strip() for h in datos_cot_ui[0]]
+                        celdas_cot_upd = []
+                        import random
 
-                        cod_actual = str(fila_ed['Codigo_Hub']).strip().upper()
-                        sufijo_num = re.findall(r'\d{3}$', cod_actual)
-                        num_3 = sufijo_num[0] if sufijo_num else str(random.randint(100, 999))
-                        nuevo_cod_hub = f"HUB{fuente_b}{num_3}"
+                        for idx_r in ed_cot_df.index:
+                            gs_r = int(df_pend_cot.loc[idx_r, '_GS_Row'])
+                            fila_ed = ed_cot_df.loc[idx_r]
+                            costo_b = float(fila_ed['Costo_Base'])
+                            flete_b = float(fila_ed['Flete_Estimado'])
+                            margen_b = float(fila_ed['Margen_Pct'])
+                            libre_b = float(fila_ed['Precio_Libre'])
+                            fuente_b = str(fila_ed['Fuente_Seleccionada']).strip().upper()
+                            origen_b = str(fila_ed['Origen_Portal']).strip().upper()
+                            validar_b = "TRUE" if fila_ed['Validar_Bool'] else "FALSE"
 
-                        cambios_fila = {
-                            'Flete_Estimado': flete_b,
-                            'Fuente_Seleccionada': fuente_b,
-                            'Origen_Portal': origen_b,
-                            'Costo_Base': costo_b,
-                            'Margen_Pct': margen_b,
-                            'Precio_Sugerido': nuevo_sug,
-                            'Precio_Libre': libre_b,
-                            'Precio_Final_Enviar': precio_final_env,
-                            'Codigo_Hub': nuevo_cod_hub,
-                            'Validar_Envio': validar_b
-                        }
-                        for col_k, val_k in cambios_fila.items():
-                            if col_k in headers_c:
-                                celdas_cot_upd.append(gspread.Cell(row=gs_r, col=headers_c.index(col_k) + 1, value=val_k))
-                    if celdas_cot_upd:
-                        ws_cot_ui.update_cells(celdas_cot_upd, value_input_option='USER_ENTERED')
+                            nuevo_sug = round((costo_b + flete_b) * (1.0 + margen_b / 100.0)) if costo_b > 0 else 0
+                            precio_final_env = round(libre_b) if libre_b > 0 else nuevo_sug
 
-                if st.button("💾 Solo Guardar Borrador / Recalcular Sugeridos", key="btn_save_mesa_cot"):
-                    with st.spinner("Guardando borrador en BD_COTIZACIONES..."):
-                        guardar_cambios_mesa_en_sheet()
-                        st.success("✅ Borrador guardado y precios recalculados.")
-                        time.sleep(0.5)
-                        st.rerun()
+                            cod_actual = str(fila_ed['Codigo_Hub']).strip().upper()
+                            sufijo_num = re.findall(r'\d{3}$', cod_actual)
+                            num_3 = sufijo_num[0] if sufijo_num else str(random.randint(100, 999))
+                            nuevo_cod_hub = f"HUB{fuente_b}{num_3}"
 
-                # Si presionó el botón 2 (Enviar al Portal), primero guardamos automáticamente la tabla en Sheets
-                if btn_run_env:
-                    with st.spinner("Guardando tu selección antes de abrir el portal..."):
-                        guardar_cambios_mesa_en_sheet()
+                            cambios_fila = {
+                                'Flete_Estimado': flete_b,
+                                'Fuente_Seleccionada': fuente_b,
+                                'Origen_Portal': origen_b,
+                                'Costo_Base': costo_b,
+                                'Margen_Pct': margen_b,
+                                'Precio_Sugerido': nuevo_sug,
+                                'Precio_Libre': libre_b,
+                                'Precio_Final_Enviar': precio_final_env,
+                                'Codigo_Hub': nuevo_cod_hub,
+                                'Validar_Envio': validar_b
+                            }
+                            for col_k, val_k in cambios_fila.items():
+                                if col_k in headers_c:
+                                    celdas_cot_upd.append(gspread.Cell(row=gs_r, col=headers_c.index(col_k) + 1, value=val_k))
+
+                        if celdas_cot_upd:
+                            ws_save.update_cells(celdas_cot_upd, value_input_option='USER_ENTERED')
+                            leer_cotizaciones_cache.clear()
+                            if not btn_run_env:
+                                st.success("✅ Cambios guardados y precios recalculados sin cerrar la tabla.")
+                                time.sleep(0.5)
+                                st.rerun()
             else:
-                st.info("No hay cotizaciones pendientes en la mesa. Presiona **🔎 1. Extraer Cotizaciones y Buscar Precios** para traer las del portal.")
+                st.info("No hay cotizaciones pendientes en la mesa. Presiona **🔎 1. Extraer Nuevas Cotizaciones del Portal**.")
 
             if not df_hist_cot.empty:
                 with st.expander(f"📊 Historial de Cotizaciones Enviadas al Portal ({len(df_hist_cot)} partidas)", expanded=False):
                     st.dataframe(df_hist_cot.drop(columns=['_GS_Row'], errors='ignore'), hide_index=True, use_container_width=True)
         else:
-            st.info("Aún no existen registros en `BD_COTIZACIONES`. Presiona **🔎 1. Extraer Cotizaciones y Buscar Precios** para inicializar la hoja automáticamente.")
+            st.info("Aún no existen registros en `BD_COTIZACIONES`. Presiona **🔎 1. Extraer Nuevas Cotizaciones del Portal**.")
 
-        # Ejecución en vivo del robot (Extracción o Envío)
         if btn_run_ext or btn_run_env:
             accion_flag = "--extraer" if btn_run_ext else "--enviar"
             with st.spinner("Ejecutando robot cotizador en vivo..."):
@@ -5441,13 +5449,12 @@ elif vista_actual == "🛠️ Cuartel General":
                     proc_cot.stdout.close()
                     proc_cot.wait()
                     st.session_state['log_cotizador_ai'] = "".join(lineas_cot)
-                    st.cache_data.clear()
+                    leer_cotizaciones_cache.clear()
                     st.rerun()
                 finally:
                     if os.path.exists("credentials.json"):
                         os.remove("credentials.json")
 
-        # Mostrar Capturas de Evidencia de Chrome si existen
         if os.path.exists("evidencia_antes_grabar.png") or os.path.exists("evidencia_despues_grabar.png"):
             with st.expander("📸 Ver Evidencia Visual de Chrome en el Portal (Antes y Después de Grabar)", expanded=True):
                 c_ev1, c_ev2 = st.columns(2)

@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import json
 import time
 import random
 import datetime
@@ -14,6 +15,7 @@ from google.oauth2.service_account import Credentials
 SHEET_ID = "10jrOsS054n0atMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
 PORTAL_URL = "https://siniestros.bbva.mx/refaccionarias/"
 
+# Exactamente las 32 columnas de tu hoja BD_COTIZACIONES (1 sola columna Link_Referencia)
 ENCABEZADOS_COT = [
     "ID_Cotizacion", "Fecha_Extraccion", "Siniestro", "Cotizacion_No",
     "Marca", "Vehiculo", "Modelo_Ano", "VIN", "Taller", "Ciudad", "Estado", "Fecha_Fin",
@@ -21,18 +23,36 @@ ENCABEZADOS_COT = [
     "Precio_Original", "Precio_No_Original", "Precio_Generica", "Precio_Historial",
     "Flete_Estimado", "Fuente_Seleccionada", "Origen_Portal", "Costo_Base",
     "Margen_Pct", "Precio_Sugerido", "Precio_Libre", "Precio_Final_Enviar",
-    "Codigo_Hub", "Link_ML", "Link_eBay", "Validar_Envio", "Estatus_Cotizacion"
+    "Codigo_Hub", "Link_Referencia", "Validar_Envio", "Estatus_Cotizacion"
 ]
 
+# Diccionario ampliado con todas las abreviaturas reales detectadas en el portal
 DICCIONARIO_BASE = {
-    "FACIA": "FASCIA", "DEL.": "DELANTERA", "DEL": "DELANTERA",
+    "FACIA": "FASCIA",
+    "DEL.": "DELANTERA", "DEL": "DELANTERA", "DL.": "DELANTERA", "DL": "DELANTERA",
     "TRA.": "TRASERA", "TRA": "TRASERA", "TRAS.": "TRASERA", "TRAS": "TRASERA",
-    "IZQ.": "IZQUIERDA", "IZQ": "IZQUIERDA", "DER.": "DERECHA", "DER": "DERECHA", "D.": "DERECHA",
-    "SOP.": "SOPORTE", "SOP": "SOPORTE", "CEN.": "CENTRAL", "CEN": "CENTRAL",
-    "SUP.": "SUPERIOR", "SUP": "SUPERIOR", "INF.": "INFERIOR", "INF": "INFERIOR",
-    "EXT.": "EXTERIOR", "INT.": "INTERIOR", "PTA.": "PUERTA", "PTA": "PUERTA",
-    "SALP.": "SALPICADERA", "SALP": "SALPICADERA", "MOLD.": "MOLDURA", "MOLD": "MOLDURA",
-    "ANTIN.": "ANTINIEBLA", "ANITIN.": "ANTINIEBLA", "INTEG.": "INTEGRADO", "INTEG": "INTEGRADO"
+    "IZQ.": "IZQUIERDA", "IZQ": "IZQUIERDA",
+    "DER.": "DERECHA", "DER": "DERECHA", "D.": "DERECHA",
+    "SOP.": "SOPORTE", "SOP": "SOPORTE",
+    "CEN.": "CENTRAL", "CEN": "CENTRAL",
+    "SUP.": "SUPERIOR", "SUP": "SUPERIOR", "SP.": "SUPERIOR", "SP": "SUPERIOR",
+    "INF.": "INFERIOR", "INF": "INFERIOR",
+    "EXT.": "EXTERIOR", "EXT": "EXTERIOR",
+    "INT.": "INTERIOR", "INT": "INTERIOR",
+    "PTA.": "PUERTA", "PTA": "PUERTA", "PUER.": "PUERTA", "PUER": "PUERTA",
+    "SALP.": "SALPICADERA", "SALP": "SALPICADERA",
+    "MOLD.": "MOLDURA", "MOLD": "MOLDURA",
+    "ANTIN.": "ANTINIEBLA", "ANITIN.": "ANTINIEBLA", "ANTIN": "ANTINIEBLA", "ANITIN": "ANTINIEBLA",
+    "INTEG.": "", "INTEG": "", "CPL.": "", "CPL": "",
+    "BISAG.": "BISAGRA", "BISAG": "BISAGRA",
+    "REC.": "RECUBRIMIENTO", "REC": "RECUBRIMIENTO",
+    "BRAZ.": "BRAZO", "BRAZ": "BRAZO",
+    "SUSP.": "SUSPENSION", "SUSP": "SUSPENSION",
+    "ABSORBED.": "ABSORBEDOR", "ABSORBED": "ABSORBEDOR", "ABSORB.": "ABSORBEDOR", "ABSORB": "ABSORBEDOR",
+    "DIRECC.": "DIRECCIONAL", "DIRECC": "DIRECCIONAL",
+    "LIMPIAPARAB.": "LIMPIAPARABRISAS", "LIMPIAPARAB": "LIMPIAPARABRISAS",
+    "TRAVES.": "TRAVESANO", "TRAVES": "TRAVESANO",
+    "FRONT.": "FRONTAL", "FRONT": "FRONTAL"
 }
 
 def conectar_sheets():
@@ -41,13 +61,18 @@ def conectar_sheets():
     cliente = gspread.authorize(credenciales)
     return cliente.open_by_key(SHEET_ID)
 
-def cargar_configuracion_dinamica(doc):
+def cargar_configuracion_y_exclusiones(doc):
+    """Carga credenciales, diccionario extra, estados excluidos (DURANGO) y talleres AUTO SURTIDO."""
     config = {
         "MULTI_USER": "PMA5816",
         "MULTI_PASS": "Pmroct1.",
         "TC_USD": 20.50,
+        "GEMINI_API_KEY": "",
+        "ESTADOS_EXCLUIDOS": ["DURANGO", "DGO"],
+        "TALLERES_AUTOSURTIDO": set(),
         "DICCIONARIO_EXTRA": {}
     }
+    # 1. Leer BD_CONFIG_BOTS
     try:
         ws_cfg = doc.worksheet("BD_CONFIG_BOTS")
         filas = ws_cfg.get_all_values()
@@ -59,40 +84,102 @@ def cargar_configuracion_dinamica(doc):
                 elif k == "TC_USD" and v:
                     try: config["TC_USD"] = float(v)
                     except: pass
+                elif k == "GEMINI_API_KEY" and v:
+                    config["GEMINI_API_KEY"] = v
+                elif k == "ESTADOS_EXCLUIDOS" and v:
+                    config["ESTADOS_EXCLUIDOS"] = [x.strip().upper() for x in v.split(",") if x.strip()]
                 elif k.startswith("ABREV_") and v:
                     config["DICCIONARIO_EXTRA"][k.replace("ABREV_", "").strip()] = v.upper()
     except Exception:
         pass
+
+    # 2. Leer BD_TALLERES para detectar talleres marcados como AUTO SURTIDO
+    try:
+        ws_t = doc.worksheet("BD_TALLERES")
+        datos_t = ws_t.get_all_values()
+        if len(datos_t) > 1:
+            for r_t in datos_t[1:]:
+                fila_str = " ".join([str(c).upper() for c in r_t])
+                nombre_t = str(r_t[0]).strip().upper() if r_t else ""
+                if nombre_t and ("AUTO SURTIDO" in fila_str or "AUTOSURTIDO" in fila_str or "(DGO)" in nombre_t):
+                    config["TALLERES_AUTOSURTIDO"].add(nombre_t)
+    except Exception:
+        pass
+
     return config
 
+def es_siniestro_excluido(ciudad, estado, regional, taller, cfg):
+    """Devuelve (True, motivo) si pertenece a Durango o a un taller Auto Surtido."""
+    t_up = str(taller).strip().upper()
+    loc_up = f"{ciudad} {estado} {regional} {t_up}".upper()
+
+    for est_ex in cfg.get("ESTADOS_EXCLUIDOS", ["DURANGO", "DGO"]):
+        if est_ex and (est_ex in loc_up or f"({est_ex})" in t_up):
+            return True, f"Plaza excluida ({est_ex})"
+
+    for t_auto in cfg.get("TALLERES_AUTOSURTIDO", set()):
+        if t_auto and (t_auto in t_up or t_up in t_auto):
+            return True, f"Taller Auto Surtido ({taller})"
+
+    return False, ""
+
+def limpiar_modelo_comercial(marca, vehiculo_raw, ano):
+    """Elimina códigos de equipamiento de aseguradora (2.0L, ZEN, AA, EE, STD, 4P, etc.)."""
+    v = str(vehiculo_raw).upper()
+    m = str(marca).upper().strip()
+    if "NUEVO J" in v or "JETTA" in v:
+        return "JETTA"
+    if "SEDAN" in v and "VOLKSWAGEN" in v:
+        try:
+            if int(ano) >= 2014: return "VENTO"
+        except:
+            pass
+        return "SEDAN"
+
+    v = re.sub(r'\b\d+\.\d+\s*[LT]?\b', ' ', v)
+    v = re.sub(r'["\'\.]', ' ', v)
+    v = v.replace(m, ' ')
+    basura = [
+        r'\b\d+\s*CIL\b', r'\bAA\b', r'\bEE\b', r'\bSTD\b', r'\bESTANDAR\b',
+        r'\bAUT\b', r'\bAUTOMATICO\b', r'\b\d+P\b', r'\b\d+PTS\b', r'\bCA\b', r'\bMP3\b',
+        r'\bCD\b', r'\bBA\b', r'\bABS\b', r'\bPICKUP\b', r'\bPACK\b', r'\bEX\b', r'\bLX\b',
+        r'\bZEN\b', r'\bADVANCE\b', r'\bHB\b', r'\bSEDAN\b', r'\bEL\b', r'\bNUEVO\b',
+        r'\bC\b', r'\b4\b', r'\b5\b'
+    ]
+    for b in basura:
+        v = re.sub(b, ' ', v)
+    v = re.sub(r'\s+', ' ', v).strip()
+    palabras = v.split()
+    return " ".join(palabras[:2]) if palabras else ""
+
 def expandir_descripcion(desc_raw, marca, vehiculo, ano, dicc_extra=None):
+    """Traduce las abreviaturas del portal y une con el modelo comercial limpio."""
     texto_orig = str(desc_raw).upper().strip()
     dicc = DICCIONARIO_BASE.copy()
-    if dicc_extra: dicc.update(dicc_extra)
+    if dicc_extra:
+        dicc.update(dicc_extra)
 
     texto = re.sub(r'\.(?=[A-Z])', '. ', texto_orig)
-    piezas_centrales = ["PARRILLA", "REJILLA", "RADIADOR", "CONDENSADOR", "SPOILER", "DEFENSA", "ALMA", "TOLVA", "COFRE", "CAJUELA"]
-    tiene_lado = any(x in texto for x in ["DER", " D.", "IZQ"])
-    tiene_altura = any(x in texto for x in ["SUP", "INF"])
-    es_central = any(p in texto for p in piezas_centrales) and not any(l in texto for l in ["SOP", "GUIA", "FARO", "CALAVERA", "PUERTA", "ESPEJO", "SALP"])
-
-    if tiene_altura: sig_i = "IZQUIERDA"
-    elif tiene_lado or es_central: sig_i = "INFERIOR"
-    else: sig_i = "IZQUIERDA"
-
     palabras = texto.split()
     traducidas = []
     for pal in palabras:
         p_s = pal.rstrip('.')
-        if pal in ["I.", "I"]: traducidas.append(sig_i)
-        elif pal in ["D.", "D"]: traducidas.append("DERECHA")
-        elif pal in dicc: traducidas.append(dicc[pal])
-        elif p_s in dicc: traducidas.append(dicc[p_s])
-        else: traducidas.append(p_s)
+        # En Multiasistencia "I." o "I" siempre es IZQUIERDA (inferior siempre viene como "INF.")
+        if pal in ["I.", "I"]:
+            traducidas.append("IZQUIERDA")
+        elif pal in ["D.", "D"]:
+            traducidas.append("DERECHA")
+        elif pal in dicc:
+            if dicc[pal]: traducidas.append(dicc[pal])
+        elif p_s in dicc:
+            if dicc[p_s]: traducidas.append(dicc[p_s])
+        else:
+            traducidas.append(p_s)
 
-    frase = re.sub(r'\s+', ' ', " ".join(traducidas)).strip()
-    veh_limpio = str(vehiculo).upper().replace(str(marca).upper(), '').strip()
-    return f"{frase} {marca} {veh_limpio} {ano}".strip()
+    frase_pieza = re.sub(r'\s+', ' ', " ".join(traducidas)).strip()
+    marca_clean = str(marca).upper().strip()
+    mod_clean = limpiar_modelo_comercial(marca_clean, vehiculo, ano)
+    return f"{frase_pieza} {marca_clean} {mod_clean} {ano}".strip()
 
 def calcular_fecha_habiles(dias_habiles=7):
     meses_p = {1:'ENE', 2:'FEB', 3:'MAR', 4:'ABR', 5:'MAY', 6:'JUN', 7:'JUL', 8:'AGO', 9:'SEP', 10:'OCT', 11:'NOV', 12:'DIC'}
@@ -101,68 +188,213 @@ def calcular_fecha_habiles(dias_habiles=7):
     agregados = 0
     while agregados < dias_habiles:
         fecha += datetime.timedelta(days=1)
-        if fecha.weekday() < 5: agregados += 1
-    while fecha.weekday() >= 5: fecha += datetime.timedelta(days=1)
+        if fecha.weekday() < 5:
+            agregados += 1
+    while fecha.weekday() >= 5:
+        fecha += datetime.timedelta(days=1)
     return f"{fecha.day:02d} {meses_p[fecha.month]} {fecha.year}"
 
 def estimar_flete(descripcion, ciudad, estado):
     loc_str = f"{ciudad} {estado}".upper()
     if any(k in loc_str for k in ["MONTERREY", "APODACA", "SAN NICOLAS", "GUADALUPE", "SANTA CATARINA", "ESCOBEDO", "SAN PEDRO", "NUEVO LEON"]):
         return 0.0
-    es_reg = any(k in loc_str for k in ["SALTILLO", "REYNOSA", "MATAMOROS", "NUEVO LAREDO", "TORREON", "TAMPICO", "COAHUILA", "TAMAULIPAS"])
+    es_reg = any(k in loc_str for k in ["SALTILLO", "REYNOSA", "MATAMOROS", "NUEVO LAREDO", "TORREON", "TAMPICO", "CIUDAD VICTORIA", "CD VICTORIA", "COAHUILA", "TAMAULIPAS"])
     d = str(descripcion).upper()
-    if any(k in d for k in ["COFRE", "PUERTA", "QUINTA", "CAJUELA", "COSTADO", "PUENTE"]):
+    if any(k in d for k in ["COFRE", "PUERTA", "QUINTA", "CAJUELA", "COSTADO", "PUENTE", "PARABRISAS", "MEDALLON"]):
         return 750.0 if es_reg else 1200.0
-    elif any(k in d for k in ["FACIA", "FASCIA", "SALPICADERA", "FARO", "RADIADOR", "CONDENSADOR", "PARRILLA"]):
+    elif any(k in d for k in ["FACIA", "FASCIA", "SALPICADERA", "FARO", "RADIADOR", "CONDENSADOR", "PARRILLA", "ALMA", "MARCO"]):
         return 450.0 if es_reg else 650.0
     else:
         return 300.0 if es_reg else 380.0
 
-def buscar_precios_mercado(query, tc_usd=20.50):
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+def buscar_precios_playwright(page_buscador, query, desc_raw, vin, tc_usd=20.50, gemini_key=""):
+    """
+    Usa el navegador real de Playwright para buscar en Mercado Libre MX y eBay Motors,
+    extrayendo precios reales y el LINK DIRECTO al anuncio del producto.
+    """
     precios_orig, precios_noorig, precios_gen = [], [], []
-    link_ml = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(query.replace(' ', '-'))}"
-    link_ebay = f"https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote(query)}"
+    mejor_link = ""
+    fuente_ganadora = "MAN"
 
+    # Palabras que indican que un resultado es un accesorio menor cuando buscamos una pieza grande
+    d_up = str(desc_raw).upper()
+    palabras_excluir = []
+    if ("PUERTA" in d_up or "PTA" in d_up) and not any(x in d_up for x in ["MOLD", "BISAG", "MANIJA"]):
+        palabras_excluir = ["MANIJA", "MOLDURA", "EMPAQUE", "HULE", "BISAGRA", "CERRADURA", "CHAPA", "ELEVADOR", "BOCINA"]
+    elif "FACIA" in d_up and not any(x in d_up for x in ["SOP", "GUIA", "REJILLA", "MOLD", "TAPA", "ALMA", "ABSORB"]):
+        palabras_excluir = ["SOPORTE", "GUIA", "GRAPA", "TAPA", "MOLDURA", "REFLEJANTE", "CUARTO"]
+    elif "COFRE" in d_up and not any(x in d_up for x in ["BISAG", "CERRADURA", "JUNTA"]):
+        palabras_excluir = ["BISAGRA", "CHAPA", "CERRADURA", "AMORTIGUADOR", "VARILLA", "EMBLEMA"]
+    elif "FARO" in d_up and "NIEBLA" not in query:
+        palabras_excluir = ["FOCO", "BULBO", "BALASTRA", "CONECTOR", "ARNES", "SOPORTE"]
+
+    # 1. CONSULTA EN MERCADO LIBRE CON NAVEGADOR REAL CHROMIUM
     try:
-        resp = requests.get(f"https://api.mercadolibre.com/sites/MLM/search?q={urllib.parse.quote(query)}&limit=15", headers=headers, timeout=5)
-        if resp.status_code == 200:
-            for it in resp.json().get("results", []):
-                p = float(it.get("price", 0))
-                if p < 200: continue
-                tit = str(it.get("title", "")).upper()
-                cond = str(it.get("condition", "")).lower()
-                if it.get("permalink"): link_ml = it["permalink"]
-                if cond == "used" or any(k in tit for k in ["USADO", "SEMINUEVO", "YONKE"]): precios_noorig.append(p)
-                elif any(k in tit for k in ["ORIGINAL", "OEM", "AGENCIA"]): precios_orig.append(p)
-                else: precios_gen.append(p)
-    except: pass
+        url_ml = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(query.replace(' ', '-'))}"
+        page_buscador.goto(url_ml, timeout=15000, wait_until="domcontentloaded")
+        time.sleep(1.2)
 
+        items_ml = page_buscador.evaluate("""
+            () => {
+                let resultados = [];
+                let cards = Array.from(document.querySelectorAll('li.ui-search-layout__item, div.poly-card, div.ui-search-result__wrapper'));
+                for (let c of cards.slice(0, 14)) {
+                    let a = c.querySelector('a.poly-component__title, a.ui-search-item__group__element, a.ui-search-link, a');
+                    let titEl = c.querySelector('.poly-component__title, .ui-search-item__title, h2, h3');
+                    let priceEl = c.querySelector('.andes-money-amount__fraction');
+                    if (a && priceEl) {
+                        let href = a.getAttribute('href') || '';
+                        let titulo = (titEl ? titEl.textContent : a.textContent).trim();
+                        let precioTxt = priceEl.textContent.replace(/[^0-9]/g, '');
+                        let textoCompleto = c.innerText || '';
+                        if (precioTxt && Number(precioTxt) > 180) {
+                            resultados.push({
+                                titulo: titulo.toUpperCase(),
+                                precio: Number(precioTxt),
+                                link: href.split('#')[0].split('?')[0],
+                                usado: textoCompleto.toUpperCase().includes('USADO') || titulo.toUpperCase().includes('USADO') || titulo.toUpperCase().includes('SEMINUEV') || titulo.toUpperCase().includes('YONKE')
+                            });
+                        }
+                    }
+                }
+                return resultados;
+            }
+        """)
+
+        for it in items_ml:
+            tit = it['titulo']
+            if any(ex in tit for ex in palabras_excluir):
+                continue
+            p = float(it['precio'])
+            es_orig = any(k in tit for k in ["ORIGINAL", "OEM", "GENUINO", "GENUINA", "AGENCIA"])
+            if it['usado']:
+                precios_noorig.append((p, it['link'], "ML"))
+            elif es_orig:
+                precios_orig.append((p, it['link'], "ML"))
+            else:
+                precios_gen.append((p, it['link'], "ML"))
+    except Exception:
+        pass
+
+    # 2. CONSULTA EN EBAY MOTORS (EE.UU.) CON NAVEGADOR REAL CHROMIUM
     try:
-        resp_eb = requests.get(link_ebay, headers=headers, timeout=5)
-        if resp_eb.status_code == 200:
-            for b in resp_eb.text.split('s-item__info')[1:8]:
-                m = re.search(r'\$([0-9]{1,4}(?:,[0-9]{3})*\.[0-9]{2})', b)
-                if m:
-                    val = float(m.group(1).replace(',', ''))
-                    mxn = val if "MXN" in b else round(val * tc_usd)
-                    if mxn < 250: continue
-                    b_up = b.upper()
-                    if any(k in b_up for k in ["PRE-OWNED", "USED", "USADO"]): precios_noorig.append(mxn)
-                    elif any(k in b_up for k in ["OEM", "GENUINE", "ORIGINAL"]): precios_orig.append(mxn)
-                    else: precios_gen.append(mxn)
-    except: pass
+        url_eb = f"https://www.ebay.com/sch/i.html?_nkw={urllib.parse.quote(query)}&_sacat=6030"
+        page_buscador.goto(url_eb, timeout=15000, wait_until="domcontentloaded")
+        time.sleep(1.2)
 
-    p_orig = round(sum(sorted(precios_orig)[:3]) / len(precios_orig[:3])) if precios_orig else 0
-    p_noorig = round(sum(sorted(precios_noorig)[:3]) / len(precios_noorig[:3])) if precios_noorig else 0
-    p_gen = round(sum(sorted(precios_gen)[:3]) / len(precios_gen[:3])) if precios_gen else 0
-    return p_orig, p_noorig, p_gen, link_ml, link_ebay
+        items_eb = page_buscador.evaluate("""
+            () => {
+                let resultados = [];
+                let items = Array.from(document.querySelectorAll('li.s-item'));
+                for (let it of items.slice(0, 12)) {
+                    let titEl = it.querySelector('.s-item__title');
+                    let priceEl = it.querySelector('.s-item__price');
+                    let linkEl = it.querySelector('a.s-item__link');
+                    if (titEl && priceEl && linkEl) {
+                        let titulo = titEl.textContent.trim();
+                        if (titulo.toLowerCase().includes('shop on ebay')) continue;
+                        let rawPrice = priceEl.textContent.trim();
+                        let href = linkEl.getAttribute('href') || '';
+                        let infoTxt = it.innerText || '';
+                        resultados.push({
+                            titulo: titulo.toUpperCase(),
+                            rawPrice: rawPrice,
+                            link: href.split('?')[0],
+                            info: infoTxt.toUpperCase()
+                        });
+                    }
+                }
+                return resultados;
+            }
+        """)
+
+        for it in items_eb:
+            tit = it['titulo']
+            if any(ex in tit for ex in palabras_excluir):
+                continue
+            m_num = re.search(r'([0-9]{1,4}(?:,[0-9]{3})*(?:\.[0-9]{2})?)', it['rawPrice'])
+            if not m_num:
+                continue
+            val = float(m_num.group(1).replace(',', ''))
+            es_mxn = ("MXN" in it['rawPrice'].upper() or "MEX" in it['rawPrice'].upper() or val > 900)
+            p_mxn = round(val) if es_mxn else round(val * tc_usd)
+            if p_mxn < 250:
+                continue
+
+            info_up = it['info']
+            es_usado = any(k in info_up for k in ["PRE-OWNED", "USED", "USADO", "SEMINUEVO"])
+            es_orig = any(k in tit for k in ["OEM", "GENUINE", "FACTORY", "ORIGINAL"])
+            if es_usado:
+                precios_noorig.append((p_mxn, it['link'], "EB"))
+            elif es_orig:
+                precios_orig.append((p_mxn, it['link'], "EB"))
+            else:
+                precios_gen.append((p_mxn, it['link'], "EB"))
+    except Exception:
+        pass
+
+    # 3. RESPALDO CON GEMINI SEARCH GROUNDING SI NO HUBO RESULTADOS Y HAY API KEY
+    if not (precios_orig or precios_noorig or precios_gen) and gemini_key:
+        try:
+            url_gem = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            prompt_g = (
+                f"Cotiza en México/EEUU la refacción automotriz '{query}' (VIN: {vin}). "
+                f"Devuelve SOLO un JSON exacto con claves: "
+                f'{{"orig": precio_mxn_original_entero, "semi": precio_mxn_usada_entero, "gen": precio_mxn_generica_entero, "link": "url_directa_compra"}}'
+            )
+            payload = {
+                "contents": [{"parts": [{"text": prompt_g}]}],
+                "tools": [{"google_search": {}}]
+            }
+            r_g = requests.post(url_gem, json=payload, timeout=12)
+            if r_g.status_code == 200:
+                txt_g = r_g.json()["candidates"][0]["content"]["parts"][0]["text"]
+                m_j = re.search(r'\{.*\}', txt_g, re.DOTALL)
+                if m_j:
+                    d_j = json.loads(m_j.group(0))
+                    if d_j.get("orig", 0) > 0: precios_orig.append((float(d_j["orig"]), d_j.get("link", ""), "ML"))
+                    if d_j.get("semi", 0) > 0: precios_noorig.append((float(d_j["semi"]), d_j.get("link", ""), "ML"))
+                    if d_j.get("gen", 0) > 0: precios_gen.append((float(d_j["gen"]), d_j.get("link", ""), "ML"))
+        except Exception:
+            pass
+
+    def procesar_bucket(lista_tuplas):
+        if not lista_tuplas:
+            return 0, "", ""
+        ordenadas = sorted(lista_tuplas, key=lambda x: x[0])
+        top = ordenadas[:3]
+        prom = round(sum(x[0] for x in top) / len(top))
+        mejor_url = ordenadas[0][1]
+        mejor_src = ordenadas[0][2]
+        return prom, mejor_url, mejor_src
+
+    p_orig, url_orig, src_orig = procesar_bucket(precios_orig)
+    p_noorig, url_noorig, src_noorig = procesar_bucket(precios_noorig)
+    p_gen, url_gen, src_gen = procesar_bucket(precios_gen)
+
+    # Elegir el link directo real al producto correspondiente a la mejor opción encontrada
+    if p_gen > 0:
+        mejor_link = url_gen
+        fuente_ganadora = src_gen
+    elif p_noorig > 0:
+        mejor_link = url_noorig
+        fuente_ganadora = src_noorig
+    elif p_orig > 0:
+        mejor_link = url_orig
+        fuente_ganadora = src_orig
+    else:
+        mejor_link = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(query.replace(' ', '-'))}"
+        fuente_ganadora = "MAN"
+
+    return p_orig, p_noorig, p_gen, mejor_link, fuente_ganadora
 
 def obtener_ws_cotizaciones(doc):
     try:
         ws = doc.worksheet("BD_COTIZACIONES")
-        if not ws.row_values(1): ws.append_row(ENCABEZADOS_COT, value_input_option='USER_ENTERED')
-    except:
+        enc_actuales = ws.row_values(1)
+        if not enc_actuales or len(enc_actuales) != len(ENCABEZADOS_COT):
+            ws.update(range_name='A1', values=[ENCABEZADOS_COT], value_input_option='USER_ENTERED')
+    except Exception:
         ws = doc.add_worksheet(title="BD_COTIZACIONES", rows=1000, cols=len(ENCABEZADOS_COT))
         ws.append_row(ENCABEZADOS_COT, value_input_option='USER_ENTERED')
     return ws
@@ -174,39 +406,33 @@ def cargar_mapa_historial(doc):
             if len(r) > 5:
                 try:
                     c = float(str(r[5]).replace('$', '').replace(',', '').strip())
-                    if c > 0: mapa[f"{str(r[3]).upper()[:12]}_{str(r[2]).upper()[:10]}"] = c
-                except: pass
-    except: pass
+                    if c > 0:
+                        mapa[f"{str(r[3]).upper()[:12]}_{str(r[2]).upper()[:10]}"] = c
+                except Exception:
+                    pass
+    except Exception:
+        pass
     return mapa
 
 def abrir_menu_cotizaciones(page):
-    """Busca y ejecuta la apertura de 'Cotizaciones' en la página o en cualquiera de sus frames."""
-    # 1. Intentar llamar submitForm en cualquier frame donde exista la función
     for f in [page.main_frame] + page.frames:
         try:
-            tiene_fn = f.evaluate("() => typeof submitForm === 'function'")
-            if tiene_fn:
-                print(f"   [OK] Ejecutando submitForm en frame '{f.name or 'principal'}'...")
+            if f.evaluate("() => typeof submitForm === 'function'"):
                 f.evaluate("submitForm('main_action.do','quotation_list_action.do')")
                 return True
         except Exception:
             pass
-
-    # 2. Intentar hacer clic en el enlace/texto 'Cotizaciones' en cualquier frame
     for f in [page.main_frame] + page.frames:
         try:
             loc = f.locator("a:has-text('Cotizaciones'), td:has-text('Cotizaciones'), [onclick*='quotation_list_action']")
             if loc.count() > 0:
-                print(f"   [OK] Haciendo clic en 'Cotizaciones' dentro del frame '{f.name or 'principal'}'...")
                 loc.first.click(timeout=5000)
                 return True
         except Exception:
             pass
-
-    raise RuntimeError("No se encontró el menú 'Cotizaciones' ni la función submitForm. Verifica usuario/contraseña del portal.")
+    raise RuntimeError("No se encontró el menú 'Cotizaciones'.")
 
 def obtener_frame_derecho(page, espera_seg=10):
-    """Busca el frame middleFrameRight esperando a que cargue."""
     fin = time.time() + espera_seg
     while time.time() < fin:
         f = page.frame(name="middleFrameRight")
@@ -222,25 +448,42 @@ def obtener_frame_derecho(page, espera_seg=10):
     return page.main_frame
 
 def verificar_headless_seguro(modo_headless):
-    """En Linux/Streamlit Cloud sin pantalla ($DISPLAY), fuerza modo oculto para evitar crash."""
     if not modo_headless and sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
-        print("⚠️ [AVISO] Servidor en la nube detectado (sin monitor físico). Cambiando automáticamente a modo Oculto (Headless)...")
+        print("⚠️ [AVISO] Servidor Cloud sin monitor físico. Usando modo Oculto (Headless)...")
         return True
     return modo_headless
 
 def ejecutar_extraccion_cotizaciones(modo_headless=True):
-    print("=== INICIANDO EXTRACCIÓN DE COTIZACIONES ===")
+    print("=== INICIANDO EXTRACCIÓN INTELIGENTE DE COTIZACIONES ===")
     modo_headless = verificar_headless_seguro(modo_headless)
 
     try:
-        print("-> Conectando con Google Sheets...")
         doc = conectar_sheets()
-        cfg = cargar_configuracion_dinamica(doc)
+        cfg = cargar_configuracion_y_exclusiones(doc)
         ws_cot = obtener_ws_cotizaciones(doc)
         mapa_hist = cargar_mapa_historial(doc)
 
-        existentes = {f"{r[2]}_{r[12]}_{r[14]}" for r in ws_cot.get_all_values()[1:] if len(r) > 14}
-        print(f"-> Partidas ya registradas en BD_COTIZACIONES: {len(existentes)}")
+        # Limpiar automáticamente filas corruptas previas (desfasadas o de Durango)
+        filas_todas = ws_cot.get_all_values()
+        filas_sanas = [ENCABEZADOS_COT]
+        existentes = set()
+        if len(filas_todas) > 1:
+            for r in filas_todas[1:]:
+                if len(r) >= 32:
+                    est_cot = str(r[31]).strip().upper()
+                    ciu_r, edo_r, tal_r = str(r[9]), str(r[10]), str(r[8])
+                    excluido, _ = es_siniestro_excluido(ciu_r, edo_r, "", tal_r, cfg)
+                    # Conservar solo filas válidas que no sean de Durango ni tengan "FALSE" en Estatus
+                    if not excluido and est_cot in ["PENDIENTE", "ENVIADA PORTAL"] and (float(r[16] or 0) > 0 or float(r[17] or 0) > 0 or float(r[18] or 0) > 0 or est_cot == "ENVIADA PORTAL"):
+                        filas_sanas.append(r[:32])
+                        existentes.add(f"{r[2]}_{r[12]}_{r[14]}")
+            if len(filas_sanas) != len(filas_todas):
+                ws_cot.clear()
+                ws_cot.update(range_name='A1', values=filas_sanas, value_input_option='USER_ENTERED')
+                print(f"🧹 Se depuraron {len(filas_todas) - len(filas_sanas)} filas antiguas (Durango / sin precio / desfasadas).")
+
+        print(f"-> Estados excluidos configurados: {cfg['ESTADOS_EXCLUIDOS']}")
+        print(f"-> Talleres Auto Surtido detectados en BD_TALLERES: {len(cfg['TALLERES_AUTOSURTIDO'])}")
     except Exception as e_sh:
         print(f"❌ [ERROR GOOGLE SHEETS]: {e_sh}")
         traceback.print_exc()
@@ -250,45 +493,59 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=modo_headless)
-        page = browser.new_context().new_page()
+        ctx = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+        page = ctx.new_page()
+        page_buscador = ctx.new_page()  # Segunda pestaña real para buscar en Mercado Libre y eBay sin bloqueo 403
         page.on("dialog", lambda d: d.accept())
 
         try:
-            print(f"-> Conectando a {PORTAL_URL} con usuario {cfg['MULTI_USER']}...")
+            print(f"-> Conectando a Multiasistencia con usuario {cfg['MULTI_USER']}...")
             page.goto(PORTAL_URL, timeout=45000)
             page.fill("input[type='text']", cfg["MULTI_USER"])
             page.fill("input[type='password']", cfg["MULTI_PASS"])
             page.click("input[value='Aceptar'], button:has-text('Aceptar'), input[type='submit']")
             time.sleep(3)
 
-            frames_nombres = [f.name or f.url for f in page.frames]
-            print(f"-> Sesión iniciada. Frames detectados en portal: {frames_nombres}")
-
-            print("-> Abriendo menú de Cotizaciones...")
             abrir_menu_cotizaciones(page)
             time.sleep(3.5)
 
             frame = obtener_frame_derecho(page, espera_seg=12)
-            print(f"-> Leyendo tabla de siniestros desde frame: '{frame.name or 'main'}'")
 
+            # Extraer siniestros junto con su columna Regional desde la tabla inicial
             siniestros = frame.evaluate("""
-                () => Array.from(document.querySelectorAll('a.cvi, a[href*="showDetail"]'))
-                    .filter(a => (a.getAttribute('href')||'').includes('showDetail') && a.textContent.trim().length >= 5)
-                    .map(a => ({ siniestro: a.textContent.trim(), js: a.getAttribute('href') }))
+                () => {
+                    let lista = [];
+                    let links = Array.from(document.querySelectorAll('a.cvi, a[href*="showDetail"]'));
+                    for (let a of links) {
+                        let href = a.getAttribute('href') || '';
+                        let txt = a.textContent.trim();
+                        if (href.includes('showDetail') && txt.length >= 5) {
+                            let tr = a.closest('tr');
+                            let tds = tr ? Array.from(tr.querySelectorAll('td')) : [];
+                            let regional = tds[5] ? tds[5].textContent.trim() : '';
+                            lista.push({ siniestro: txt, js: href, regional: regional });
+                        }
+                    }
+                    return lista;
+                }
             """)
-            print(f"-> Siniestros pendientes detectados en bandeja: {len(siniestros)}")
-
-            if len(siniestros) == 0:
-                txt_debug = frame.evaluate("() => document.body ? document.body.innerText.slice(0, 400).replace(/\\s+/g, ' ') : ''")
-                print(f"   [INFO] Texto visible en bandeja: {txt_debug}")
+            print(f"-> Siniestros en bandeja: {len(siniestros)}")
 
             for idx, item in enumerate(siniestros):
                 num_sin = item['siniestro']
-                print(f"\n[{idx+1}/{len(siniestros)}] Entrando al Siniestro {num_sin}...")
+                reg_sin = item.get('regional', '')
+
+                # FILTRO NIVEL 1: Saltar Durango desde la lista principal sin siquiera abrirlo
+                ex_pre, motivo_pre = es_siniestro_excluido("", "", reg_sin, "", cfg)
+                if ex_pre:
+                    print(f"[{idx+1}/{len(siniestros)}] ⏭️ Saltando Siniestro {num_sin} ({motivo_pre}).")
+                    continue
+
+                print(f"\n[{idx+1}/{len(siniestros)}] Abriendo Siniestro {num_sin} (Regional: {reg_sin})...")
                 try:
                     frame = obtener_frame_derecho(page)
                     frame.evaluate(item['js'].replace("javascript:", ""))
-                    time.sleep(2.5)
+                    time.sleep(2.2)
 
                     frame = obtener_frame_derecho(page)
                     sub_js = frame.evaluate("""
@@ -298,21 +555,21 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                         }
                     """)
                     if not sub_js:
-                        print(f"  [!] No se encontró enlace de cotización (1) dentro de {num_sin}.")
                         continue
 
-                    print(f"  -> Abriendo pliego de piezas de {num_sin}...")
                     frame.evaluate(sub_js.replace("javascript:", ""))
-                    time.sleep(2.8)
+                    time.sleep(2.5)
 
                     frame = obtener_frame_derecho(page)
+                    # Regex corregido para soportar comillas dobles dentro de displayTool(event, 'VOLKSWAGEN "EL NUEVO JETTA"')
                     detalle = frame.evaluate(r"""
                         () => {
                             function fullTxt(el) {
                                 if (!el) return '';
                                 let onm = el.getAttribute('onmouseover') || '';
-                                let m = onm.match(/displayTool\s*\(\s*event\s*,\s*['"]([^'"]+)['"]\s*\)/i);
-                                if (m && m[1]) return m[1].trim();
+                                let m = onm.match(/displayTool\s*\(\s*event\s*,\s*'([^']*)'\s*\)/i) ||
+                                        onm.match(/displayTool\s*\(\s*event\s*,\s*"([^"]*)"\s*\)/i);
+                                if (m && m[1]) return m[1].replace(/[\s\xA0]+/g, ' ').trim();
                                 return el.textContent.replace(/[\s\xA0]+/g, ' ').trim();
                             }
                             let marca = '', vehiculo = '', modelo = '', vin = '', taller = '', ciudad = '', estado = '', fecha_fin = '';
@@ -339,54 +596,81 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                         }
                     """)
 
+                    # FILTRO NIVEL 2: Verificar si el Taller es Auto Surtido o Ciudad/Estado es Durango
+                    ex_det, motivo_det = es_siniestro_excluido(
+                        detalle.get('ciudad', ''), detalle.get('estado', ''), reg_sin, detalle.get('taller', ''), cfg
+                    )
+                    if ex_det:
+                        print(f"  ⏭️ Ignorando Siniestro {num_sin}: {motivo_det}.")
+                        abrir_menu_cotizaciones(page)
+                        time.sleep(2)
+                        continue
+
                     piezas_lista = detalle.get('piezas', [])
-                    print(f"  -> Vehículo: {detalle.get('marca','')} {detalle.get('vehiculo','')} {detalle.get('modelo','')} | Piezas leídas: {len(piezas_lista)}")
+                    print(f"  -> Auto: {detalle.get('marca','')} {detalle.get('vehiculo','')} ({detalle.get('modelo','')}) | Taller: {detalle.get('taller','')} ({detalle.get('ciudad','')}) | Piezas: {len(piezas_lista)}")
 
                     ahora = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-6))).strftime("%Y-%m-%d %H:%M")
                     for pza in piezas_lista:
                         llave_u = f"{num_sin}_{pza['idx']}_{pza['descripcion']}"
                         if llave_u in existentes:
-                            print(f"     [Omitida] Partida #{pza['idx']+1} ({pza['descripcion']}) ya existe en BD_COTIZACIONES.")
+                            print(f"     [Ya en bandeja] Partida #{pza['idx']+1}: {pza['descripcion']}")
                             continue
 
-                        q = expandir_descripcion(pza['descripcion'], detalle.get('marca',''), detalle.get('vehiculo',''), detalle.get('modelo',''), cfg.get("DICCIONARIO_EXTRA", {}))
-                        print(f"     🔎 Buscando Partida #{pza['idx']+1}: '{q}' en ML y eBay...")
-                        p_orig, p_noorig, p_gen, l_ml, l_eb = buscar_precios_mercado(q, cfg.get("TC_USD", 20.50))
+                        q = expandir_descripcion(
+                            pza['descripcion'], detalle.get('marca', ''), detalle.get('vehiculo', ''), detalle.get('modelo', ''), cfg.get("DICCIONARIO_EXTRA", {})
+                        )
+                        print(f"     🔎 Buscando: '{q}'...")
+                        p_orig, p_noorig, p_gen, link_directo, fuente_det = buscar_precios_playwright(
+                            page_buscador, q, pza['descripcion'], detalle.get('vin', ''), cfg.get("TC_USD", 20.50), cfg.get("GEMINI_API_KEY", "")
+                        )
                         p_hist = mapa_hist.get(f"{pza['descripcion'][:12].upper()}_{detalle.get('vehiculo','')[:10].upper()}", 0.0)
-                        flete = estimar_flete(pza['descripcion'], detalle.get('ciudad',''), detalle.get('estado',''))
+                        flete = estimar_flete(pza['descripcion'], detalle.get('ciudad', ''), detalle.get('estado', ''))
 
-                        costo = p_gen or p_noorig or p_orig or p_hist or 0
-                        origen = "NO ORIGINAL" if p_gen or p_noorig else ("ORIGINAL" if p_orig else "NO ORIGINAL")
-                        fuente = "ML" if costo > 0 else "MAN"
+                        if p_gen > 0:
+                            costo = p_gen
+                            origen = "NO ORIGINAL"
+                        elif p_noorig > 0:
+                            costo = p_noorig
+                            origen = "SEMINUEVA"
+                        elif p_orig > 0:
+                            costo = p_orig
+                            origen = "ORIGINAL"
+                        else:
+                            costo = p_hist
+                            origen = "NO ORIGINAL"
+                            if p_hist > 0:
+                                fuente_det = "LOC"
+
                         sug = round((costo + flete) * 1.35) if costo > 0 else 0
+                        print(f"        💰 Orig: ${p_orig} | Semi: ${p_noorig} | Gen: ${p_gen} | Sugerido: ${sug} ({fuente_det})")
 
+                        # Exactamente 32 valores alineados con ENCABEZADOS_COT
                         nuevas.append([
                             f"COT-{num_sin}-{pza['idx']+1}", ahora, num_sin, "1",
-                            detalle.get('marca',''), detalle.get('vehiculo',''), detalle.get('modelo',''), detalle.get('vin',''),
-                            detalle.get('taller',''), detalle.get('ciudad',''), detalle.get('estado',''), detalle.get('fecha_fin',''),
+                            detalle.get('marca', '').upper(), detalle.get('vehiculo', '').upper(), detalle.get('modelo', ''), detalle.get('vin', ''),
+                            detalle.get('taller', ''), detalle.get('ciudad', ''), detalle.get('estado', ''), detalle.get('fecha_fin', ''),
                             pza['idx'], pza['cantidad'], pza['descripcion'], q,
-                            p_orig, p_noorig, p_gen, p_hist, flete, fuente, origen, costo, 35, sug, 0, sug,
-                            f"HUB{fuente}{random.randint(100,999)}", l_ml, l_eb, "FALSE", "PENDIENTE"
+                            p_orig, p_noorig, p_gen, p_hist,
+                            flete, fuente_det, origen, costo,
+                            35, sug, 0, sug,
+                            f"HUB{fuente_det}{random.randint(100,999)}", link_directo, "FALSE", "PENDIENTE"
                         ])
 
                     abrir_menu_cotizaciones(page)
-                    time.sleep(2.5)
+                    time.sleep(2.2)
                 except Exception as e_sin:
                     print(f"  ❌ [ERROR en Siniestro {num_sin}]: {e_sin}")
                     try:
                         abrir_menu_cotizaciones(page)
                         time.sleep(2)
-                    except:
+                    except Exception:
                         pass
-        except Exception as e_gen:
-            print(f"\n❌ [ERROR CRÍTICO DURANTE LA EXTRACCIÓN]: {e_gen}")
-            traceback.print_exc()
         finally:
             browser.close()
 
     if nuevas:
         ws_cot.append_rows(nuevas, value_input_option='USER_ENTERED')
-        print(f"\n✅ {len(nuevas)} partidas extraídas y guardadas exitosamente en BD_COTIZACIONES.")
+        print(f"\n✅ {len(nuevas)} partidas cotizadas y guardadas en BD_COTIZACIONES (sin Durango ni Auto Surtido).")
     else:
         print("\nℹ️ Proceso finalizado sin partidas nuevas por agregar.")
 
@@ -396,7 +680,7 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
 
     try:
         doc = conectar_sheets()
-        cfg = cargar_configuracion_dinamica(doc)
+        cfg = cargar_configuracion_y_exclusiones(doc)
         ws_cot = obtener_ws_cotizaciones(doc)
         datos = ws_cot.get_all_values()
         if len(datos) <= 1:
@@ -417,14 +701,19 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
 
     por_enviar = {}
     for r_num, r in enumerate(datos[1:], start=2):
-        if len(r) <= idx_est: continue
+        if len(r) <= idx_est:
+            continue
         if str(r[idx_val]).strip().upper() in ["TRUE", "SI", "1", "VERDADERO"] and str(r[idx_est]).strip().upper() == "PENDIENTE":
-            try: p_int = int(round(float(str(r[idx_fin]).replace('$', '').replace(',', '').strip())))
-            except: p_int = 0
+            try:
+                p_int = int(round(float(str(r[idx_fin]).replace('$', '').replace(',', '').strip())))
+            except Exception:
+                p_int = 0
             if p_int > 0:
                 por_enviar.setdefault(str(r[idx_sin]).strip(), []).append({
-                    'gs_row': r_num, 'partida_idx': int(r[idx_pza]),
-                    'origen_txt': str(r[idx_ori]).strip().upper(), 'precio_int': str(p_int),
+                    'gs_row': r_num,
+                    'partida_idx': int(r[idx_pza]),
+                    'origen_txt': str(r[idx_ori]).strip().upper(),
+                    'precio_int': str(p_int),
                     'codigo_hub': re.sub(r'[^A-Za-z0-9]', '', str(r[idx_cod]).strip().upper())[:20]
                 })
 
@@ -442,7 +731,6 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
         page.on("dialog", lambda d: d.accept())
 
         try:
-            print(f"-> Iniciando sesión en portal con {cfg['MULTI_USER']}...")
             page.goto(PORTAL_URL, timeout=45000)
             page.fill("input[type='text']", cfg["MULTI_USER"])
             page.fill("input[type='password']", cfg["MULTI_PASS"])
@@ -458,7 +746,6 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                     frame = obtener_frame_derecho(page)
                     link = frame.locator(f"a.cvi:has-text('{sin}'), a[href*='showDetail']:has-text('{sin}')")
                     if link.count() == 0:
-                        print(f"  [!] Siniestro {sin} no encontrado en bandeja.")
                         continue
                     frame.evaluate(link.first.get_attribute("href").replace("javascript:", ""))
                     time.sleep(2.5)
@@ -499,9 +786,6 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                     time.sleep(2.5)
                 except Exception as e:
                     print(f"❌ [!] Error enviando {sin}: {e}")
-        except Exception as e_gen:
-            print(f"❌ [ERROR CRÍTICO EN ENVÍO]: {e_gen}")
-            traceback.print_exc()
         finally:
             browser.close()
 

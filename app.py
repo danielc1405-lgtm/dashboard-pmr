@@ -5242,7 +5242,7 @@ elif vista_actual == "🛠️ Cuartel General":
     # =========================================================================
     with tab_cotizador:
         st.markdown("#### ⚡ Mesa de Decisión y Cotizador Automático (Multiasistencia)")
-        st.caption("1️⃣ Extrae cotizaciones y precios (Mercado Libre + eBay EE.UU.) • 2️⃣ Ajusta margen o Precio Libre y marca **Validar** • 3️⃣ Inyecta al portal a 7 días hábiles.")
+        st.caption("1️⃣ Extrae cotizaciones activas (omite Durango y talleres Auto Surtido) • 2️⃣ Ajusta margen o Precio Libre y marca **Validar** • 3️⃣ Inyecta al portal a 7 días hábiles.")
 
         col_btn_ext, col_btn_env, col_modo_cot = st.columns([1.4, 1.4, 1.2], vertical_alignment="center")
         with col_modo_cot:
@@ -5252,7 +5252,7 @@ elif vista_actual == "🛠️ Cuartel General":
         btn_run_ext = col_btn_ext.button("🔎 1. Extraer Cotizaciones y Buscar Precios", type="primary", use_container_width=True)
         btn_run_env = col_btn_env.button("🚀 3. Inyectar Validadas al Portal (7 Días Hábiles)", use_container_width=True)
 
-        with st.expander("🖥️ Ver Bitácora de Ejecución en Vivo del Robot Cotizador", expanded=True):
+        with st.expander("🖥️ Ver Bitácora de Ejecución en Vivo del Robot Cotizador", expanded=False):
             consola_cot_vivo = st.empty()
             consola_cot_vivo.code(st.session_state.get('log_cotizador_ai', 'Esperando orden de ejecución...'))
 
@@ -5294,10 +5294,6 @@ elif vista_actual == "🛠️ Cuartel General":
                     if os.path.exists("credentials.json"):
                         os.remove("credentials.json")
 
-        if st.session_state.get('log_cotizador_ai'):
-            with st.expander("🖥️ Ver Bitácora de Ejecución del Robot Cotizador", expanded=False):
-                st.code(st.session_state['log_cotizador_ai'])
-
         try:
             doc_cot = init_connection()
             ws_cot_ui = doc_cot.worksheet("BD_COTIZACIONES")
@@ -5309,7 +5305,7 @@ elif vista_actual == "🛠️ Cuartel General":
         if not df_cot_ui.empty and 'Estatus_Cotizacion' in df_cot_ui.columns:
             df_cot_ui['_GS_Row'] = df_cot_ui.index + 2
             df_pend_cot = df_cot_ui[df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() == 'PENDIENTE'].copy()
-            df_hist_cot = df_cot_ui[df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() != 'PENDIENTE'].copy()
+            df_hist_cot = df_cot_ui[df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() == 'ENVIADA PORTAL'].copy()
 
             if not df_pend_cot.empty:
                 for col_num in ['Precio_Original', 'Precio_No_Original', 'Precio_Generica', 'Precio_Historial', 'Flete_Estimado', 'Costo_Base', 'Margen_Pct', 'Precio_Sugerido', 'Precio_Libre', 'Precio_Final_Enviar']:
@@ -5329,7 +5325,7 @@ elif vista_actual == "🛠️ Cuartel General":
 
                 primera = df_pend_cot.iloc[0]
                 st.info(
-                    f"🚘 **Vehículo:** {primera.get('Marca','')} {primera.get('Vehiculo','')} {primera.get('Modelo_Ano','')} | "
+                    f"🚘 **Vehículo:** {primera.get('Marca','')} {primera.get('Vehiculo','')} ({primera.get('Modelo_Ano','')}) | "
                     f"🔢 **VIN:** `{primera.get('VIN','')}` | 🏢 **Taller:** {primera.get('Taller','')} ({primera.get('Ciudad','')}, {primera.get('Estado','')}) | "
                     f"⏰ **Cierre Subasta:** {primera.get('Fecha_Fin','')}"
                 )
@@ -5340,7 +5336,7 @@ elif vista_actual == "🛠️ Cuartel General":
                         'Precio_Original', 'Precio_No_Original', 'Precio_Generica', 'Precio_Historial',
                         'Flete_Estimado', 'Fuente_Seleccionada', 'Origen_Portal',
                         'Costo_Base', 'Margen_Pct', 'Precio_Sugerido', 'Precio_Libre',
-                        'Codigo_Hub', 'Link_ML', 'Link_eBay', 'Validar_Bool'
+                        'Codigo_Hub', 'Link_Referencia', 'Validar_Bool'
                     ] if c in df_pend_cot.columns
                 ]
 
@@ -5357,7 +5353,7 @@ elif vista_actual == "🛠️ Cuartel General":
                         'Precio_No_Original': st.column_config.NumberColumn("2. NO ORIG (Semi)", format="$ %.0f", disabled=True, width="small"),
                         'Precio_Generica': st.column_config.NumberColumn("3. GENÉRICA", format="$ %.0f", disabled=True, width="small"),
                         'Precio_Historial': st.column_config.NumberColumn("Hist. PMR", format="$ %.0f", disabled=True, width="small"),
-                        'Flete_Estimado': st.column_config.NumberColumn("🚚 Flete (Mín $300)", format="$ %.0f", width="small"),
+                        'Flete_Estimado': st.column_config.NumberColumn("🚚 Flete", format="$ %.0f", width="small"),
                         'Fuente_Seleccionada': st.column_config.SelectboxColumn("Dónde Comprar", options=["ML", "EB", "INV", "LOC", "AGENCIA", "MAN"], width="small"),
                         'Origen_Portal': st.column_config.SelectboxColumn("Origen Portal", options=["ORIGINAL", "NO ORIGINAL", "SEMINUEVA"], width="small"),
                         'Costo_Base': st.column_config.NumberColumn("Costo Base", format="$ %.0f", width="small"),
@@ -5365,8 +5361,7 @@ elif vista_actual == "🛠️ Cuartel General":
                         'Precio_Sugerido': st.column_config.NumberColumn("💡 Sugerido", format="$ %.0f", disabled=True, width="small"),
                         'Precio_Libre': st.column_config.NumberColumn("✍️ Precio Libre", format="$ %.0f", help="Si escribes un monto > 0 aquí, este se enviará al portal en lugar del sugerido.", width="small"),
                         'Codigo_Hub': st.column_config.TextColumn("Código Portal", width="small"),
-                        'Link_ML': st.column_config.LinkColumn("🇲🇽 ML", display_text="Ver ML", width="small"),
-                        'Link_eBay': st.column_config.LinkColumn("🇺🇸 eBay", display_text="Ver eBay", width="small"),
+                        'Link_Referencia': st.column_config.LinkColumn("🔗 Producto", display_text="Ver Producto", width="small"),
                         'Validar_Bool': st.column_config.CheckboxColumn("✅ Validar", default=False, width="small")
                     },
                     key="editor_mesa_cotizador"

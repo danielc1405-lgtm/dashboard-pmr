@@ -5281,7 +5281,7 @@ elif vista_actual == "🛠️ Cuartel General":
     # =========================================================================
     with tab_cotizador:
         st.markdown("#### ⚡ Mesa de Decisión y Cotizador Automático (Multiasistencia)")
-        st.caption("1️⃣ Extrae cotizaciones activas • 2️⃣ Edita precios/orígenes con calma en la tabla (no se recarga al editar) • 3️⃣ Guarda o Envía al Portal.")
+        st.caption("1️⃣ Extrae cotizaciones activas • 2️⃣ Edita precios/orígenes con calma en la tabla • 3️⃣ Guarda o Envía al Portal.")
 
         @st.cache_data(ttl=180)
         def leer_cotizaciones_cache():
@@ -5289,15 +5289,87 @@ elif vista_actual == "🛠️ Cuartel General":
             ws_c = doc_c.worksheet("BD_COTIZACIONES")
             return ws_c.get_all_values()
 
-        col_btn_ext, col_btn_ref_c, col_modo_cot = st.columns([1.8, 0.8, 1.4], vertical_alignment="center")
+        # Botones principales y selector de vista Chrome
+        col_btn_ext, col_btn_env, col_modo_cot = st.columns([1.4, 1.6, 1.2], vertical_alignment="center")
         with col_modo_cot:
             modo_bot_cot = st.radio("Vista Chrome:", ["Oculto (Rápido)", "Visual (PC Local)"], horizontal=True, key="rad_modo_cot")
         arg_vis_cot = "--oculto" if "Oculto" in modo_bot_cot else "--visual"
 
-        btn_run_ext = col_btn_ext.button("🔎 1. Extraer Nuevas Cotizaciones del Portal", type="primary", use_container_width=True)
-        if col_btn_ref_c.button("🔄 Refrescar Tabla", use_container_width=True):
+        btn_run_ext = col_btn_ext.button("🔎 1. Extraer Nuevas Cotizaciones", type="primary", use_container_width=True)
+        btn_run_env = col_btn_env.button("🚀 2. Guardar y Enviar Validadas al Portal", type="primary", use_container_width=True)
+
+        # Botones secundarios (Reporte PDF y Limpieza de Evidencias)
+        col_btn_pdf, col_btn_ref_c, col_btn_limp = st.columns([1.5, 1.0, 1.5], vertical_alignment="center")
+        
+        if col_btn_pdf.button("📄 Descargar Reporte PDF", use_container_width=True):
+            try:
+                doc_pdf = init_connection()
+                ws_pdf = doc_pdf.worksheet("BD_COTIZACIONES")
+                d_p = ws_pdf.get_all_values()
+                if len(d_p) > 1:
+                    df_pdf = pd.DataFrame(d_p[1:], columns=[str(h).strip() for h in d_p[0]])
+                    df_pdf_pend = df_pdf[df_pdf['Estatus_Cotizacion'].astype(str).str.upper() == 'PENDIENTE']
+                    if not df_pdf_pend.empty:
+                        pdf_rep = FPDF(orientation='L', unit='mm', format='A4')
+                        pdf_rep.set_auto_page_break(auto=True, margin=10)
+                        pdf_rep.add_page()
+                        pdf_rep.set_font("Arial", 'B', 12)
+                        pdf_rep.cell(0, 8, "REPORTE DE COTIZACIONES PENDIENTES - PMR HUB AI", ln=True, align='C')
+                        pdf_rep.set_font("Arial", '', 8)
+                        pdf_rep.cell(0, 5, f"Fecha de emision: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align='C')
+                        pdf_rep.ln(4)
+
+                        pdf_rep.set_fill_color(0, 51, 102)
+                        pdf_rep.set_text_color(255, 255, 255)
+                        pdf_rep.set_font("Arial", 'B', 8)
+                        headers_p_pdf = ['Siniestro', 'Taller', 'Vehiculo', 'Pieza', 'Origen', 'Costo', 'Flete', 'Final']
+                        widths_pdf = [25, 45, 55, 75, 22, 18, 18, 22]
+                        for h_i, h_t in enumerate(headers_p_pdf):
+                            pdf_rep.cell(widths_pdf[h_i], 6, h_t, border=1, fill=True, align='C')
+                        pdf_rep.ln()
+
+                        pdf_rep.set_text_color(0, 0, 0)
+                        pdf_rep.set_font("Arial", '', 7)
+                        for _, rp in df_pdf_pend.iterrows():
+                            pdf_rep.cell(widths_pdf[0], 5, str(rp.get('Siniestro',''))[:15], border=1)
+                            pdf_rep.cell(widths_pdf[1], 5, str(rp.get('Taller',''))[:30], border=1)
+                            pdf_rep.cell(widths_pdf[2], 5, f"{rp.get('Marca','')} {rp.get('Vehiculo','')}"[:35], border=1)
+                            pdf_rep.cell(widths_pdf[3], 5, str(rp.get('Descripcion_Portal',''))[:45], border=1)
+                            pdf_rep.cell(widths_pdf[4], 5, str(rp.get('Origen_Portal',''))[:12], border=1, align='C')
+                            pdf_rep.cell(widths_pdf[5], 5, f"${float(rp.get('Costo_Base',0) or 0):,.0f}", border=1, align='R')
+                            pdf_rep.cell(widths_pdf[6], 5, f"${float(rp.get('Flete_Estimado',0) or 0):,.0f}", border=1, align='R')
+                            pdf_rep.cell(widths_pdf[7], 5, f"${float(rp.get('Precio_Final_Enviar',0) or 0):,.0f}", border=1, align='R')
+                            pdf_rep.ln()
+
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_p:
+                            pdf_rep.output(tmp_p.name)
+                            with open(tmp_p.name, "rb") as f_p: pdf_b_rep = f_p.read()
+                        st.download_button(
+                            label="📥 Descargar PDF Generado",
+                            data=pdf_b_rep,
+                            file_name=f"Reporte_Cotizaciones_{datetime.datetime.now().strftime('%d%m%Y')}.pdf",
+                            mime="application/pdf",
+                            type="primary",
+                            key="dl_pdf_cotizaciones_gen"
+                        )
+                    else:
+                        st.warning("No hay cotizaciones pendientes para generar el PDF.")
+            except Exception as e_pdf:
+                st.error(f"Error generando PDF: {e_pdf}")
+
+        if col_btn_ref_c.button("🔄 Refrescar", use_container_width=True):
             leer_cotizaciones_cache.clear()
             st.rerun()
+
+        if os.path.exists("evidencia_antes_grabar.png") or os.path.exists("evidencia_despues_grabar.png"):
+            if col_btn_limp.button("🧹 Limpiar Evidencias", use_container_width=True, key="btn_limpiar_evidencias"):
+                try:
+                    if os.path.exists("evidencia_antes_grabar.png"): os.remove("evidencia_antes_grabar.png")
+                    if os.path.exists("evidencia_despues_grabar.png"): os.remove("evidencia_despues_grabar.png")
+                    st.success("Evidencias limpiadas.")
+                    st.rerun()
+                except Exception:
+                    pass
 
         with st.expander("🖥️ Ver Bitácora de Ejecución en Vivo del Robot Cotizador", expanded=False):
             consola_cot_vivo = st.empty()
@@ -5309,8 +5381,6 @@ elif vista_actual == "🛠️ Cuartel General":
         except Exception:
             datos_cot_ui = []
             df_cot_ui = pd.DataFrame()
-
-        btn_run_env = False
 
         if not df_cot_ui.empty and 'Estatus_Cotizacion' in df_cot_ui.columns:
             df_cot_ui['_GS_Row'] = df_cot_ui.index + 2
@@ -5377,7 +5447,7 @@ elif vista_actual == "🛠️ Cuartel General":
                             'Precio_Generica': st.column_config.NumberColumn("3. GENÉRICA", format="$ %.0f", disabled=True, width="small"),
                             'Precio_Historial': st.column_config.NumberColumn("Hist. PMR", format="$ %.0f", disabled=True, width="small"),
                             'Flete_Estimado': st.column_config.NumberColumn("🚚 Flete", format="$ %.0f", width="small"),
-                            'Fuente_Seleccionada': st.column_config.SelectboxColumn("Dónde Comprar", options=["ML", "EB", "INV", "LOC", "AGENCIA", "MAN"], width="small"),
+                            'Fuente_Seleccionada': st.column_config.SelectboxColumn("Dónde Comprar", options=["ML", "EB", "RADEC", "PARTSOUQ", "INV", "LOC", "AGENCIA", "MAN"], width="small"),
                             'Origen_Portal': st.column_config.SelectboxColumn("Origen Portal", options=["ORIGINAL", "NO ORIGINAL", "SEMINUEVA"], width="small"),
                             'Costo_Base': st.column_config.NumberColumn("Costo Base", format="$ %.0f", width="small"),
                             'Margen_Pct': st.column_config.SelectboxColumn("% Utilidad", options=[15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 100], width="small"),
@@ -5394,56 +5464,65 @@ elif vista_actual == "🛠️ Cuartel General":
                     btn_save_borrador = c_f1.form_submit_button("💾 Guardar Cambios / Recalcular Sugeridos", use_container_width=True)
                     btn_run_env = c_f2.form_submit_button("🚀 Guardar Selección y Enviar Validadas al Portal (7 Días)", type="primary", use_container_width=True)
 
-                if btn_save_borrador or btn_run_env:
-                    with st.spinner("Guardando cambios en BD_COTIZACIONES..."):
-                        doc_save = init_connection()
-                        ws_save = doc_save.worksheet("BD_COTIZACIONES")
-                        headers_c = [str(h).strip() for h in datos_cot_ui[0]]
-                        celdas_cot_upd = []
-                        import random
+                def guardar_cambios_mesa_en_sheet():
+                    headers_c = [str(h).strip() for h in datos_cot_ui[0]]
+                    celdas_cot_upd = []
+                    import random
 
-                        for idx_r in ed_cot_df.index:
-                            gs_r = int(df_pend_cot.loc[idx_r, '_GS_Row'])
-                            fila_ed = ed_cot_df.loc[idx_r]
-                            costo_b = float(fila_ed['Costo_Base'])
-                            flete_b = float(fila_ed['Flete_Estimado'])
-                            margen_b = float(fila_ed['Margen_Pct'])
-                            libre_b = float(fila_ed['Precio_Libre'])
-                            fuente_b = str(fila_ed['Fuente_Seleccionada']).strip().upper()
-                            origen_b = str(fila_ed['Origen_Portal']).strip().upper()
-                            validar_b = "TRUE" if fila_ed['Validar_Bool'] else "FALSE"
+                    for idx_r in ed_cot_df.index:
+                        gs_r = int(df_pend_cot.loc[idx_r, '_GS_Row'])
+                        fila_ed = ed_cot_df.loc[idx_r]
 
-                            nuevo_sug = round((costo_b + flete_b) * (1.0 + margen_b / 100.0)) if costo_b > 0 else 0
-                            precio_final_env = round(libre_b) if libre_b > 0 else nuevo_sug
+                        costo_b = float(fila_ed['Costo_Base'])
+                        flete_b = float(fila_ed['Flete_Estimado'])
+                        margen_b = float(fila_ed['Margen_Pct'])
+                        libre_b = float(fila_ed['Precio_Libre'])
+                        fuente_b = str(fila_ed['Fuente_Seleccionada']).strip().upper()
+                        origen_b = str(fila_ed['Origen_Portal']).strip().upper()
+                        validar_b = "TRUE" if fila_ed['Validar_Bool'] else "FALSE"
 
-                            cod_actual = str(fila_ed['Codigo_Hub']).strip().upper()
-                            sufijo_num = re.findall(r'\d{3}$', cod_actual)
-                            num_3 = sufijo_num[0] if sufijo_num else str(random.randint(100, 999))
-                            nuevo_cod_hub = f"HUB{fuente_b}{num_3}"
+                        nuevo_sug = round((costo_b + flete_b) * (1.0 + margen_b / 100.0)) if costo_b > 0 else 0
+                        precio_final_env = round(libre_b) if libre_b > 0 else nuevo_sug
 
-                            cambios_fila = {
-                                'Flete_Estimado': flete_b,
-                                'Fuente_Seleccionada': fuente_b,
-                                'Origen_Portal': origen_b,
-                                'Costo_Base': costo_b,
-                                'Margen_Pct': margen_b,
-                                'Precio_Sugerido': nuevo_sug,
-                                'Precio_Libre': libre_b,
-                                'Precio_Final_Enviar': precio_final_env,
-                                'Codigo_Hub': nuevo_cod_hub,
-                                'Validar_Envio': validar_b
-                            }
-                            for col_k, val_k in cambios_fila.items():
-                                if col_k in headers_c:
-                                    celdas_cot_upd.append(gspread.Cell(row=gs_r, col=headers_c.index(col_k) + 1, value=val_k))
+                        cod_actual = str(fila_ed['Codigo_Hub']).strip().upper()
+                        sufijo_num = re.findall(r'\d{3}$', cod_actual)
+                        num_3 = sufijo_num[0] if sufijo_num else str(random.randint(100, 999))
+                        tag_prov = re.sub(r'[^A-Z]', '', fuente_b)[:5]
+                        if not tag_prov: tag_prov = "RAD"
+                        nuevo_cod_hub = f"HUB{tag_prov}{num_3}"
 
-                        if celdas_cot_upd:
-                            ws_save.update_cells(celdas_cot_upd, value_input_option='USER_ENTERED')
-                            leer_cotizaciones_cache.clear()
-                            if not btn_run_env:
-                                st.success("✅ Cambios guardados y precios recalculados sin cerrar la tabla.")
-                                time.sleep(0.5)
-                                st.rerun()
+                        cambios_fila = {
+                            'Flete_Estimado': flete_b,
+                            'Fuente_Seleccionada': fuente_b,
+                            'Origen_Portal': origen_b,
+                            'Costo_Base': costo_b,
+                            'Margen_Pct': margen_b,
+                            'Precio_Sugerido': nuevo_sug,
+                            'Precio_Libre': libre_b,
+                            'Precio_Final_Enviar': precio_final_env,
+                            'Codigo_Hub': nuevo_cod_hub,
+                            'Validar_Envio': validar_b
+                        }
+                        for col_k, val_k in cambios_fila.items():
+                            if col_k in headers_c:
+                                celdas_cot_upd.append(gspread.Cell(row=gs_r, col=headers_c.index(col_k) + 1, value=val_k))
+
+                    if celdas_cot_upd:
+                        doc_upd = init_connection()
+                        ws_upd = doc_upd.worksheet("BD_COTIZACIONES")
+                        ws_upd.update_cells(celdas_cot_upd, value_input_option='USER_ENTERED')
+                        leer_cotizaciones_cache.clear()
+
+                if btn_save_borrador:
+                    with st.spinner("Guardando borrador en BD_COTIZACIONES..."):
+                        guardar_cambios_mesa_en_sheet()
+                        st.success("✅ Cambios guardados y precios recalculados.")
+                        time.sleep(0.5)
+                        st.rerun()
+
+                if btn_run_env:
+                    with st.spinner("Guardando tu selección antes de abrir el portal..."):
+                        guardar_cambios_mesa_en_sheet()
             else:
                 st.info("No hay cotizaciones pendientes en la mesa. Presiona **🔎 1. Extraer Nuevas Cotizaciones del Portal**.")
 

@@ -4978,25 +4978,55 @@ elif vista_actual == "🛠️ Cuartel General":
                     return []
 
             with st.container(border=True):
-                st.markdown("**🔐 Credenciales, IA Key y Diccionario (Cotizador)**")
+                st.markdown("**🔐 Credenciales, IA Key, Portales Web y Diccionario (Cotizador)**")
                 filas_cfg = leer_config_bots_seguro()
 
                 mapa_cfg_ui = {}
                 abrev_lista_ui = []
+                portales_lista_ui = []
                 for r_c in filas_cfg[1:]:
                     if len(r_c) >= 2:
                         k_c, v_c = str(r_c[0]).strip().upper(), str(r_c[1]).strip()
+                        nota_c = str(r_c[2]).strip().upper() if len(r_c) >= 3 else "TODAS"
                         if k_c.startswith("ABREV_"):
                             abrev_lista_ui.append({"Abreviatura Portal": k_c.replace("ABREV_", ""), "Significado Completo": v_c})
+                        elif k_c.startswith("PORTAL_"):
+                            portales_lista_ui.append({"Nombre Portal": k_c.replace("PORTAL_", ""), "Dominio / URL": v_c, "Categoría": nota_c})
                         else:
                             mapa_cfg_ui[k_c] = v_c
 
+                if not portales_lista_ui:
+                    portales_lista_ui = [
+                        {"Nombre Portal": "RADEC", "Dominio / URL": "radec.com.mx", "Categoría": "GENERICA"},
+                        {"Nombre Portal": "PARTSOUQ", "Dominio / URL": "partsouq.com", "Categoría": "ORIGINAL"},
+                        {"Nombre Portal": "PARTSLINK24", "Dominio / URL": "partslink24.com", "Categoría": "ORIGINAL"},
+                        {"Nombre Portal": "KIAPARTSNOW", "Dominio / URL": "kiapartsnow.com", "Categoría": "ORIGINAL"},
+                        {"Nombre Portal": "FORDPARTSGIANT", "Dominio / URL": "fordpartsgiant.com", "Categoría": "ORIGINAL"},
+                        {"Nombre Portal": "GMPARTSGIANT", "Dominio / URL": "gmpartsgiant.com", "Categoría": "ORIGINAL"},
+                        {"Nombre Portal": "NISSANPARTSDEAL", "Dominio / URL": "nissanpartsdeal.com", "Categoría": "ORIGINAL"},
+                        {"Nombre Portal": "MERCADO LIBRE", "Dominio / URL": "mercadolibre.com.mx", "Categoría": "TODAS"},
+                        {"Nombre Portal": "EBAY MOTORS", "Dominio / URL": "ebay.com", "Categoría": "SEMINUEVA"}
+                    ]
+
                 usr_m_in = st.text_input("Usuario Multiasistencia:", value=mapa_cfg_ui.get("MULTI_USER", "PMA5816"))
                 pwd_m_in = st.text_input("Contraseña Multiasistencia:", value=mapa_cfg_ui.get("MULTI_PASS", "Pmroct1."), type="password")
-                gem_key_in = st.text_input("🤖 Gemini API Key (Para búsqueda de precios en Google/ML/eBay/PartsNow):", value=mapa_cfg_ui.get("GEMINI_API_KEY", ""), type="password")
-                tc_usd_in = st.number_input("Tipo de Cambio USD -> MXN (eBay / PartsGiant):", min_value=15.0, max_value=35.0, value=float(mapa_cfg_ui.get("TC_USD", 20.50)), step=0.25)
+                gem_key_in = st.text_input("🤖 Gemini API Key (Obligatoria para buscar en Radec / PartSouq / ML / eBay):", value=mapa_cfg_ui.get("GEMINI_API_KEY", ""), type="password")
+                tc_usd_in = st.number_input("Tipo de Cambio USD -> MXN:", min_value=15.0, max_value=35.0, value=float(mapa_cfg_ui.get("TC_USD", 20.50)), step=0.25)
 
-                st.caption("Diccionario de abreviaturas del portal (ej. `ANITIN.` -> `ANTINIEBLA`):")
+                st.caption("🌐 **Portales Web de Búsqueda:** Agrega aquí cualquier página nueva (usa el signo `+` abajo de la tabla):")
+                df_portales_base = pd.DataFrame(portales_lista_ui)
+                ed_portales_ui = st.data_editor(
+                    df_portales_base,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Categoría": st.column_config.SelectboxColumn("Categoría", options=["ORIGINAL", "SEMINUEVA", "GENERICA", "TODAS"])
+                    },
+                    key="ed_portales_bot"
+                )
+
+                st.caption("📖 **Diccionario de abreviaturas del portal** (ej. `ANITIN.` -> `ANTINIEBLA`):")
                 df_abrev_base = pd.DataFrame(abrev_lista_ui) if abrev_lista_ui else pd.DataFrame([{"Abreviatura Portal": "ANITIN.", "Significado Completo": "ANTINIEBLA"}])
                 ed_abrev_ui = st.data_editor(df_abrev_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="ed_diccionario_bot")
 
@@ -5011,6 +5041,13 @@ elif vista_actual == "🛠️ Cuartel General":
                             ["GEMINI_API_KEY", gem_key_in.strip(), "API Key de Google AI Studio para buscador web"],
                             ["TC_USD", str(tc_usd_in), "Tipo de cambio USD a MXN para eBay"]
                         ]
+                        for _, r_pt in ed_portales_ui.iterrows():
+                            pt_nom = str(r_pt.get("Nombre Portal", "")).strip().upper()
+                            pt_url = str(r_pt.get("Dominio / URL", "")).strip().lower()
+                            pt_cat = str(r_pt.get("Categoría", "TODAS")).strip().upper()
+                            if pt_nom and pt_url and pt_nom != "NAN":
+                                nuevas_filas_cfg.append([f"PORTAL_{pt_nom}", pt_url, pt_cat])
+
                         for _, r_ab in ed_abrev_ui.iterrows():
                             ab_k = str(r_ab.get("Abreviatura Portal", "")).strip().upper()
                             ab_v = str(r_ab.get("Significado Completo", "")).strip().upper()
@@ -5020,7 +5057,7 @@ elif vista_actual == "🛠️ Cuartel General":
                         ws_cfg.clear()
                         ws_cfg.update(range_name='A1', values=nuevas_filas_cfg, value_input_option='USER_ENTERED')
                         leer_config_bots_seguro.clear()
-                        st.success("✅ Configuración y API Key guardadas correctamente.")
+                        st.success("✅ Configuración, API Key y Portales Web guardados correctamente.")
                         time.sleep(0.6)
                         st.rerun()
                     except Exception as e_cfg:

@@ -5325,7 +5325,6 @@ elif vista_actual == "🛠️ Cuartel General":
                     ] if c in df_pend_cot.columns
                 ]
 
-                # FORMULARIO AISLADO: Permite editar Origen, Costo, Precio Libre y Validar sin que la tabla se cierre ni parpadee
                 with st.form("form_mesa_cotizador_estable", clear_on_submit=False):
                     ed_cot_df = st.data_editor(
                         df_pend_cot[cols_tabla_cot],
@@ -5412,8 +5411,48 @@ elif vista_actual == "🛠️ Cuartel General":
                 st.info("No hay cotizaciones pendientes en la mesa. Presiona **🔎 1. Extraer Nuevas Cotizaciones del Portal**.")
 
             if not df_hist_cot.empty:
-                with st.expander(f"📊 Historial de Cotizaciones Enviadas al Portal ({len(df_hist_cot)} partidas)", expanded=False):
-                    st.dataframe(df_hist_cot.drop(columns=['_GS_Row'], errors='ignore'), hide_index=True, use_container_width=True)
+                with st.expander(f"📊 Historial de Cotizaciones Enviadas al Portal ({len(df_hist_cot)} partidas) — Marca para regresar a la mesa si requieres reenviar", expanded=False):
+                    df_hist_view = df_hist_cot.copy()
+                    df_hist_view['Reenviar_Bool'] = False
+                    cols_hist_ver = [
+                        c for c in [
+                            'Reenviar_Bool', 'Fecha_Extraccion', 'Siniestro', 'Marca', 'Vehiculo',
+                            'Modelo_Ano', 'Taller', 'Descripcion_Portal', 'Precio_Final_Enviar',
+                            'Origen_Portal', 'Codigo_Hub'
+                        ] if c in df_hist_view.columns
+                    ]
+                    ed_hist_cot = st.data_editor(
+                        df_hist_view[cols_hist_ver],
+                        hide_index=True,
+                        use_container_width=True,
+                        column_config={
+                            'Reenviar_Bool': st.column_config.CheckboxColumn("🔄 Reenviar", default=False, width="small"),
+                            'Precio_Final_Enviar': st.column_config.TextColumn("Precio Enviado", disabled=True),
+                            'Descripcion_Portal': st.column_config.TextColumn("Pieza", disabled=True)
+                        },
+                        disabled=[c for c in cols_hist_ver if c != 'Reenviar_Bool'],
+                        key="editor_historial_cot_reenvio"
+                    )
+                    seleccion_reenviar = ed_hist_cot[ed_hist_cot['Reenviar_Bool'] == True]
+                    if not seleccion_reenviar.empty:
+                        if st.button("♻️ Regresar Seleccionadas a la Mesa (Cambiar a PENDIENTE)", type="primary", key="btn_revivir_cot"):
+                            with st.spinner("Devolviendo partidas a la mesa de cotización..."):
+                                doc_rev = init_connection()
+                                ws_rev = doc_rev.worksheet("BD_COTIZACIONES")
+                                headers_rev = [str(h).strip() for h in datos_cot_ui[0]]
+                                idx_est_rev = headers_rev.index("Estatus_Cotizacion") + 1
+                                idx_val_rev = headers_rev.index("Validar_Envio") + 1
+                                celdas_rev = []
+                                for idx_sel in seleccion_reenviar.index:
+                                    gs_row_rev = int(df_hist_cot.loc[idx_sel, '_GS_Row'])
+                                    celdas_rev.append(gspread.Cell(row=gs_row_rev, col=idx_est_rev, value="PENDIENTE"))
+                                    celdas_rev.append(gspread.Cell(row=gs_row_rev, col=idx_val_rev, value="TRUE"))
+                                if celdas_rev:
+                                    ws_rev.update_cells(celdas_rev, value_input_option='USER_ENTERED')
+                                    leer_cotizaciones_cache.clear()
+                                    st.success("✅ Partida(s) devuelta(s) a la mesa listas para enviar.")
+                                    time.sleep(0.5)
+                                    st.rerun()
         else:
             st.info("Aún no existen registros en `BD_COTIZACIONES`. Presiona **🔎 1. Extraer Nuevas Cotizaciones del Portal**.")
 

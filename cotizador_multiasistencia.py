@@ -262,21 +262,25 @@ def cargar_mapa_historial_completo(doc):
     return registros
 
 def buscar_en_historial(registros_hist, desc_raw, query_limpia, modelo_limpio):
-    if not registros_hist:
+    """
+    Busca en el historial exigiendo SIEMPRE coincidencia exacta del modelo del vehículo
+    (ej. si busca TUNDRA y no hay TUNDRA en la base, devuelve estrictamente 0.0).
+    """
+    if not registros_hist or not modelo_limpio:
         return 0.0
-    pal_clave = query_limpia.split()[0].upper() if query_limpia else ""
+    mod_up = str(modelo_limpio).upper().strip()
     d_raw_up = str(desc_raw).upper().strip()
-    precios_exactos, precios_modelo = [], []
+    pal_clave = query_limpia.split()[0].upper() if query_limpia else ""
+
+    precios_exactos = []
     for p_txt, m_txt, val in registros_hist:
-        if modelo_limpio and modelo_limpio in m_txt:
-            if d_raw_up[:8] in p_txt or (pal_clave and pal_clave in p_txt):
+        # Exigir como palabra completa que el modelo del vehículo coincida
+        if re.search(rf'\b{re.escape(mod_up)}\b', m_txt):
+            if d_raw_up == p_txt or d_raw_up[:10] in p_txt or (pal_clave and len(pal_clave) >= 4 and pal_clave in p_txt):
                 precios_exactos.append(val)
-        elif d_raw_up == p_txt:
-            precios_modelo.append(val)
+
     if precios_exactos:
         return round(sum(precios_exactos[:5]) / len(precios_exactos[:5]))
-    if precios_modelo:
-        return round(sum(precios_modelo[:5]) / len(precios_modelo[:5]))
     return 0.0
 
 def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc_usd, gemini_key):

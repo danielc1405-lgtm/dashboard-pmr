@@ -1,4 +1,4 @@
-# ==============================================================================
+F# ==============================================================================
 # === [BLOQUE 1: IMPORTS, CONFIGURACIÓN VISUAL Y CSS] ===
 # ==============================================================================
 import streamlit as st
@@ -734,15 +734,15 @@ def abrir_popup_monitor():
                         df_total_sla['D_Ciclo_Total'] = limpiar_rango_dias((fecha_cierre_op - df_total_sla['DT_Asig']).dt.days)
                         df_total_sla['Cumple_0_7_Dias'] = df_total_sla['D_Ciclo_Total'].apply(lambda d: 1 if pd.notna(d) and d <= 7 else (0 if pd.notna(d) else pd.NA))
 
-                        # Filtro interactivo por Plaza (Destacando Torreón, Saltillo, Tampico, Monterrey, SLP)
-                        plazas_disp = sorted(df_total_sla['Plaza_Ciudad'].dropna().unique().tolist())
-                        plazas_sel = st.multiselect(
-                            "📍 Filtrar Plazas específicas (Deja vacío para ver todas):",
-                            options=plazas_disp,
-                            default=[p for p in ["TORREON", "SALTILLO", "TAMPICO", "MONTERREY", "SAN LUIS POTOSI"] if p in plazas_disp],
-                            key="ms_plazas_sla_pop"
+                        # Filtro interactivo por Estado (Vacío por defecto para no omitir ninguna ciudad del Estado)
+                        estados_disp = sorted(df_total_sla['Estado_Plaza'].dropna().unique().tolist())
+                        estados_sel = st.multiselect(
+                            "🗺️ Filtrar Estados específicos (Deja vacío para incluir todos):",
+                            options=estados_disp,
+                            default=[],
+                            key="ms_estados_sla_pop"
                         )
-                        df_sla_view = df_total_sla[df_total_sla['Plaza_Ciudad'].isin(plazas_sel)].copy() if plazas_sel else df_total_sla.copy()
+                        df_sla_view = df_total_sla[df_total_sla['Estado_Plaza'].isin(estados_sel)].copy() if estados_sel else df_total_sla.copy()
 
                         # KPIs Globales de la selección
                         def prom_seguro(s):
@@ -797,91 +797,123 @@ def abrir_popup_monitor():
                                 df_out = df_out.sort_values(by=['Piezas', '_ef_num'], ascending=[False, True]).drop(columns=['_ef_num'])
                             return df_out
 
-                        df_por_plaza = construir_resumen_agrupado(df_sla_view, ['Plaza_Ciudad', 'Estado_Plaza']).rename(columns={'Plaza_Ciudad': 'Plaza / Ciudad', 'Estado_Plaza': 'Estado'})
-                        df_por_taller = construir_resumen_agrupado(df_sla_view, ['Plaza_Ciudad', c_tal_s]).rename(columns={'Plaza_Ciudad': 'Plaza', c_tal_s: 'Taller (CDR)'})
+                        # 1. Agrupado por Estado | 2. Agrupado por Ciudad | 3. Desglose por Taller
+                        df_por_estado = construir_resumen_agrupado(df_sla_view, ['Estado_Plaza']).rename(columns={'Estado_Plaza': 'Estado'})
+                        df_por_ciudad = construir_resumen_agrupado(df_sla_view, ['Estado_Plaza', 'Plaza_Ciudad']).rename(columns={'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad / Plaza'})
+                        df_por_taller = construir_resumen_agrupado(df_sla_view, ['Estado_Plaza', 'Plaza_Ciudad', c_tal_s]).rename(columns={'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad', c_tal_s: 'Taller (CDR)'})
 
-                        # Preparar Nivel 3 (Detalle por Siniestro y Partida)
+                        # Detalle por Siniestro y Partida (para consulta y descarga CSV)
                         df_det_sin = df_sla_view.copy()
                         for c_dt_f, nom_f in [('DT_Asig', 'F. Asignación'), ('DT_Conf', 'F. Confirmación'), ('DT_Env', 'F. Envío'), ('DT_Ent', 'F. Entrega'), ('DT_Rec', 'F. Recibo')]:
                             df_det_sin[nom_f] = df_det_sin[c_dt_f].dt.strftime('%d/%m/%Y').fillna('-')
 
                         df_det_sin['Vehículo'] = df_det_sin[c_mar_s].astype(str) + " " + df_det_sin[c_mod_s].astype(str)
-                        cols_nivel3 = [
-                            'Plaza_Ciudad', c_tal_s, c_sin_s, 'Vehículo', c_pza_s, c_est_s,
+                        cols_nivel4 = [
+                            'Estado_Plaza', 'Plaza_Ciudad', c_tal_s, c_sin_s, 'Vehículo', c_pza_s, c_est_s,
                             'F. Asignación', 'F. Confirmación', 'D_Asig_Conf',
                             'F. Envío', 'D_Conf_Env', 'F. Entrega', 'D_Env_Ent',
                             'F. Recibo', 'D_Ent_Rec', 'D_Ciclo_Total'
                         ]
-                        cols_nivel3 = [c for c in cols_nivel3 if c in df_det_sin.columns]
-                        df_por_siniestro = df_det_sin[cols_nivel3].rename(columns={
-                            'Plaza_Ciudad': 'Plaza', c_tal_s: 'Taller (CDR)', c_sin_s: 'Siniestro',
+                        cols_nivel4 = [c for c in cols_nivel4 if c in df_det_sin.columns]
+                        df_por_siniestro = df_det_sin[cols_nivel4].rename(columns={
+                            'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad', c_tal_s: 'Taller (CDR)', c_sin_s: 'Siniestro',
                             c_pza_s: 'Pieza', c_est_s: 'Estatus',
                             'D_Asig_Conf': 'Asig➔Conf (d)', 'D_Conf_Env': 'Conf➔Env (d)',
                             'D_Env_Ent': 'Env➔Ent (d)', 'D_Ent_Rec': 'Ent➔Rec (d)',
                             'D_Ciclo_Total': 'Total (d)'
-                        }).sort_values(by=['Plaza', 'Taller (CDR)', 'Siniestro'])
+                        }).sort_values(by=['Estado', 'Ciudad', 'Taller (CDR)', 'Siniestro'])
 
-                        sub_t1, sub_t2, sub_t3 = st.tabs([
-                            f"🌎 1. Resumen por Plaza / Estado ({len(df_por_plaza)})",
-                            f"🏢 2. Desglose por Taller CDR ({len(df_por_taller)})",
-                            f"🚗 3. Detalle por Siniestro y Pieza ({len(df_por_siniestro)})"
+                        sub_t1, sub_t2, sub_t3, sub_t4 = st.tabs([
+                            f"🗺️ 1. Resumen Ejecutivo por Estado ({len(df_por_estado)})",
+                            f"🏙️ 2. Resumen Ejecutivo por Ciudad ({len(df_por_ciudad)})",
+                            f"🏢 3. Desglose por Taller ({len(df_por_taller)})",
+                            f"🚗 4. Detalle por Siniestro ({len(df_por_siniestro)})"
                         ])
 
                         with sub_t1:
-                            st.dataframe(df_por_plaza, use_container_width=True, hide_index=True)
+                            st.dataframe(df_por_estado, use_container_width=True, hide_index=True)
                         with sub_t2:
-                            st.dataframe(df_por_taller, use_container_width=True, hide_index=True)
+                            st.dataframe(df_por_ciudad, use_container_width=True, hide_index=True)
                         with sub_t3:
+                            st.dataframe(df_por_taller, use_container_width=True, hide_index=True)
+                        with sub_t4:
                             st.dataframe(df_por_siniestro, use_container_width=True, hide_index=True)
 
-                        # Generador de PDF Ejecutivo Imprimible (Con las 3 tablas para auditoría BBVA)
+                        # Fecha ajustada a zona horaria de México (UTC-6) y sin hora en el encabezado
+                        tz_mx_rep = datetime.timezone(datetime.timedelta(hours=-6))
+                        ahora_mx_rep = datetime.datetime.now(tz_mx_rep)
+                        fecha_emision_str = ahora_mx_rep.strftime('%d/%m/%Y')
+
+                        # Generador de PDF Ejecutivo Imprimible (Con los 3 reportes solicitados)
                         pdf_sla = FPDF(orientation='L', unit='mm', format='A4')
                         pdf_sla.set_auto_page_break(auto=True, margin=10)
                         pdf_sla.add_page()
                         pdf_sla.set_font("Arial", 'B', 12)
-                        pdf_sla.cell(0, 7, limpiar_txt_pdf("PMR SERVICIOS AUTOMOTRICES - INFORME DE TIEMPOS Y SLA POR PLAZA"), ln=True, align='C')
+                        pdf_sla.cell(0, 7, limpiar_txt_pdf("PMR SERVICIOS AUTOMOTRICES - INFORME EJECUTIVO DE TIEMPOS Y DESEMPEÑO"), ln=True, align='C')
                         pdf_sla.set_font("Arial", '', 8)
-                        pdf_sla.cell(0, 5, limpiar_txt_pdf(f"Periodo: {periodo_rep_sel} | Aseguradora: {aseg_rep_sel} | Generado: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}"), ln=True, align='C')
+                        pdf_sla.cell(0, 5, limpiar_txt_pdf(f"Periodo: {periodo_rep_sel} | Aseguradora: {aseg_rep_sel} | Fecha de emisión: {fecha_emision_str}"), ln=True, align='C')
                         pdf_sla.ln(2)
 
-                        # Bloque 1 en PDF: Por Plaza
+                        # 1. RESUMEN EJECUTIVO POR ESTADO
                         pdf_sla.set_font("Arial", 'B', 9)
-                        pdf_sla.cell(0, 6, limpiar_txt_pdf("1. RESUMEN EJECUTIVO POR PLAZA / ESTADO"), ln=True)
+                        pdf_sla.cell(0, 6, limpiar_txt_pdf("1. RESUMEN EJECUTIVO POR ESTADO"), ln=True)
                         pdf_sla.set_fill_color(0, 51, 102); pdf_sla.set_text_color(255, 255, 255); pdf_sla.set_font("Arial", 'B', 7)
-                        cols_p1 = [
-                            ('Plaza / Ciudad', 38), ('Estado', 32), ('Piezas', 16), ('% Surtido', 20),
-                            ('1. Asig ➔ Conf (días)', 28), ('2. Conf ➔ Envío (días)', 28),
-                            ('3. Envío ➔ Entrega (días)', 30), ('4. Entrega ➔ Recibo (días)', 30),
-                            ('Ciclo Total (días)', 25), ('% Ef. 0-7 Días', 25)
+                        cols_p_est = [
+                            ('Estado', 55), ('Piezas', 18), ('Sin Confirmar', 22), ('% Surtido', 22),
+                            ('1. Asig ➔ Conf (días)', 26), ('2. Conf ➔ Envío (días)', 26),
+                            ('3. Envío ➔ Entrega (días)', 28), ('4. Entrega ➔ Recibo (días)', 28),
+                            ('Ciclo Total (días)', 24), ('% Ef. 0-7 Días', 24)
                         ]
-                        headers_cortos_p1 = ['Plaza', 'Estado', 'Piezas', '% Surtido', 'Asig->Conf (d)', 'Conf->Env (d)', 'Env->Ent (d)', 'Ent->Rec (d)', 'Ciclo Total', '% Ef. 0-7d']
-                        for idx_h, (_, w_c) in enumerate(cols_p1):
-                            pdf_sla.cell(w_c, 6, limpiar_txt_pdf(headers_cortos_p1[idx_h]), border=1, fill=True, align='C')
+                        headers_cortos_est = ['Estado', 'Piezas', 'Sin Conf.', '% Surtido', 'Asig->Conf (d)', 'Conf->Env (d)', 'Env->Ent (d)', 'Ent->Rec (d)', 'Ciclo Total', '% Ef. 0-7d']
+                        for idx_h, (_, w_c) in enumerate(cols_p_est):
+                            pdf_sla.cell(w_c, 6, limpiar_txt_pdf(headers_cortos_est[idx_h]), border=1, fill=True, align='C')
                         pdf_sla.ln()
                         pdf_sla.set_text_color(0, 0, 0); pdf_sla.set_font("Arial", '', 7)
-                        for _, r_p1 in df_por_plaza.iterrows():
-                            for col_k, w_c in cols_p1:
-                                pdf_sla.cell(w_c, 5, limpiar_txt_pdf(str(r_p1.get(col_k, ''))), border=1, align='C' if w_c < 32 else 'L')
+                        for _, r_pe in df_por_estado.iterrows():
+                            for col_k, w_c in cols_p_est:
+                                pdf_sla.cell(w_c, 5, limpiar_txt_pdf(str(r_pe.get(col_k, ''))), border=1, align='C' if w_c < 35 else 'L')
                             pdf_sla.ln()
 
+                        # 2. RESUMEN EJECUTIVO POR CIUDAD
                         pdf_sla.ln(4)
                         pdf_sla.set_font("Arial", 'B', 9)
-                        pdf_sla.cell(0, 6, limpiar_txt_pdf("2. DESGLOSE POR TALLER (CDR)"), ln=True)
+                        pdf_sla.cell(0, 6, limpiar_txt_pdf("2. RESUMEN EJECUTIVO POR CIUDAD"), ln=True)
                         pdf_sla.set_fill_color(0, 51, 102); pdf_sla.set_text_color(255, 255, 255); pdf_sla.set_font("Arial", 'B', 7)
-                        cols_p2 = [
-                            ('Plaza', 32), ('Taller (CDR)', 68), ('Piezas', 15), ('% Surtido', 18),
-                            ('1. Asig ➔ Conf (días)', 24), ('2. Conf ➔ Envío (días)', 24),
-                            ('3. Envío ➔ Entrega (días)', 24), ('4. Entrega ➔ Recibo (días)', 24),
-                            ('Ciclo Total (días)', 22), ('% Ef. 0-7 Días', 22)
+                        cols_p_ciu = [
+                            ('Estado', 34), ('Ciudad / Plaza', 38), ('Piezas', 16), ('% Surtido', 20),
+                            ('1. Asig ➔ Conf (días)', 27), ('2. Conf ➔ Envío (días)', 27),
+                            ('3. Envío ➔ Entrega (días)', 29), ('4. Entrega ➔ Recibo (días)', 29),
+                            ('Ciclo Total (días)', 26), ('% Ef. 0-7 Días', 26)
                         ]
-                        headers_cortos_p2 = ['Plaza', 'Taller (CDR)', 'Pzas', '% Surt', 'Asig->Conf', 'Conf->Env', 'Env->Ent', 'Ent->Rec', 'Total (d)', '% Ef 0-7d']
-                        for idx_h, (_, w_c) in enumerate(cols_p2):
-                            pdf_sla.cell(w_c, 6, limpiar_txt_pdf(headers_cortos_p2[idx_h]), border=1, fill=True, align='C')
+                        headers_cortos_ciu = ['Estado', 'Ciudad / Plaza', 'Piezas', '% Surtido', 'Asig->Conf (d)', 'Conf->Env (d)', 'Env->Ent (d)', 'Ent->Rec (d)', 'Ciclo Total', '% Ef. 0-7d']
+                        for idx_h, (_, w_c) in enumerate(cols_p_ciu):
+                            pdf_sla.cell(w_c, 6, limpiar_txt_pdf(headers_cortos_ciu[idx_h]), border=1, fill=True, align='C')
+                        pdf_sla.ln()
+                        pdf_sla.set_text_color(0, 0, 0); pdf_sla.set_font("Arial", '', 7)
+                        for _, r_pc in df_por_ciudad.iterrows():
+                            for col_k, w_c in cols_p_ciu:
+                                pdf_sla.cell(w_c, 5, limpiar_txt_pdf(str(r_pc.get(col_k, ''))), border=1, align='C' if w_c < 32 else 'L')
+                            pdf_sla.ln()
+
+                        # 3. DESGLOSE POR TALLER (CDR)
+                        pdf_sla.ln(4)
+                        pdf_sla.set_font("Arial", 'B', 9)
+                        pdf_sla.cell(0, 6, limpiar_txt_pdf("3. DESGLOSE POR TALLER (CDR)"), ln=True)
+                        pdf_sla.set_fill_color(0, 51, 102); pdf_sla.set_text_color(255, 255, 255); pdf_sla.set_font("Arial", 'B', 7)
+                        cols_p_tal = [
+                            ('Estado', 28), ('Ciudad', 28), ('Taller (CDR)', 56), ('Piezas', 14), ('% Surtido', 18),
+                            ('1. Asig ➔ Conf (días)', 22), ('2. Conf ➔ Envío (días)', 22),
+                            ('3. Envío ➔ Entrega (días)', 22), ('4. Entrega ➔ Recibo (días)', 22),
+                            ('Ciclo Total (días)', 20), ('% Ef. 0-7 Días', 20)
+                        ]
+                        headers_cortos_tal = ['Estado', 'Ciudad', 'Taller (CDR)', 'Pzas', '% Surt', 'Asig->Conf', 'Conf->Env', 'Env->Ent', 'Ent->Rec', 'Total (d)', '% Ef 0-7d']
+                        for idx_h, (_, w_c) in enumerate(cols_p_tal):
+                            pdf_sla.cell(w_c, 6, limpiar_txt_pdf(headers_cortos_tal[idx_h]), border=1, fill=True, align='C')
                         pdf_sla.ln()
                         pdf_sla.set_text_color(0, 0, 0); pdf_sla.set_font("Arial", '', 6.5)
-                        for _, r_p2 in df_por_taller.iterrows():
-                            for col_k, w_c in cols_p2:
-                                pdf_sla.cell(w_c, 5, limpiar_txt_pdf(str(r_p2.get(col_k, ''))[:38]), border=1, align='C' if w_c < 30 else 'L')
+                        for _, r_pt in df_por_taller.iterrows():
+                            for col_k, w_c in cols_p_tal:
+                                pdf_sla.cell(w_c, 5, limpiar_txt_pdf(str(r_pt.get(col_k, ''))[:34]), border=1, align='C' if w_c < 26 else 'L')
                             pdf_sla.ln()
 
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_sla:
@@ -890,9 +922,9 @@ def abrir_popup_monitor():
 
                         c_bs1, c_bs2 = st.columns(2)
                         c_bs1.download_button(
-                            label="🖨️ Descargar Informe Ejecutivo de Tiempos (PDF)",
+                            label="🖨️ Descargar Informe Ejecutivo (Estado / Ciudad / Taller) en PDF",
                             data=bytes_pdf_sla,
-                            file_name=f"Informe_Tiempos_SLA_PMR_{datetime.datetime.now().strftime('%d%m%Y_%H%M')}.pdf",
+                            file_name=f"Informe_Tiempos_PMR_{ahora_mx_rep.strftime('%d%m%Y')}.pdf",
                             mime="application/pdf",
                             type="primary",
                             use_container_width=True
@@ -900,7 +932,7 @@ def abrir_popup_monitor():
                         c_bs2.download_button(
                             label="📥 Descargar Detalle por Siniestro (CSV / Excel)",
                             data=df_por_siniestro.to_csv(index=False).encode('utf-8-sig'),
-                            file_name=f"Detalle_Siniestros_Tiempos_PMR_{datetime.datetime.now().strftime('%d%m%Y_%H%M')}.csv",
+                            file_name=f"Detalle_Siniestros_Tiempos_PMR_{ahora_mx_rep.strftime('%d%m%Y')}.csv",
                             mime="text/csv",
                             use_container_width=True
                         )
@@ -5710,7 +5742,7 @@ elif vista_actual == "🛠️ Cuartel General":
                         pdf_rep.set_font("Arial", 'B', 12)
                         pdf_rep.cell(0, 8, "REPORTE DE COTIZACIONES PENDIENTES - PMR HUB AI", ln=True, align='C')
                         pdf_rep.set_font("Arial", '', 8)
-                        pdf_rep.cell(0, 5, f"Fecha de emision: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')}", ln=True, align='C')
+                        pdf_rep.cell(0, 5, f"Fecha de emision: {datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-6))).strftime('%d/%m/%Y')}", ln=True, align='C')
                         pdf_rep.ln(4)
 
                         pdf_rep.set_fill_color(0, 51, 102)

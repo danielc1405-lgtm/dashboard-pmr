@@ -169,7 +169,7 @@ def limpiar_modelo_comercial(marca, vehiculo_raw, ano):
         r'\bAUT\b', r'\bAUTOMATICO\b', r'\b\d+P\b', r'\b\d+PTS\b', r'\bCA\b', r'\bMP3\b',
         r'\bCD\b', r'\bBA\b', r'\bABS\b', r'\bPICKUP\b', r'\bPACK\b', r'\bEX\b', r'\bLX\b',
         r'\bZEN\b', r'\bADVANCE\b', r'\bHB\b', r'\bSEDAN\b', r'\bEL\b', r'\bNUEVO\b', r'\bLUJO\b',
-        r'\bCHEVROLET\b', r'\bVOLKSWAGEN\b', r'\bNISSAN\b', r'\bKIA\b', r'\bMAZDA\b', r'\bRENAULT\b', r'\bHYUNDAI\b'
+        r'\bCHEVROLET\b', r'\bVOLKSWAGEN\b', r'\bNISSAN\b', r'\bKIA\b', r'\bMAZDA\b', r'\bRENAULT\b', r'\bHYUNDAI\b', r'\bHONDA\b'
     ]
     for b in basura:
         v = re.sub(b, ' ', v)
@@ -262,65 +262,173 @@ def buscar_en_historial(registros_hist, desc_raw, modelo_limpio):
     if not registros_hist or not modelo_limpio:
         return 0.0
     mod_up = str(modelo_limpio).upper().strip()
+    mod_sin_guion = mod_up.replace("-", "")
     d_raw_up = str(desc_raw).upper().strip()
     precios_exactos = []
     for p_txt, m_txt, val in registros_hist:
-        if mod_up in m_txt and d_raw_up == p_txt:
+        m_clean = m_txt.replace("-", "")
+        if (mod_up in m_txt or mod_sin_guion in m_clean) and d_raw_up == p_txt:
             precios_exactos.append(val)
     if precios_exactos:
         return round(sum(precios_exactos) / len(precios_exactos))
     return 0.0
 
+def descubrir_modelos_gemini(gemini_key):
+    """Consulta a Google AI Studio exactamente qué modelos están activos para tu API Key."""
+    preferidos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    if not gemini_key:
+        return []
+    try:
+        r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}", timeout=10)
+        if r.status_code == 200:
+            modelos_api = []
+            for m in r.json().get("models", []):
+                metodos = m.get("supportedGenerationMethods", [])
+                if "generateContent" in metodos:
+                    nom = m.get("name", "").replace("models/", "")
+                    if "gemini" in nom and "vision" not in nom and "embedding" not in nom:
+                        modelos_api.append(nom)
+            ordenados = [p for p in preferidos if p in modelos_api]
+            for m_rest in modelos_api:
+                if m_rest not in ordenados:
+                    ordenados.append(m_rest)
+            return ordenados[:3]
+        else:
+            print(f"   ⚠️ [Diagnóstico API Key] Error HTTP {r.status_code}: {r.text[:180]}")
+    except Exception as e:
+        print(f"   ⚠️ [Diagnóstico API Key] Excepción: {e}")
+    return preferidos[:2]
+
 def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc_usd, gemini_key, portales_cfg):
+    """
+    Capa 1: Consulta a Gemini AI probando primero con Google Search en vivo y,
+    si el tier gratuito rechaza la herramienta, usa conocimiento directo de mercado automotriz.
+    Imprime en consola qué modelo respondió y qué encontró.
+    """
     resultados_ia = {}
-    if not gemini_key or not lista_partidas_query:
+    if not gemini_key:
+        print("   ⚠️ [Capa 1 - IA]: No hay GEMINI_API_KEY guardada en BD_CONFIG_BOTS. Saltando a Capa 2 (Web Directa)...")
         return resultados_ia
 
+    modelos_disponibles = descubrir_modelos_gemini(gemini_key)
+    print(f"   🤖 [Capa 1 - IA]: Modelos detectados en tu cuenta: {modelos_disponibles}")
+
     lista_portales_txt = ", ".join([f"{p['nombre']} ({p['url']})" for p in portales_cfg])
-    url_gem = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}"
 
     for i in range(0, len(lista_partidas_query), 8):
         lote = lista_partidas_query[i:i+8]
-        lineas_prompt = "\n".join([f"- ID {item['idx']}: {item['q']} (Portal: {item['desc']})" for item in lote])
+        lineas_prompt = "\n".join([f"- ID {item['idx']}: {item['q']} (Descripción portal: {item['desc']})" for item in lote])
         prompt = (
-            f"Actúa como cotizador senior de refacciones automotrices en México y EE.UU.\n"
-            f"Vehículo: {marca} {modelo} ({ano}) | VIN: {vin}\n"
+            f"Actúa como cotizador senior de refacciones de colisión en México y EE.UU.\n"
+            f"Vehículo: {marca} {modelo} (Año {ano}) | VIN: {vin}\n"
             f"Tipo de cambio USD a MXN: {tc_usd}\n"
-            f"Buscadores de referencia: Radec (radec.com.mx), Mercado Libre, eBay, PartsSouq, PartsLink24. ({lista_portales_txt})\n\n"
-            f"Para cada una de las siguientes piezas, devuelve los costos estimados en pesos mexicanos (MXN):\n"
-            f"1) 'orig': Precio pieza original / OEM nueva.\n"
-            f"2) 'semi': Precio pieza usada / seminueva.\n"
-            f"3) 'gen': Precio pieza genérica / aftermarket nueva.\n"
-            f"Piezas:\n{lineas_prompt}\n\n"
-            f"Devuelve ÚNICAMENTE un arreglo JSON válido (sin formato de bloque de código markdown adicional ni explicaciones):\n"
-            f'[{{"idx": numero_id, "orig": entero, "semi": entero, "gen": entero, "fuente": "RADEC o ML o EB o PARTSOUQ", "link": "url_referencia"}}]'
+            f"Portales de referencia: Radec (radec.com.mx), Mercado Libre México, eBay Motors, PartSouq, PartsLink24, PartsNow ({lista_portales_txt}).\n\n"
+            f"Para cada una de las siguientes piezas, entrega precios reales de mercado en pesos mexicanos (MXN, enteros mayores a 0):\n"
+            f"- 'orig': Precio pieza ORIGINAL / OEM nueva.\n"
+            f"- 'semi': Precio pieza USADA / SEMINUEVA en Mercado Libre o eBay.\n"
+            f"- 'gen': Precio pieza GENÉRICA nueva (Radec / TYC / Depo / Tong Yang) si existe para esta pieza.\n\n"
+            f"Piezas a cotizar:\n{lineas_prompt}\n\n"
+            f"Responde ÚNICAMENTE con un arreglo JSON válido con este formato exacto:\n"
+            f'[{{"idx": numero_id, "orig": entero_mxn, "semi": entero_mxn, "gen": entero_mxn, "fuente": "RAD o ML o EB o AGEN", "link": "url_directa_o_vacio"}}]'
         )
-        try:
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "tools": [{"google_search": {}}]
-            }
-            resp = requests.post(url_gem, json=payload, timeout=25)
-            if resp.status_code == 200:
-                cand = resp.json().get("candidates", [])
-                if cand:
-                    partes_txt = cand[0].get("content", {}).get("parts", [])
-                    texto_completo = "".join([p.get("text", "") for p in partes_txt])
-                    m_arr = re.search(r'\[.*\]', texto_completo, re.DOTALL)
-                    if m_arr:
-                        arr_json = json.loads(m_arr.group(0))
-                        for obj in arr_json:
-                            idx_k = int(obj.get("idx", -1))
-                            resultados_ia[idx_k] = {
-                                "orig": round(float(obj.get("orig", 0) or 0)),
-                                "semi": round(float(obj.get("semi", 0) or 0)),
-                                "gen": round(float(obj.get("gen", 0) or 0)),
-                                "fuente": str(obj.get("fuente", "RADEC")).upper(),
-                                "link": str(obj.get("link", ""))
-                            }
-        except Exception as e_g:
-            print(f"     ⚠️ Aviso en consulta IA: {e_g}")
+
+        exito_lote = False
+        for mod_name in modelos_disponibles:
+            if exito_lote:
+                break
+            for usar_search in [True, False]:
+                if exito_lote:
+                    break
+                try:
+                    url_gem = f"https://generativelanguage.googleapis.com/v1beta/models/{mod_name}:generateContent?key={gemini_key}"
+                    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+                    if usar_search:
+                        payload["tools"] = [{"google_search": {}}]
+
+                    resp = requests.post(url_gem, json=payload, timeout=25)
+                    if resp.status_code == 200:
+                        cand = resp.json().get("candidates", [])
+                        if cand:
+                            partes_txt = cand[0].get("content", {}).get("parts", [])
+                            texto_completo = "".join([p.get("text", "") for p in partes_txt])
+                            m_arr = re.search(r'\[.*\]', texto_completo, re.DOTALL)
+                            if m_arr:
+                                arr_json = json.loads(m_arr.group(0))
+                                encontrados_cnt = 0
+                                for obj in arr_json:
+                                    idx_k = int(obj.get("idx", -1))
+                                    o_v = round(float(obj.get("orig", 0) or 0))
+                                    s_v = round(float(obj.get("semi", 0) or 0))
+                                    g_v = round(float(obj.get("gen", 0) or 0))
+                                    if o_v > 0 or s_v > 0 or g_v > 0:
+                                        encontrados_cnt += 1
+                                    resultados_ia[idx_k] = {
+                                        "orig": o_v,
+                                        "semi": s_v,
+                                        "gen": g_v,
+                                        "fuente": str(obj.get("fuente", "ML")).upper(),
+                                        "link": str(obj.get("link", ""))
+                                    }
+                                if encontrados_cnt > 0:
+                                    modo_lbl = "con Google Search" if usar_search else "modo Estimación Experta"
+                                    print(f"   ✅ [Capa 1 - IA]: {mod_name} ({modo_lbl}) cotizó {encontrados_cnt}/{len(lote)} piezas.")
+                                    exito_lote = True
+                    else:
+                        err_short = resp.text[:120].replace("\n", " ")
+                        print(f"   ℹ️ [Capa 1 - {mod_name} search={usar_search}]: HTTP {resp.status_code} ({err_short})")
+                except Exception as e_g:
+                    print(f"   ℹ️ [Capa 1 - {mod_name}]: {e_g}")
+
     return resultados_ia
+
+def buscar_web_playwright_respaldo(page_buscador, query, marca, modelo):
+    """
+    Capa 2: Si alguna pieza quedó en $0, usa el navegador Chromium para buscar en DuckDuckGo HTML
+    y Bing precios publicados en Mercado Libre, Radec y eBay (probando modelo con y sin guion, ej. BR-V y BRV).
+    """
+    precios_orig, precios_semi, precios_gen = [], [], []
+    link_hallado = ""
+
+    # Si el modelo tiene guion (ej. BR-V, CR-V, HR-V, CX-5), buscamos también sin guion (BRV, CRV)
+    variantes_q = [query]
+    if "-" in modelo:
+        variantes_q.append(query.replace(modelo, modelo.replace("-", "")))
+
+    for q_var in variantes_q:
+        try:
+            url_ddg = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q_var + ' precio pesos mercadolibre')}"
+            page_buscador.goto(url_ddg, timeout=12000, wait_until="domcontentloaded")
+            time.sleep(0.8)
+            bloques = page_buscador.evaluate("""
+                () => Array.from(document.querySelectorAll('.result, .web-result'))
+                    .map(el => ({
+                        txt: (el.innerText || '').toUpperCase(),
+                        href: (el.querySelector('a.result__a') ? el.querySelector('a.result__a').href : '')
+                    }))
+                    .slice(0, 12)
+            """)
+            for b in bloques:
+                Montos = re.findall(r'\$\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,5})', b['txt'])
+                for m in Montos:
+                    val = float(m.replace(',', ''))
+                    if 250 <= val <= 65000:
+                        if not link_hallado and "http" in b['href']:
+                            link_hallado = b['href']
+                        if any(k in b['txt'] for k in ["USADO", "USADA", "SEMINUEV", "YONKE"]):
+                            precios_semi.append(val)
+                        elif any(k in b['txt'] for k in ["ORIGINAL", "OEM", "GENUIN", "AGENCIA"]):
+                            precios_orig.append(val)
+                        else:
+                            precios_gen.append(val)
+            if precios_orig or precios_semi or precios_gen:
+                break
+        except Exception:
+            pass
+
+    p_o = round(sum(sorted(precios_orig)[:3]) / len(precios_orig[:3])) if precios_orig else 0
+    p_s = round(sum(sorted(precios_semi)[:3]) / len(precios_semi[:3])) if precios_semi else 0
+    p_g = round(sum(sorted(precios_gen)[:3]) / len(precios_gen[:3])) if precios_gen else 0
+    return p_o, p_s, p_g, link_hallado
 
 def obtener_ws_cotizaciones(doc):
     try:
@@ -396,6 +504,9 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
         ws_cot = obtener_ws_cotizaciones(doc)
         registros_hist = cargar_mapa_historial_completo(doc)
 
+        key_len = len(cfg.get("GEMINI_API_KEY", ""))
+        print(f"🔑 Estado Gemini API Key en BD_CONFIG_BOTS: {'CONFIGURADA (' + str(key_len) + ' caracteres)' if key_len > 10 else 'VACÍA / NO CONFIGURADA'}")
+
         filas_todas = ws_cot.get_all_values()
         filas_sanas = [ENCABEZADOS_COT]
         existentes = set()
@@ -425,8 +536,12 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=modo_headless, args=["--no-sandbox"])
-        ctx = browser.new_context(viewport={"width": 1366, "height": 900})
+        ctx = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            viewport={"width": 1366, "height": 900}
+        )
         page = ctx.new_page()
+        page_buscador = ctx.new_page()
         page.on("dialog", lambda d: d.accept())
 
         try:
@@ -541,6 +656,7 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
 
                     print(f"  ✅ Cotizando {len(partidas_a_cotizar)} pieza(s) | Auto: {marca_clean} {mod_comercial} ({ano_clean}) | Taller: {taller_real}")
 
+                    # CAPA 1: Gemini AI
                     precios_ia_lote = cotizar_lote_con_gemini_ai(
                         marca_clean, mod_comercial, ano_clean, detalle.get('vin', ''),
                         partidas_a_cotizar, cfg.get("TC_USD", 20.50), cfg.get("GEMINI_API_KEY", ""),
@@ -558,31 +674,39 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                         p_noorig = datos_ia.get("semi", 0)
                         p_gen = datos_ia.get("gen", 0)
                         link_directo = datos_ia.get("link", "")
-                        if not link_directo or not link_directo.startswith("http"):
-                            link_directo = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q.replace(' ', '-'))}"
-                        fuente_ia = datos_ia.get("fuente", "RADEC").upper()
+                        fuente_ia = datos_ia.get("fuente", "ML").upper()
 
+                        # CAPA 2: Si Capa 1 devolvió $0, buscar con navegador Chromium en DuckDuckGo
+                        if p_orig == 0 and p_noorig == 0 and p_gen == 0:
+                            print(f"     🌐 [Capa 2 - Web] Buscando '{q}' en portales...")
+                            p_orig, p_noorig, p_gen, link_web = buscar_web_playwright_respaldo(page_buscador, q, marca_clean, mod_comercial)
+                            if link_web:
+                                link_directo = link_web
+
+                        if not link_directo or not link_directo.startswith("http"):
+                            q_sin_guion = q.replace(mod_comercial, mod_comercial.replace("-", ""))
+                            link_directo = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_sin_guion.replace(' ', '-'))}"
+
+                        # CAPA 3: Historial exacto en tu base
                         p_hist = buscar_en_historial(registros_hist, desc_p, mod_comercial)
                         flete = estimar_flete(desc_p, ciudad_real, estado_real)
 
                         if p_gen > 0:
-                            costo, origen = p_gen, "NO ORIGINAL"
+                            costo, origen, fuente_cod = p_gen, "NO ORIGINAL", ("RAD" if "RAD" in fuente_ia else "ML")
                         elif p_noorig > 0:
-                            costo, origen = p_noorig, "SEMINUEVA"
+                            costo, origen, fuente_cod = p_noorig, "SEMINUEVA", ("EB" if "EB" in fuente_ia else "ML")
                         elif p_orig > 0:
-                            costo, origen = p_orig, "ORIGINAL"
+                            costo, origen, fuente_cod = p_orig, "ORIGINAL", "AGEN"
                         elif p_hist > 0:
-                            costo, origen, fuente_ia = p_hist, "NO ORIGINAL", "LOC"
+                            costo, origen, fuente_cod = p_hist, "NO ORIGINAL", "LOC"
                         else:
-                            costo, origen, fuente_ia = 0, "NO ORIGINAL", "MAN"
+                            costo, origen, fuente_cod = 0, "NO ORIGINAL", "MAN"
 
                         sug = round((costo + flete) * 1.35) if costo > 0 else 0
-                        # Generar código HUB basado en las primeras 5 letras del proveedor (ej. HUBRADEC -> HUBRAD)
-                        tag_prov = re.sub(r'[^A-Z]', '', fuente_ia)[:5]
-                        if not tag_prov: tag_prov = "RAD"
+                        tag_prov = re.sub(r'[^A-Z]', '', fuente_cod)[:4] or "RAD"
                         codigo_hub_gen = f"HUB{tag_prov}{random.randint(100, 999)}"
 
-                        print(f"     💰 #{idx_p+1} {desc_p} ➔ Orig: ${p_orig} | Semi: ${p_noorig} | Gen: ${p_gen} | Hist: ${p_hist} ➔ Sug: ${sug} ({fuente_ia})")
+                        print(f"     💰 #{idx_p+1} {desc_p} ({q}) ➔ Orig: ${p_orig} | Semi: ${p_noorig} | Gen: ${p_gen} | Hist: ${p_hist} ➔ Sug: ${sug} ({codigo_hub_gen})")
 
                         nuevas.append([
                             f"COT-{num_sin}-{idx_p+1}", ahora, num_sin, "1",
@@ -590,7 +714,7 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                             taller_real, ciudad_real, estado_real, detalle.get('fecha_fin', ''),
                             idx_p, item_p['cantidad'], desc_p, q,
                             p_orig, p_noorig, p_gen, p_hist,
-                            flete, fuente_ia, origen, costo,
+                            flete, fuente_cod, origen, costo,
                             35, sug, 0, sug,
                             codigo_hub_gen, link_directo, "FALSE", "PENDIENTE"
                         ])
@@ -732,6 +856,8 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                         print(f"   ✔ Partida #{idx_fila+1} llenada: ${it['precio_int']} | {it['origen_txt']} | {it['codigo_hub']} | Fecha: {fecha_usada}")
                         time.sleep(0.15)
 
+                    page.screenshot(path="evidencia_antes_grabar.png", full_page=True)
+
                     btn = frame.locator("input[name='btnSubmit'][value='Grabar']")
                     if btn.count() > 0:
                         btn.first.click()
@@ -754,6 +880,8 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                                     )
                                 btn.first.click()
                                 time.sleep(3.5)
+
+                        page.screenshot(path="evidencia_despues_grabar.png", full_page=True)
 
                         if not ultimo_dialogo["msg"]:
                             print(f"   💾 Siniestro {sin} GRABADO exitosamente en el portal.")

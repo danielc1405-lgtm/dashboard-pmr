@@ -50,19 +50,26 @@ st.markdown("""
             background-color: #000000 !important; 
         }
 
-        /* 3. Encabezado Superior pegado al tope (sin espacio vacío) y fijo al bajar */
-        div[data-testid="stHorizontalBlock"]:has([data-testid="stRadio"]):not(:has([data-testid="stForm"])) {
-            position: -webkit-sticky !important;
-            position: sticky !important;
+        /* 3. Encabezado Superior 100% FIJO al hacer scroll hacia abajo (Incluye Menú y Botón Guardar) */
+        div[data-testid="stHorizontalBlock"]:has(button[kind="primary"]):has([data-testid="stRadio"]) {
+            position: fixed !important;
             top: 0px !important;
-            z-index: 99999 !important;
+            left: 0.8rem !important;
+            right: 0.8rem !important;
+            z-index: 999990 !important;
             background-color: #0B0E14 !important;
-            padding: 8px 14px !important;
-            border-radius: 8px !important;
+            padding: 8px 16px !important;
+            border-radius: 0px 0px 10px 10px !important;
             border: 1px solid #1F2430 !important;
-            box-shadow: 0px 6px 15px rgba(0, 0, 0, 0.85) !important;
-            margin-top: -14px !important;
-            margin-bottom: 8px !important;
+            border-top: none !important;
+            box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.92) !important;
+            margin-top: 0px !important;
+        }
+        /* Espacio superior automático para que el encabezado fijo nunca tape los títulos ni las tablas */
+        .block-container,
+        div[data-testid="stMainBlockContainer"],
+        div[data-testid="stAppViewBlockContainer"] {
+            padding-top: 6.8rem !important;
         }
 
         /* 4. Menú de Navegación (st.radio) en una sola línea */
@@ -423,19 +430,22 @@ def abrir_popup_monitor():
             st.caption(f"{st.session_state.get('temp_bot_status', '')} | {st.session_state.get('temp_bot_resumen', '')}")
 
     # =========================================================================
-    # PESTAÑA 2: CENTRO DE REPORTERÍA (CON LANZADOR DE REPORTES IMPRIMIBLES)
+    # PESTAÑA 2: CENTRO DE REPORTERÍA (CON CALENDARIO DE INICIO Y FIN)
     # =========================================================================
     with tab_reporte:
         if 'reporte_activo_popup' not in st.session_state:
-            st.session_state['reporte_activo_popup'] = "Reporte Operativo"
+            st.session_state['reporte_activo_popup'] = "Informe de Tiempos y SLA por Plaza (Auditoría BBVA)"
+
+        tz_mx_cal = datetime.timezone(datetime.timedelta(hours=-6))
+        hoy_cal_date = datetime.datetime.now(tz_mx_cal).date()
 
         with st.container(border=True):
             st.markdown("**1. Lanzador de Reportes Ejecutivos**")
-            c_sel_rep, c_aseg_rep, c_per_rep, c_btn_rep = st.columns([2.2, 1.1, 1.3, 1.0], vertical_alignment="bottom")
+            c_sel_rep, c_aseg_rep, c_ini_rep, c_fin_rep, c_btn_rep = st.columns([2.0, 0.9, 1.0, 1.0, 1.0], vertical_alignment="bottom")
             with c_sel_rep:
                 tipo_rep_sel = st.selectbox(
                     "Selecciona el Reporte:",
-                    ["Reporte Operativo", "Informe de Tiempos y SLA por Plaza (Auditoría BBVA)"],
+                    ["Informe de Tiempos y SLA por Plaza (Auditoría BBVA)", "Reporte Operativo"],
                     key="sel_tipo_rep_pop"
                 )
             with c_aseg_rep:
@@ -444,11 +454,19 @@ def abrir_popup_monitor():
                     ["MULTI", "GNP", "TODAS"],
                     key="sel_aseg_rep_pop"
                 )
-            with c_per_rep:
-                periodo_rep_sel = st.selectbox(
-                    "Periodo de Asignación:",
-                    ["Sep + Oct 2026 (Evaluación BBVA)", "Todos (Desde Sep 2026)", "Septiembre 2026", "Octubre 2026", "Noviembre 2026", "Histórico Completo"],
-                    key="sel_per_rep_pop"
+            with c_ini_rep:
+                fecha_ini_rep = st.date_input(
+                    "📅 Fecha Inicio:",
+                    value=datetime.date(2026, 9, 1),
+                    format="DD/MM/YYYY",
+                    key="cal_ini_rep_pop"
+                )
+            with c_fin_rep:
+                fecha_fin_rep = st.date_input(
+                    "📅 Fecha Fin:",
+                    value=datetime.date(2026, 10, 31),
+                    format="DD/MM/YYYY",
+                    key="cal_fin_rep_pop"
                 )
             with c_btn_rep:
                 if st.button("📊 Ejecutar Reporte", type="primary", use_container_width=True, key="btn_ejecutar_rep_pop"):
@@ -537,14 +555,13 @@ def abrir_popup_monitor():
                     df_rep = df_rep[columnas_solicitadas].sort_values(by=['COMPAÑÍA', 'ESTATUS'])
                     st.dataframe(df_rep, use_container_width=True, hide_index=True)
 
-                    # Generar PDF Imprimible y CSV
                     pdf_op = FPDF(orientation='L', unit='mm', format='A4')
                     pdf_op.set_auto_page_break(auto=True, margin=10)
                     pdf_op.add_page()
                     pdf_op.set_font("Arial", 'B', 11)
                     pdf_op.cell(0, 7, limpiar_txt_pdf("PMR SERVICIOS AUTOMOTRICES - REPORTE OPERATIVO"), ln=True, align='C')
                     pdf_op.set_font("Arial", '', 8)
-                    pdf_op.cell(0, 5, limpiar_txt_pdf(f"Fecha: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} | Partidas: {len(df_rep)}"), ln=True, align='C')
+                    pdf_op.cell(0, 5, limpiar_txt_pdf(f"Fecha: {hoy_cal_date.strftime('%d/%m/%Y')} | Partidas: {len(df_rep)}"), ln=True, align='C')
                     pdf_op.ln(2)
                     pdf_op.set_fill_color(0, 51, 102); pdf_op.set_text_color(255, 255, 255); pdf_op.set_font("Arial", 'B', 7)
                     cols_pdf_op = [('COMPAÑÍA', 16), ('ESTATUS', 28), ('SINIESTRO/PEDIDO', 25), ('CDR', 48), ('MODELO', 32), ('PIEZA', 55), ('PROVEEDOR', 35), ('FECHA VENCIMIENTO', 22)]
@@ -564,7 +581,7 @@ def abrir_popup_monitor():
                     c_dl1.download_button(
                         label="🖨️ Descargar Reporte Operativo (PDF)",
                         data=bytes_pdf_op,
-                        file_name=f"Reporte_Operativo_PMR_{datetime.datetime.now().strftime('%d%m%Y_%H%M')}.pdf",
+                        file_name=f"Reporte_Operativo_PMR_{hoy_cal_date.strftime('%d%m%Y')}.pdf",
                         mime="application/pdf",
                         type="primary",
                         use_container_width=True
@@ -572,7 +589,7 @@ def abrir_popup_monitor():
                     c_dl2.download_button(
                         label="📥 Descargar Reporte Operativo (CSV / Excel)",
                         data=df_rep.to_csv(index=False).encode('utf-8-sig'),
-                        file_name=f"Reporte_Operativo_PMR_{datetime.datetime.now().strftime('%d%m%Y_%H%M')}.csv",
+                        file_name=f"Reporte_Operativo_PMR_{hoy_cal_date.strftime('%d%m%Y')}.csv",
                         mime="text/csv",
                         use_container_width=True
                     )
@@ -583,10 +600,11 @@ def abrir_popup_monitor():
         # OPCIÓN B: INFORME DETALLADO DE TIEMPOS Y SLA POR PLAZA / TALLER / SINIESTRO
         # ---------------------------------------------------------------------
         else:
-            st.markdown("### ⏱️ Informe Detallado de Tiempos Logísticos y Eficiencia (0 a 7 Días)")
-            st.caption("Desglose por **Plaza (Ciudad/Estado)** ➔ **Taller (CDR)** ➔ **Siniestro**: *Asignación vs Confirmación*, *Confirmación vs Envío*, *Envío vs Entrega* y *Entrega vs Recibo*.")
+            rango_str_titulo = f"{fecha_ini_rep.strftime('%d/%m/%Y')} al {fecha_fin_rep.strftime('%d/%m/%Y')}"
+            st.markdown(f"### ⏱️ Informe Detallado de Tiempos Logísticos ({rango_str_titulo})")
+            st.caption("Audita con exactitud qué siniestros y piezas están incluidos en el periodo seleccionado, sus fechas por etapa y cuáles cumplen o exceden el rango de 0 a 7 días.")
 
-            with st.spinner("Calculando tiempos entre etapas por Plaza, Taller y Siniestro..."):
+            with st.spinner("Calculando tiempos entre etapas por Estado, Ciudad, Taller y Siniestro..."):
                 df_u_sla = fetch_seguro_pop("BD_UNIFICADA")
                 df_h_sla = fetch_seguro_pop("BD_HISTORICO")
                 df_t_sla = fetch_seguro_pop("BD_TALLERES")
@@ -603,6 +621,7 @@ def abrir_popup_monitor():
                     c_mar_s = get_c_pop(df_total_sla, ["MARCA"])
                     c_mod_s = get_c_pop(df_total_sla, ["MODELO", "VEH"])
                     c_pza_s = get_c_pop(df_total_sla, ["DESCRIPCI", "REFACCI"])
+                    c_can_s = get_c_pop(df_total_sla, ["CANTIDAD", "CANT"])
                     c_est_s = get_c_pop(df_total_sla, ["ESTATUS", "STATUS"], excluidos=["ENV", "PAGO"])
                     c_ase_s = get_c_pop(df_total_sla, ["ASEGURADORA"])
 
@@ -616,7 +635,12 @@ def abrir_popup_monitor():
                     if c_sin_s and c_pza_s:
                         df_total_sla = df_total_sla.drop_duplicates(subset=[c_sin_s, c_pza_s], keep='first').copy()
 
-                    # Mapear Ciudad y Estado desde BD_TALLERES
+                    # Cantidad numérica real (para cuadrar contra conteo de piezas de aseguradora)
+                    if c_can_s and c_can_s in df_total_sla.columns:
+                        df_total_sla['_Cant_Num'] = pd.to_numeric(df_total_sla[c_can_s], errors='coerce').fillna(1).clip(lower=1).astype(int)
+                    else:
+                        df_total_sla['_Cant_Num'] = 1
+
                     dict_ciudad_t = {}
                     dict_estado_t = {}
                     if not df_t_sla.empty:
@@ -641,7 +665,7 @@ def abrir_popup_monitor():
                             elif any(k in t_up for k in ["POTOSI", "SLP", "VALLES"]): ciu, edo = "SAN LUIS POTOSI", "SAN LUIS POTOSI"
                             elif "MERIDA" in t_up: ciu, edo = "MERIDA", "YUCATAN"
                             elif "AGUASCALIENTES" in t_up: ciu, edo = "AGUASCALIENTES", "AGUASCALIENTES"
-                            elif any(k in t_up for k in ["MONTERREY", "SAN NICOLAS", "GUADALUPE", "APODACA", "SANTA CATARINA", "SAN PEDRO", "CUMBRES", "MITRAS", " Gonzalitos".upper()]): ciu, edo = "MONTERREY", "NUEVO LEON"
+                            elif any(k in t_up for k in ["MONTERREY", "SAN NICOLAS", "GUADALUPE", "APODACA", "SANTA CATARINA", "SAN PEDRO", "CUMBRES", "MITRAS", "GONZALITOS"]): ciu, edo = "MONTERREY", "NUEVO LEON"
                             else: ciu = "MONTERREY / LOCAL"
                         if not edo:
                             edo = "NUEVO LEON" if "MONTERREY" in ciu else "S/D"
@@ -649,11 +673,9 @@ def abrir_popup_monitor():
 
                     df_total_sla[['Plaza_Ciudad', 'Estado_Plaza']] = df_total_sla[c_tal_s].apply(inferir_plaza)
 
-                    # Filtrar Aseguradora
                     if c_ase_s and aseg_rep_sel != "TODAS":
                         df_total_sla = df_total_sla[df_total_sla[c_ase_s].astype(str).str.upper().str.contains(aseg_rep_sel, na=False)].copy()
 
-                    # Parsear fechas con parse_dt_safe_op
                     def parse_dt_safe_op(val):
                         if pd.isna(val) or str(val).strip() == '': return pd.NaT
                         val_str = str(val).lower().replace('-', '/')
@@ -678,7 +700,6 @@ def abrir_popup_monitor():
                     df_total_sla['DT_Rec'] = safe_apply_date(df_total_sla, c_f_rec)
                     df_total_sla['DT_Fac'] = safe_apply_date(df_total_sla, c_f_fac)
 
-                    # Si existe columna separada de Entrega o registros en BD_RUTAS, rescatamos fecha de entrega física
                     dict_entrega_rutas = {}
                     if not df_r_sla.empty:
                         cr_sin = get_c_pop(df_r_sla, ["SINIESTRO"])
@@ -703,20 +724,13 @@ def abrir_popup_monitor():
                             return r.get('DT_Rec', pd.NaT)
                         df_total_sla['DT_Ent'] = df_total_sla.apply(resolver_dt_entrega, axis=1)
 
-                    # Filtrar por Periodo seleccionado
+                    # Filtrar exactamente por el rango de los dos calendarios (Fecha Inicio a Fecha Fin)
                     df_total_sla = df_total_sla[df_total_sla['DT_Asig'].notna()].copy()
-                    if periodo_rep_sel == "Sep + Oct 2026 (Evaluación BBVA)":
-                        df_total_sla = df_total_sla[(df_total_sla['DT_Asig'] >= pd.to_datetime('2026-09-01')) & (df_total_sla['DT_Asig'] <= pd.to_datetime('2026-10-31'))].copy()
-                    elif periodo_rep_sel == "Todos (Desde Sep 2026)":
-                        df_total_sla = df_total_sla[df_total_sla['DT_Asig'] >= pd.to_datetime('2026-09-01')].copy()
-                    elif periodo_rep_sel == "Septiembre 2026":
-                        df_total_sla = df_total_sla[(df_total_sla['DT_Asig'] >= pd.to_datetime('2026-09-01')) & (df_total_sla['DT_Asig'] <= pd.to_datetime('2026-09-30'))].copy()
-                    elif periodo_rep_sel == "Octubre 2026":
-                        df_total_sla = df_total_sla[(df_total_sla['DT_Asig'] >= pd.to_datetime('2026-10-01')) & (df_total_sla['DT_Asig'] <= pd.to_datetime('2026-10-31'))].copy()
-                    elif periodo_rep_sel == "Noviembre 2026":
-                        df_total_sla = df_total_sla[(df_total_sla['DT_Asig'] >= pd.to_datetime('2026-11-01')) & (df_total_sla['DT_Asig'] <= pd.to_datetime('2026-11-30'))].copy()
+                    dt_ini_filtro = pd.to_datetime(fecha_ini_rep)
+                    dt_fin_filtro = pd.to_datetime(fecha_fin_rep) + pd.Timedelta(hours=23, minutes=59, seconds=59)
+                    df_total_sla = df_total_sla[(df_total_sla['DT_Asig'] >= dt_ini_filtro) & (df_total_sla['DT_Asig'] <= dt_fin_filtro)].copy()
 
-                    # Excluir Pérdida Total y Pago de Daños para medir tiempos operativos reales
+                    # Excluir Pérdida Total y Pago de Daños (no cuentan como ganadas/surtibles)
                     if c_est_s:
                         df_total_sla = df_total_sla[~df_total_sla[c_est_s].astype(str).str.upper().isin(["PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"])].copy()
 
@@ -729,25 +743,53 @@ def abrir_popup_monitor():
                         df_total_sla['D_Env_Ent'] = limpiar_rango_dias((df_total_sla['DT_Ent'] - df_total_sla['DT_Env']).dt.days)
                         df_total_sla['D_Ent_Rec'] = limpiar_rango_dias((df_total_sla['DT_Rec'] - df_total_sla['DT_Ent']).dt.days)
 
-                        # Ciclo Total (Asignación -> Entrega/Recibo) para medir Eficiencia 0 a 7 días de BBVA
+                        # Ciclo Total (Asignación -> Entrega/Recibo) solo sobre partidas NO canceladas
+                        es_cancelada_mask = df_total_sla[c_est_s].astype(str).str.upper().str.contains("CANCELAD|REEMBOLS", na=False) if c_est_s else pd.Series(False, index=df_total_sla.index)
                         fecha_cierre_op = df_total_sla['DT_Rec'].combine_first(df_total_sla['DT_Ent']).combine_first(df_total_sla['DT_Env'])
                         df_total_sla['D_Ciclo_Total'] = limpiar_rango_dias((fecha_cierre_op - df_total_sla['DT_Asig']).dt.days)
-                        df_total_sla['Cumple_0_7_Dias'] = df_total_sla['D_Ciclo_Total'].apply(lambda d: 1 if pd.notna(d) and d <= 7 else (0 if pd.notna(d) else pd.NA))
+                        df_total_sla.loc[es_cancelada_mask, 'D_Ciclo_Total'] = pd.NA
 
-                        # Filtro interactivo por Estado (Vacío por defecto para no omitir ninguna ciudad del Estado)
-                        estados_disp = sorted(df_total_sla['Estado_Plaza'].dropna().unique().tolist())
-                        estados_sel = st.multiselect(
-                            "🗺️ Filtrar Estados específicos (Deja vacío para incluir todos):",
-                            options=estados_disp,
-                            default=[],
-                            key="ms_estados_sla_pop"
+                        def clasificar_auditoria_7d(r):
+                            est_r = str(r.get(c_est_s, '')).upper() if c_est_s else ''
+                            if "CANCELAD" in est_r or "REEMBOLS" in est_r:
+                                return "🚫 Cancelada (No Surtida)"
+                            d_tot = r.get('D_Ciclo_Total', pd.NA)
+                            if pd.isna(d_tot):
+                                return "⏳ En Proceso / Sin Fecha Cierre"
+                            return "✅ Cumple (0 a 7 días)" if float(d_tot) <= 7 else "❌ Excede (> 7 días)"
+
+                        df_total_sla['Auditoria_BBVA'] = df_total_sla.apply(clasificar_auditoria_7d, axis=1)
+                        df_total_sla['Cumple_0_7_Dias'] = df_total_sla['Auditoria_BBVA'].apply(
+                            lambda x: 1 if "Cumple" in x else (0 if "Excede" in x else pd.NA)
                         )
+
+                        # Filtros interactivos de Estado y Ciudad para auditar sin perder ningún registro
+                        cf_est, cf_ciu, cf_aud = st.columns(3)
+                        with cf_est:
+                            estados_disp = sorted(df_total_sla['Estado_Plaza'].dropna().unique().tolist())
+                            estados_sel = st.multiselect("🗺️ Filtrar Estado:", options=estados_disp, default=[], key="ms_estados_sla_pop")
                         df_sla_view = df_total_sla[df_total_sla['Estado_Plaza'].isin(estados_sel)].copy() if estados_sel else df_total_sla.copy()
 
-                        # KPIs Globales de la selección
+                        with cf_ciu:
+                            ciudades_disp = sorted(df_sla_view['Plaza_Ciudad'].dropna().unique().tolist())
+                            ciudades_sel = st.multiselect("🏙️ Filtrar Ciudad / Plaza:", options=ciudades_disp, default=[], key="ms_ciudades_sla_pop")
+                        if ciudades_sel:
+                            df_sla_view = df_sla_view[df_sla_view['Plaza_Ciudad'].isin(ciudades_sel)].copy()
+
+                        with cf_aud:
+                            aud_disp = sorted(df_sla_view['Auditoria_BBVA'].dropna().unique().tolist())
+                            aud_sel = st.multiselect("🔍 Filtrar por Estatus Auditoría BBVA:", options=aud_disp, default=[], key="ms_aud_sla_pop")
+                        if aud_sel:
+                            df_sla_view = df_sla_view[df_sla_view['Auditoria_BBVA'].isin(aud_sel)].copy()
+
                         def prom_seguro(s):
                             s_val = pd.to_numeric(s, errors='coerce').dropna()
                             return round(s_val.mean(), 1) if not s_val.empty else 0.0
+
+                        total_ganadas_kpi = int(df_sla_view['_Cant_Num'].sum())
+                        canceladas_kpi = int(df_sla_view[df_sla_view['Auditoria_BBVA'] == "🚫 Cancelada (No Surtida)"]['_Cant_Num'].sum())
+                        surtidas_kpi = total_ganadas_kpi - canceladas_kpi
+                        pct_surtido_kpi = round((surtidas_kpi / total_ganadas_kpi) * 100, 2) if total_ganadas_kpi > 0 else 0.0
 
                         k_asig_conf = prom_seguro(df_sla_view['D_Asig_Conf'])
                         k_conf_env = prom_seguro(df_sla_view['D_Conf_Env'])
@@ -755,7 +797,15 @@ def abrir_popup_monitor():
                         k_ent_rec = prom_seguro(df_sla_view['D_Ent_Rec'])
                         k_ciclo = prom_seguro(df_sla_view['D_Ciclo_Total'])
                         s_cumple = pd.to_numeric(df_sla_view['Cumple_0_7_Dias'], errors='coerce').dropna()
-                        pct_ef_7d = round(s_cumple.mean() * 100, 1) if not s_cumple.empty else 0.0
+                        pct_ef_7d = round(s_cumple.mean() * 100, 2) if not s_cumple.empty else 0.0
+
+                        st.info(
+                            f"📊 **Cuadre de Volumen ({rango_str_titulo}):** "
+                            f"**Piezas Ganadas:** `{total_ganadas_kpi}` ({len(df_sla_view)} partidas) | "
+                            f"**Piezas Surtidas:** `{surtidas_kpi}` (**{pct_surtido_kpi}%** Surtido vs Ganado) | "
+                            f"**Canceladas:** `{canceladas_kpi}` | "
+                            f"**Evaluadas con Fecha Cierre:** `{len(s_cumple)}` (**{pct_ef_7d}%** en 0-7 días)"
+                        )
 
                         km1, km2, km3, km4, km5, km6 = st.columns(6)
                         km1.metric("1️⃣ Asig ➔ Conf", f"{k_asig_conf} días")
@@ -770,18 +820,19 @@ def abrir_popup_monitor():
                             for keys, grp in df_in.groupby(cols_grupo, dropna=False):
                                 if not isinstance(keys, tuple): keys = (keys,)
                                 dic_f = {cols_grupo[i]: keys[i] for i in range(len(cols_grupo))}
-                                total_pzas = len(grp)
-                                canceladas = len(grp[grp[c_est_s].astype(str).str.upper() == "CANCELADO"]) if c_est_s else 0
+                                total_pzas = int(grp['_Cant_Num'].sum())
+                                canceladas = int(grp[grp['Auditoria_BBVA'] == "🚫 Cancelada (No Surtida)"]['_Cant_Num'].sum())
                                 surtidas = total_pzas - canceladas
                                 pct_surt = round((surtidas / total_pzas) * 100, 1) if total_pzas > 0 else 0.0
-                                sin_conf = len(grp[grp['DT_Conf'].isna() & (grp[c_est_s].astype(str).str.upper() != "CANCELADO")])
+                                sin_conf = int(grp[grp['DT_Conf'].isna() & (grp['Auditoria_BBVA'] != "🚫 Cancelada (No Surtida)")]['_Cant_Num'].sum())
 
                                 s_7d = pd.to_numeric(grp['Cumple_0_7_Dias'], errors='coerce').dropna()
                                 ef_7d = round(s_7d.mean() * 100, 1) if not s_7d.empty else 0.0
 
                                 dic_f.update({
                                     'Piezas': total_pzas,
-                                    'Sin Confirmar': sin_conf,
+                                    'Surtidas': surtidas,
+                                    'Canceladas': canceladas,
                                     '% Surtido': f"{pct_surt}%",
                                     '1. Asig ➔ Conf (días)': prom_seguro(grp['D_Asig_Conf']),
                                     '2. Conf ➔ Envío (días)': prom_seguro(grp['D_Conf_Env']),
@@ -797,19 +848,17 @@ def abrir_popup_monitor():
                                 df_out = df_out.sort_values(by=['Piezas', '_ef_num'], ascending=[False, True]).drop(columns=['_ef_num'])
                             return df_out
 
-                        # 1. Agrupado por Estado | 2. Agrupado por Ciudad | 3. Desglose por Taller
                         df_por_estado = construir_resumen_agrupado(df_sla_view, ['Estado_Plaza']).rename(columns={'Estado_Plaza': 'Estado'})
                         df_por_ciudad = construir_resumen_agrupado(df_sla_view, ['Estado_Plaza', 'Plaza_Ciudad']).rename(columns={'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad / Plaza'})
                         df_por_taller = construir_resumen_agrupado(df_sla_view, ['Estado_Plaza', 'Plaza_Ciudad', c_tal_s]).rename(columns={'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad', c_tal_s: 'Taller (CDR)'})
 
-                        # Detalle por Siniestro y Partida (para consulta y descarga CSV)
                         df_det_sin = df_sla_view.copy()
                         for c_dt_f, nom_f in [('DT_Asig', 'F. Asignación'), ('DT_Conf', 'F. Confirmación'), ('DT_Env', 'F. Envío'), ('DT_Ent', 'F. Entrega'), ('DT_Rec', 'F. Recibo')]:
                             df_det_sin[nom_f] = df_det_sin[c_dt_f].dt.strftime('%d/%m/%Y').fillna('-')
 
                         df_det_sin['Vehículo'] = df_det_sin[c_mar_s].astype(str) + " " + df_det_sin[c_mod_s].astype(str)
                         cols_nivel4 = [
-                            'Estado_Plaza', 'Plaza_Ciudad', c_tal_s, c_sin_s, 'Vehículo', c_pza_s, c_est_s,
+                            'Estado_Plaza', 'Plaza_Ciudad', c_tal_s, c_sin_s, 'Vehículo', '_Cant_Num', c_pza_s, c_est_s, 'Auditoria_BBVA',
                             'F. Asignación', 'F. Confirmación', 'D_Asig_Conf',
                             'F. Envío', 'D_Conf_Env', 'F. Entrega', 'D_Env_Ent',
                             'F. Recibo', 'D_Ent_Rec', 'D_Ciclo_Total'
@@ -817,17 +866,17 @@ def abrir_popup_monitor():
                         cols_nivel4 = [c for c in cols_nivel4 if c in df_det_sin.columns]
                         df_por_siniestro = df_det_sin[cols_nivel4].rename(columns={
                             'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad', c_tal_s: 'Taller (CDR)', c_sin_s: 'Siniestro',
-                            c_pza_s: 'Pieza', c_est_s: 'Estatus',
+                            '_Cant_Num': 'Cant', c_pza_s: 'Pieza', c_est_s: 'Estatus Actual', 'Auditoria_BBVA': 'Evaluación 0-7d',
                             'D_Asig_Conf': 'Asig➔Conf (d)', 'D_Conf_Env': 'Conf➔Env (d)',
                             'D_Env_Ent': 'Env➔Ent (d)', 'D_Ent_Rec': 'Ent➔Rec (d)',
                             'D_Ciclo_Total': 'Total (d)'
                         }).sort_values(by=['Estado', 'Ciudad', 'Taller (CDR)', 'Siniestro'])
 
                         sub_t1, sub_t2, sub_t3, sub_t4 = st.tabs([
-                            f"🗺️ 1. Resumen Ejecutivo por Estado ({len(df_por_estado)})",
-                            f"🏙️ 2. Resumen Ejecutivo por Ciudad ({len(df_por_ciudad)})",
-                            f"🏢 3. Desglose por Taller ({len(df_por_taller)})",
-                            f"🚗 4. Detalle por Siniestro ({len(df_por_siniestro)})"
+                            f"🗺️ 1. Por Estado ({len(df_por_estado)})",
+                            f"🏙️ 2. Por Ciudad / Plaza ({len(df_por_ciudad)})",
+                            f"🏢 3. Por Taller CDR ({len(df_por_taller)})",
+                            f"🚗 4. Siniestros Incluidos en el Informe ({ df_por_siniestro['Siniestro'].nunique() } Sin. | { int(df_por_siniestro['Cant'].sum()) } Pzas)"
                         ])
 
                         with sub_t1:
@@ -837,21 +886,18 @@ def abrir_popup_monitor():
                         with sub_t3:
                             st.dataframe(df_por_taller, use_container_width=True, hide_index=True)
                         with sub_t4:
+                            st.caption("Aquí puedes ver exactamente qué siniestros conforman los números de arriba, cuántas piezas tiene cada uno y cómo calificó en la meta de 0 a 7 días.")
                             st.dataframe(df_por_siniestro, use_container_width=True, hide_index=True)
 
-                        # Fecha ajustada a zona horaria de México (UTC-6) y sin hora en el encabezado
-                        tz_mx_rep = datetime.timezone(datetime.timedelta(hours=-6))
-                        ahora_mx_rep = datetime.datetime.now(tz_mx_rep)
-                        fecha_emision_str = ahora_mx_rep.strftime('%d/%m/%Y')
+                        fecha_emision_str = hoy_cal_date.strftime('%d/%m/%Y')
 
-                        # Generador de PDF Ejecutivo Imprimible (Con los 3 reportes solicitados)
                         pdf_sla = FPDF(orientation='L', unit='mm', format='A4')
                         pdf_sla.set_auto_page_break(auto=True, margin=10)
                         pdf_sla.add_page()
                         pdf_sla.set_font("Arial", 'B', 12)
                         pdf_sla.cell(0, 7, limpiar_txt_pdf("PMR SERVICIOS AUTOMOTRICES - INFORME EJECUTIVO DE TIEMPOS Y DESEMPEÑO"), ln=True, align='C')
                         pdf_sla.set_font("Arial", '', 8)
-                        pdf_sla.cell(0, 5, limpiar_txt_pdf(f"Periodo: {periodo_rep_sel} | Aseguradora: {aseg_rep_sel} | Fecha de emisión: {fecha_emision_str}"), ln=True, align='C')
+                        pdf_sla.cell(0, 5, limpiar_txt_pdf(f"Periodo: {rango_str_titulo} | Aseguradora: {aseg_rep_sel} | Fecha de emisión: {fecha_emision_str}"), ln=True, align='C')
                         pdf_sla.ln(2)
 
                         # 1. RESUMEN EJECUTIVO POR ESTADO
@@ -859,12 +905,12 @@ def abrir_popup_monitor():
                         pdf_sla.cell(0, 6, limpiar_txt_pdf("1. RESUMEN EJECUTIVO POR ESTADO"), ln=True)
                         pdf_sla.set_fill_color(0, 51, 102); pdf_sla.set_text_color(255, 255, 255); pdf_sla.set_font("Arial", 'B', 7)
                         cols_p_est = [
-                            ('Estado', 55), ('Piezas', 18), ('Sin Confirmar', 22), ('% Surtido', 22),
+                            ('Estado', 55), ('Piezas', 18), ('Surtidas', 20), ('% Surtido', 22),
                             ('1. Asig ➔ Conf (días)', 26), ('2. Conf ➔ Envío (días)', 26),
                             ('3. Envío ➔ Entrega (días)', 28), ('4. Entrega ➔ Recibo (días)', 28),
                             ('Ciclo Total (días)', 24), ('% Ef. 0-7 Días', 24)
                         ]
-                        headers_cortos_est = ['Estado', 'Piezas', 'Sin Conf.', '% Surtido', 'Asig->Conf (d)', 'Conf->Env (d)', 'Env->Ent (d)', 'Ent->Rec (d)', 'Ciclo Total', '% Ef. 0-7d']
+                        headers_cortos_est = ['Estado', 'Ganadas', 'Surtidas', '% Surtido', 'Asig->Conf (d)', 'Conf->Env (d)', 'Env->Ent (d)', 'Ent->Rec (d)', 'Ciclo Total', '% Ef. 0-7d']
                         for idx_h, (_, w_c) in enumerate(cols_p_est):
                             pdf_sla.cell(w_c, 6, limpiar_txt_pdf(headers_cortos_est[idx_h]), border=1, fill=True, align='C')
                         pdf_sla.ln()
@@ -924,20 +970,20 @@ def abrir_popup_monitor():
                         c_bs1.download_button(
                             label="🖨️ Descargar Informe Ejecutivo (Estado / Ciudad / Taller) en PDF",
                             data=bytes_pdf_sla,
-                            file_name=f"Informe_Tiempos_PMR_{ahora_mx_rep.strftime('%d%m%Y')}.pdf",
+                            file_name=f"Informe_Tiempos_PMR_{hoy_cal_date.strftime('%d%m%Y')}.pdf",
                             mime="application/pdf",
                             type="primary",
                             use_container_width=True
                         )
                         c_bs2.download_button(
-                            label="📥 Descargar Detalle por Siniestro (CSV / Excel)",
+                            label="📥 Descargar Siniestros Auditados (CSV / Excel)",
                             data=df_por_siniestro.to_csv(index=False).encode('utf-8-sig'),
-                            file_name=f"Detalle_Siniestros_Tiempos_PMR_{ahora_mx_rep.strftime('%d%m%Y')}.csv",
+                            file_name=f"Detalle_Siniestros_Tiempos_PMR_{hoy_cal_date.strftime('%d%m%Y')}.csv",
                             mime="text/csv",
                             use_container_width=True
                         )
                     else:
-                        st.info("No se encontraron registros para el periodo y filtros seleccionados.")
+                        st.info("No se encontraron registros para el rango de fechas seleccionado.")
                 else:
                     st.warning("No hay datos disponibles para calcular los tiempos.")
 

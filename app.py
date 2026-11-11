@@ -5395,7 +5395,7 @@ elif vista_actual == "🛠️ Cuartel General":
                     filas_ini = [
                         ["Clave", "Valor", "Notas"],
                         ["MULTI_USER", "PMA5816", "Usuario Portal Multiasistencia"],
-                        ["MULTI_PASS", "Pmroct1.", "Contraseña Portal Multiasistencia"],
+                        ["MULTI_PASS", "PmrNov1.", "Contraseña Portal Multiasistencia"],
                         ["TC_USD", "20.50", "Tipo de cambio USD a MXN para eBay"]
                     ]
                     ws_c.append_rows(filas_ini, value_input_option='USER_ENTERED')

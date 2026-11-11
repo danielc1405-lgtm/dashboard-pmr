@@ -71,7 +71,7 @@ def conectar_sheets():
 def cargar_configuracion_y_exclusiones(doc):
     config = {
         "MULTI_USER": "PMA5816",
-        "MULTI_PASS": "Pmroct1.",
+        "MULTI_PASS": "PmrNov1.",
         "TC_USD": 20.50,
         "GEMINI_API_KEY": "",
         "ESTADOS_EXCLUIDOS": ["DURANGO", "DGO"],

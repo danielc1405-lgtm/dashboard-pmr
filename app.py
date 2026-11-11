@@ -1,4 +1,4 @@
-# ==============================================================================
+F# ==============================================================================
 # === [BLOQUE 1: IMPORTS, CONFIGURACIÓN VISUAL Y CSS] ===
 # ==============================================================================
 import streamlit as st
@@ -654,6 +654,24 @@ def abrir_popup_monitor():
                         df_total_sla = df_total_sla[df_total_sla[c_ase_s].astype(str).str.upper().str.contains(aseg_rep_sel, na=False)].copy()
 
                     # Parsear fechas con parse_dt_safe_op
+                    def parse_dt_safe_op(val):
+                        if pd.isna(val) or str(val).strip() == '': return pd.NaT
+                        val_str = str(val).lower().replace('-', '/')
+                        if val_str.replace('.', '', 1).isdigit():
+                            v_num = float(val_str)
+                            if v_num > 30000: return pd.to_datetime('1899-12-30') + pd.to_timedelta(v_num, unit='D')
+                        meses_map = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+                        for m_es, m_num in meses_map.items():
+                            if m_es in val_str: val_str = val_str.replace(m_es, m_num); break
+                        try: return pd.to_datetime(val_str, dayfirst=True, errors='coerce')
+                        except: return pd.NaT
+
+                    def safe_apply_date(df_obj, col_name):
+                        if col_name and col_name in df_obj.columns:
+                            serie = df_obj[col_name].iloc[:, 0] if isinstance(df_obj[col_name], pd.DataFrame) else df_obj[col_name]
+                            return serie.apply(parse_dt_safe_op)
+                        return pd.Series(pd.NaT, index=df_obj.index)
+
                     df_total_sla['DT_Asig'] = safe_apply_date(df_total_sla, c_f_asig)
                     df_total_sla['DT_Conf'] = safe_apply_date(df_total_sla, c_f_conf)
                     df_total_sla['DT_Env'] = safe_apply_date(df_total_sla, c_f_env)

@@ -274,44 +274,57 @@ def buscar_en_historial(registros_hist, desc_raw, modelo_limpio):
     return 0.0
 
 def descubrir_modelos_gemini(gemini_key):
-    """Consulta a Google AI Studio exactamente qué modelos están activos para tu API Key."""
-    preferidos = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    """
+    Obtiene los modelos de TEXTO activos en tu cuenta, excluyendo modelos de voz (-tts),
+    imagen o experimentales, y priorizando los habilitados para cuentas nuevas.
+    """
+    preferidos = [
+        "gemini-2.5-flash-lite",
+        "gemini-3-flash-preview",
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+        "gemma-3-27b-it",
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash"
+    ]
     if not gemini_key:
         return []
     try:
         r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}", timeout=10)
         if r.status_code == 200:
             modelos_api = []
+            palabras_excluir = ["tts", "audio", "image", "imagen", "veo", "embedding", "aqa", "robotics", "computer", "learnlm", "thinking"]
             for m in r.json().get("models", []):
                 metodos = m.get("supportedGenerationMethods", [])
                 if "generateContent" in metodos:
                     nom = m.get("name", "").replace("models/", "")
-                    if "gemini" in nom and "vision" not in nom and "embedding" not in nom:
+                    if ("gemini" in nom or "gemma-3-27b" in nom) and not any(ex in nom.lower() for ex in palabras_excluir):
                         modelos_api.append(nom)
+
+            # Poner primero los preferidos que sí existen en tu cuenta y dejar al final 2.5-flash/pro
             ordenados = [p for p in preferidos if p in modelos_api]
             for m_rest in modelos_api:
-                if m_rest not in ordenados:
+                if m_rest not in ordenados and m_rest not in ["gemini-2.5-flash", "gemini-2.5-pro"]:
                     ordenados.append(m_rest)
-            return ordenados[:3]
+            return ordenados[:6]
         else:
             print(f"   ⚠️ [Diagnóstico API Key] Error HTTP {r.status_code}: {r.text[:180]}")
     except Exception as e:
         print(f"   ⚠️ [Diagnóstico API Key] Excepción: {e}")
-    return preferidos[:2]
+    return preferidos[:4]
 
 def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc_usd, gemini_key, portales_cfg):
     """
-    Capa 1: Consulta a Gemini AI probando primero con Google Search en vivo y,
-    si el tier gratuito rechaza la herramienta, usa conocimiento directo de mercado automotriz.
-    Imprime en consola qué modelo respondió y qué encontró.
+    Capa 1: Prueba los modelos de texto válidos en tu cuenta (con y sin Google Search)
+    hasta obtener los precios en MXN.
     """
     resultados_ia = {}
     if not gemini_key:
-        print("   ⚠️ [Capa 1 - IA]: No hay GEMINI_API_KEY guardada en BD_CONFIG_BOTS. Saltando a Capa 2 (Web Directa)...")
+        print("   ⚠️ [Capa 1 - IA]: No hay GEMINI_API_KEY guardada en BD_CONFIG_BOTS. Saltando a Capa 2...")
         return resultados_ia
 
     modelos_disponibles = descubrir_modelos_gemini(gemini_key)
-    print(f"   🤖 [Capa 1 - IA]: Modelos detectados en tu cuenta: {modelos_disponibles}")
+    print(f"   🤖 [Capa 1 - IA]: Modelos de texto listos para probar: {modelos_disponibles}")
 
     lista_portales_txt = ", ".join([f"{p['nombre']} ({p['url']})" for p in portales_cfg])
 
@@ -322,11 +335,11 @@ def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc
             f"Actúa como cotizador senior de refacciones de colisión en México y EE.UU.\n"
             f"Vehículo: {marca} {modelo} (Año {ano}) | VIN: {vin}\n"
             f"Tipo de cambio USD a MXN: {tc_usd}\n"
-            f"Portales de referencia: Radec (radec.com.mx), Mercado Libre México, eBay Motors, PartSouq, PartsLink24, PartsNow ({lista_portales_txt}).\n\n"
+            f"Portales de referencia: Radec (radec.com.mx), Mercado Libre México, eBay Motors, PartSouq, PartsLink24 ({lista_portales_txt}).\n\n"
             f"Para cada una de las siguientes piezas, entrega precios reales de mercado en pesos mexicanos (MXN, enteros mayores a 0):\n"
             f"- 'orig': Precio pieza ORIGINAL / OEM nueva.\n"
             f"- 'semi': Precio pieza USADA / SEMINUEVA en Mercado Libre o eBay.\n"
-            f"- 'gen': Precio pieza GENÉRICA nueva (Radec / TYC / Depo / Tong Yang) si existe para esta pieza.\n\n"
+            f"- 'gen': Precio pieza GENÉRICA nueva (Radec / TYC / Depo / Tong Yang).\n\n"
             f"Piezas a cotizar:\n{lineas_prompt}\n\n"
             f"Responde ÚNICAMENTE con un arreglo JSON válido con este formato exacto:\n"
             f'[{{"idx": numero_id, "orig": entero_mxn, "semi": entero_mxn, "gen": entero_mxn, "fuente": "RAD o ML o EB o AGEN", "link": "url_directa_o_vacio"}}]'
@@ -336,7 +349,9 @@ def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc
         for mod_name in modelos_disponibles:
             if exito_lote:
                 break
-            for usar_search in [True, False]:
+            # Los modelos gemma no usan la herramienta google_search; los gemini prueban con search y luego directo
+            modos_search = [False] if "gemma" in mod_name else [True, False]
+            for usar_search in modos_search:
                 if exito_lote:
                     break
                 try:
@@ -374,7 +389,7 @@ def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc
                                     print(f"   ✅ [Capa 1 - IA]: {mod_name} ({modo_lbl}) cotizó {encontrados_cnt}/{len(lote)} piezas.")
                                     exito_lote = True
                     else:
-                        err_short = resp.text[:120].replace("\n", " ")
+                        err_short = resp.text[:160].replace("\n", " ")
                         print(f"   ℹ️ [Capa 1 - {mod_name} search={usar_search}]: HTTP {resp.status_code} ({err_short})")
                 except Exception as e_g:
                     print(f"   ℹ️ [Capa 1 - {mod_name}]: {e_g}")
@@ -383,37 +398,38 @@ def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc
 
 def buscar_web_playwright_respaldo(page_buscador, query, marca, modelo):
     """
-    Capa 2: Si alguna pieza quedó en $0, usa el navegador Chromium para buscar en DuckDuckGo HTML
-    y Bing precios publicados en Mercado Libre, Radec y eBay (probando modelo con y sin guion, ej. BR-V y BRV).
+    Capa 2: Busca en Yahoo México y Bing anuncios de Mercado Libre y Radec,
+    probando el modelo sin guion (ej. S-10 -> S10, BR-V -> BRV).
     """
     precios_orig, precios_semi, precios_gen = [], [], []
     link_hallado = ""
 
-    # Si el modelo tiene guion (ej. BR-V, CR-V, HR-V, CX-5), buscamos también sin guion (BRV, CRV)
     variantes_q = [query]
     if "-" in modelo:
-        variantes_q.append(query.replace(modelo, modelo.replace("-", "")))
+        variantes_q.insert(0, query.replace(modelo, modelo.replace("-", "")))
 
     for q_var in variantes_q:
         try:
-            url_ddg = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(q_var + ' precio pesos mercadolibre')}"
-            page_buscador.goto(url_ddg, timeout=12000, wait_until="domcontentloaded")
-            time.sleep(0.8)
+            url_yh = f"https://mx.search.yahoo.com/search?p={urllib.parse.quote('site:mercadolibre.com.mx ' + q_var)}"
+            page_buscador.goto(url_yh, timeout=12000, wait_until="domcontentloaded")
+            time.sleep(0.9)
             bloques = page_buscador.evaluate("""
-                () => Array.from(document.querySelectorAll('.result, .web-result'))
+                () => Array.from(document.querySelectorAll('div.algo, li'))
                     .map(el => ({
-                        txt: (el.innerText || '').toUpperCase(),
-                        href: (el.querySelector('a.result__a') ? el.querySelector('a.result__a').href : '')
+                        txt: (el.innerText || '').replace(/\\s+/g, ' ').toUpperCase(),
+                        href: (el.querySelector('a') ? el.querySelector('a').href : '')
                     }))
+                    .filter(x => x.txt.includes('$'))
                     .slice(0, 12)
             """)
             for b in bloques:
-                Montos = re.findall(r'\$\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,5})', b['txt'])
-                for m in Montos:
+                montos = re.findall(r'\$\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,5})', b['txt'])
+                for m in montos:
                     val = float(m.replace(',', ''))
                     if 250 <= val <= 65000:
                         if not link_hallado and "http" in b['href']:
-                            link_hallado = b['href']
+                            m_ru = re.search(r'/RU=([^/]+)/', b['href'])
+                            link_hallado = urllib.parse.unquote(m_ru.group(1)) if m_ru else b['href']
                         if any(k in b['txt'] for k in ["USADO", "USADA", "SEMINUEV", "YONKE"]):
                             precios_semi.append(val)
                         elif any(k in b['txt'] for k in ["ORIGINAL", "OEM", "GENUIN", "AGENCIA"]):

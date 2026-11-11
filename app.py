@@ -33,7 +33,7 @@ st.markdown("""
         .block-container, 
         div[data-testid="stMainBlockContainer"], 
         div[data-testid="stAppViewBlockContainer"] { 
-            padding-top: 1rem !important; 
+            padding-top: 8.2rem !important; 
             padding-bottom: 1rem !important; 
             padding-left: 1rem !important; 
             padding-right: 1rem !important; 
@@ -50,8 +50,8 @@ st.markdown("""
             background-color: #000000 !important; 
         }
 
-        /* 3. Encabezado Superior 100% FIJO al hacer scroll hacia abajo (Incluye Menú y Botón Guardar) */
-        div[data-testid="stHorizontalBlock"]:has(button[kind="primary"]):has([data-testid="stRadio"]) {
+        /* 3. Encabezado Superior 100% FIJO (Aplica SOLO a la barra con el Logo y el Menú) */
+        div[data-testid="stHorizontalBlock"]:has([data-testid="stImage"]):has([data-testid="stRadio"]) {
             position: fixed !important;
             top: 0px !important;
             left: 0.8rem !important;

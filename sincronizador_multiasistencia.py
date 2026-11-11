@@ -7,13 +7,34 @@ from playwright.sync_api import sync_playwright
 import gspread
 from google.oauth2.service_account import Credentials
 
-# --- CREDENCIALES Y PORTAL ---
+# --- CREDENCIALES BASE Y PORTAL ---
 SHEET_ID = "10jrOsS054n0atMk8GxQilkXqm6LjsnrwPOZnSx8iDek"
 PORTAL_URL = "https://siniestros.bbva.mx/refaccionarias/"
 USUARIO_PORTAL = "PMA5816"
-PASSWORD_PORTAL = "Pmroct1."
+PASSWORD_PORTAL = "PmrNov1."
 
 meses_map = {'ene': 1, 'feb': 2, 'mar': 3, 'abr': 4, 'may': 5, 'jun': 6, 'jul': 7, 'ago': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dic': 12}
+
+def cargar_credenciales_dinamicas():
+    """Lee el usuario y contraseña vigentes desde BD_CONFIG_BOTS en Google Sheets."""
+    user_p = USUARIO_PORTAL
+    pass_p = PASSWORD_PORTAL
+    try:
+        scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        credenciales = Credentials.from_service_account_file('credentials.json', scopes=scopes)
+        cliente = gspread.authorize(credenciales)
+        doc = cliente.open_by_key(SHEET_ID)
+        ws_cfg = doc.worksheet("BD_CONFIG_BOTS")
+        for f in ws_cfg.get_all_values()[1:]:
+            if len(f) >= 2:
+                k, v = str(f[0]).strip().upper(), str(f[1]).strip()
+                if k == "MULTI_USER" and v:
+                    user_p = v
+                elif k == "MULTI_PASS" and v:
+                    pass_p = v
+    except Exception as e:
+        print(f"ℹ️ Usando credenciales de respaldo locales ({e})")
+    return user_p, pass_p
 
 def formato_fecha_mex(fecha_obj):
     if not fecha_obj: return ""
@@ -104,6 +125,9 @@ def extraer_datos_multi():
     print(" AUTOMATIZACIÓN MULTIASISTENCIA -> NUBE (G. SHEETS) ")
     print("==================================================")
 
+    usuario_activo_portal, password_activo_portal = cargar_credenciales_dinamicas()
+    print(f"🔑 Credenciales cargadas desde BD_CONFIG_BOTS para usuario: {usuario_activo_portal}")
+
     partidas_extraidas = []
     ya_procesados = set() 
     intentos_globales = 0
@@ -123,8 +147,8 @@ def extraer_datos_multi():
                 page.goto(PORTAL_URL, timeout=60000)
                 page.wait_for_load_state("domcontentloaded")
 
-                page.fill("input[type='text']", USUARIO_PORTAL)
-                page.fill("input[type='password']", PASSWORD_PORTAL)
+                page.fill("input[type='text']", usuario_activo_portal)
+                page.fill("input[type='password']", password_activo_portal)
                 page.click("input[value='Aceptar'], button:has-text('Aceptar')")
                 time.sleep(2.5)
 

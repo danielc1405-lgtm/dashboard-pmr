@@ -181,10 +181,31 @@ def limpiar_modelo_comercial(marca, vehiculo_raw, ano):
 def expandir_descripcion(desc_raw, marca, vehiculo, ano, dicc_extra=None):
     texto_orig = str(desc_raw).upper().strip()
     dicc = DICCIONARIO_BASE.copy()
+    dicc.update({
+        "REFLECTOR": "CUARTO REFLEJANTE",
+        "REFLEJANTE": "CUARTO REFLEJANTE",
+        "REFLEC.": "CUARTO REFLEJANTE",
+        "REFLEC": "CUARTO REFLEJANTE",
+        "GUARDAFANGO": "TOLVA LODERA"
+    })
     if dicc_extra:
         dicc.update(dicc_extra)
 
     texto = re.sub(r'\.(?=[A-Z])', '. ', texto_orig)
+
+    # 1. Reemplazar primero frases compuestas para desambiguar (ej. TOLVA SALPICADERA vs SALPICADERA)
+    frases_compuestas = {
+        "TOLVA SALP.": "TOLVA LODERA",
+        "TOLVA SALPICADERA": "TOLVA LODERA",
+        "FORRO SALPICADERA": "TOLVA LODERA",
+        "LUZ DIRECC.": "CUARTO DIRECCIONAL",
+        "FARO NIEBLA": "FARO ANTINIEBLA"
+    }
+    for k_f, v_f in sorted({**frases_compuestas, **(dicc_extra or {})}.items(), key=lambda x: -len(x[0])):
+        if " " in k_f and k_f in texto:
+            texto = texto.replace(k_f, v_f)
+
+    # 2. Traducir palabra por palabra y resolver sinónimos regionales
     palabras = texto.split()
     traducidas = []
     for pal in palabras:
@@ -201,6 +222,9 @@ def expandir_descripcion(desc_raw, marca, vehiculo, ano, dicc_extra=None):
             traducidas.append(p_s)
 
     frase_pieza = re.sub(r'\s+', ' ', " ".join(traducidas)).strip()
+    if "COSTADO" in frase_pieza and not any(x in frase_pieza for x in ["MOLDURA", "CRISTAL", "VIDRIO", "CALAVERA"]):
+        frase_pieza = frase_pieza.replace("COSTADO", "COSTADO LIENZO", 1)
+
     marca_clean = str(marca).upper().strip()
     mod_clean = limpiar_modelo_comercial(marca_clean, vehiculo, ano)
     return f"{frase_pieza} {marca_clean} {mod_clean} {ano}".strip()
@@ -274,18 +298,13 @@ def buscar_en_historial(registros_hist, desc_raw, modelo_limpio):
     return 0.0
 
 def descubrir_modelos_gemini(gemini_key):
-    """
-    Obtiene los modelos de TEXTO activos en tu cuenta, excluyendo modelos de voz (-tts),
-    imagen o experimentales, y priorizando los habilitados para cuentas nuevas.
-    """
+    """Prioriza los modelos estables con cuota activa y excluye los dados de baja (2.5-flash-lite) o de voz."""
     preferidos = [
-        "gemini-2.5-flash-lite",
-        "gemini-3-flash-preview",
         "gemini-flash-latest",
         "gemini-flash-lite-latest",
         "gemma-3-27b-it",
-        "gemini-2.0-flash-lite",
-        "gemini-2.0-flash"
+        "gemini-2.0-flash",
+        "gemini-2.0-flash-lite"
     ]
     if not gemini_key:
         return []
@@ -293,7 +312,7 @@ def descubrir_modelos_gemini(gemini_key):
         r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}", timeout=10)
         if r.status_code == 200:
             modelos_api = []
-            palabras_excluir = ["tts", "audio", "image", "imagen", "veo", "embedding", "aqa", "robotics", "computer", "learnlm", "thinking"]
+            palabras_excluir = ["tts", "audio", "image", "imagen", "veo", "embedding", "aqa", "robotics", "computer", "learnlm", "thinking", "2.5-flash", "2.5-pro", "3-flash", "3.1-pro"]
             for m in r.json().get("models", []):
                 metodos = m.get("supportedGenerationMethods", [])
                 if "generateContent" in metodos:
@@ -301,17 +320,14 @@ def descubrir_modelos_gemini(gemini_key):
                     if ("gemini" in nom or "gemma-3-27b" in nom) and not any(ex in nom.lower() for ex in palabras_excluir):
                         modelos_api.append(nom)
 
-            # Poner primero los preferidos que sí existen en tu cuenta y dejar al final 2.5-flash/pro
             ordenados = [p for p in preferidos if p in modelos_api]
             for m_rest in modelos_api:
-                if m_rest not in ordenados and m_rest not in ["gemini-2.5-flash", "gemini-2.5-pro"]:
+                if m_rest not in ordenados:
                     ordenados.append(m_rest)
-            return ordenados[:6]
-        else:
-            print(f"   ⚠️ [Diagnóstico API Key] Error HTTP {r.status_code}: {r.text[:180]}")
-    except Exception as e:
-        print(f"   ⚠️ [Diagnóstico API Key] Excepción: {e}")
-    return preferidos[:4]
+            return ordenados[:4]
+    except Exception:
+        pass
+    return preferidos[:3]
 
 def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc_usd, gemini_key, portales_cfg):
     """
@@ -730,11 +746,15 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                             if link_web:
                                 link_directo = link_web
 
-                        if "||" not in str(link_directo):
-                            q_sin_guion = q.replace(mod_comercial, mod_comercial.replace("-", ""))
-                            l_base_ml = link_directo if (link_directo and str(link_directo).startswith("http")) else f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_sin_guion.replace(' ', '-'))}"
-                            l_orig_def = f"https://www.google.com/search?q={urllib.parse.quote(q_sin_guion + ' OEM original partsouq')}"
-                            l_gen_def = f"https://www.google.com/search?q={urllib.parse.quote('site:radec.com.mx OR site:mercadolibre.com.mx ' + q_sin_guion)}"
+                        # Construir los 3 enlaces dedicados por columna (sin URLs inventadas por IA que den 404)
+                        q_sin_guion = q.replace(mod_comercial, mod_comercial.replace("-", ""))
+                        # Para Radec quitamos el nombre largo de la marca (ej. CHEVROLET) porque Radec usa abreviaturas (CV SONIC 17-19)
+                        q_radec = q_sin_guion.replace(f" {marca_clean} ", " ")
+                        vin_clean = str(detalle.get('vin', '')).strip()
+                        l_orig_def = f"https://partsouq.com/en/search/all?q={urllib.parse.quote(vin_clean)}" if len(vin_clean) >= 11 else f"https://www.google.com/search?q={urllib.parse.quote(q_sin_guion + ' OEM original partsouq')}"
+                        l_base_ml = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_sin_guion.replace(' ', '-'))}"
+                        l_gen_def = f"https://www.google.com/search?q={urllib.parse.quote('site:radec.com.mx ' + q_radec)}"
+                        if "||" not in str(link_directo) or "radec.com.mx/catalogo/" in str(link_directo):
                             link_directo = f"{l_orig_def} || {l_base_ml} || {l_gen_def}"
 
                         # CAPA 3: Historial exacto en tu base
@@ -752,7 +772,8 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                         else:
                             costo, origen, fuente_cod = 0, "NO ORIGINAL", "MAN"
 
-                        sug = round((costo + flete) * 1.35) if costo > 0 else 0
+                        margen_def = 65
+                        sug = max(1000, round((costo + flete) * (1.0 + margen_def / 100.0))) if costo > 0 else 0
                         tag_prov = re.sub(r'[^A-Z]', '', fuente_cod)[:4] or "RAD"
                         codigo_hub_gen = f"HUB{tag_prov}{random.randint(100, 999)}"
 
@@ -765,7 +786,7 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                             idx_p, item_p['cantidad'], desc_p, q,
                             p_orig, p_noorig, p_gen, p_hist,
                             flete, fuente_cod, origen, costo,
-                            35, sug, 0, sug,
+                            margen_def, sug, 0, sug,
                             codigo_hub_gen, link_directo, "FALSE", "PENDIENTE"
                         ])
                         existentes.add(f"{num_sin}_{idx_p}")

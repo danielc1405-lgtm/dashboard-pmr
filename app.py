@@ -5913,26 +5913,28 @@ elif vista_actual == "🛠️ Cuartel General":
 
                 # Convertir las 3 columnas de precios en hipervínculos directos con el monto visible
                 def construir_celdas_precio_link(row):
-                    raw_links = str(row.get('Link_Referencia', '')).strip()
-                    partes_l = [x.strip() for x in raw_links.split('||')] if '||' in raw_links else [raw_links, raw_links, raw_links]
-                    while len(partes_l) < 3:
-                        partes_l.append(partes_l[0] if partes_l else "")
+                    q_raw = str(row.get('Busqueda_Sugerida', row.get('Descripcion_Portal', ''))).strip().upper()
+                    marca_r = str(row.get('Marca', '')).strip().upper()
+                    vin_r = str(row.get('VIN', '')).strip()
 
-                    q_raw = str(row.get('Busqueda_Sugerida', row.get('Descripcion_Portal', ''))).strip()
-                    url_fb_orig = f"https://www.google.com/search?q={urllib.parse.quote(q_raw + ' OEM original partsouq')}"
-                    url_fb_semi = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_raw.replace(' ', '-'))}"
-                    url_fb_gen = f"https://www.google.com/search?q={urllib.parse.quote('site:radec.com.mx OR site:mercadolibre.com.mx ' + q_raw)}"
-                    fallbacks = [url_fb_orig, url_fb_semi, url_fb_gen]
+                    # Traducir variantes regionales para la búsqueda en vivo (ej. REFLECTOR -> CUARTO REFLEJANTE)
+                    q_radec = q_raw.replace("REFLECTOR", "CUARTO REFLEJANTE").replace("REFLEJANTE", "CUARTO REFLEJANTE")
+                    q_radec = re.sub(r'\bCUARTO\s+CUARTO\b', 'CUARTO', q_radec)
+                    if marca_r:
+                        q_radec = q_radec.replace(f" {marca_r} ", " ")
 
+                    # 1. ORIGINAL -> PartSouq por VIN o búsqueda OEM de la pieza exacta
+                    url_orig = f"https://www.google.com/search?q={urllib.parse.quote(q_raw + ' ' + vin_r + ' OEM original partsouq')}"
+                    # 2. NO ORIG (Semi) -> Mercado Libre México de la pieza exacta
+                    url_semi = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_raw.replace(' ', '-'))}"
+                    # 3. GENÉRICA -> Exclusivo en Radec sin mezclar Mercado Libre y sin URLs 404 inventadas
+                    url_gen = f"https://www.google.com/search?q={urllib.parse.quote('site:radec.com.mx ' + q_radec)}"
+
+                    urls_fijas = [url_orig, url_semi, url_gen]
                     res = []
                     for idx_c, col_p in enumerate(['Precio_Original', 'Precio_No_Original', 'Precio_Generica']):
                         val_p = float(row.get(col_p, 0) or 0)
-                        cand_url = partes_l[idx_c]
-                        if not cand_url or not cand_url.startswith('http') or ('||' not in raw_links and idx_c != 1):
-                            url_c = fallbacks[idx_c]
-                        else:
-                            url_c = cand_url
-                        url_c = url_c.split('#')[0]
+                        url_c = urls_fijas[idx_c]
                         if val_p > 0:
                             res.append(f"{url_c}#$ {val_p:,.0f}")
                         else:
@@ -5969,7 +5971,7 @@ elif vista_actual == "🛠️ Cuartel General":
                             'Fuente_Seleccionada': st.column_config.SelectboxColumn("Dónde Comprar", options=["ML", "EB", "RADEC", "PARTSOUQ", "INV", "LOC", "AGENCIA", "MAN"], width="small"),
                             'Origen_Portal': st.column_config.SelectboxColumn("Origen Portal", options=["ORIGINAL", "NO ORIGINAL", "SEMINUEVA"], width="small"),
                             'Costo_Base': st.column_config.NumberColumn("Costo Base", format="$ %.0f", width="small"),
-                            'Margen_Pct': st.column_config.SelectboxColumn("% Utilidad", options=[15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 100], width="small"),
+                            'Margen_Pct': st.column_config.SelectboxColumn("% Utilidad", options=[15, 20, 25, 30, 35, 40, 45, 50, 60, 65, 70, 75, 80, 85, 90, 100], width="small"),
                             'Precio_Sugerido': st.column_config.NumberColumn("💡 Sugerido", format="$ %.0f", disabled=True, width="small"),
                             'Precio_Libre': st.column_config.NumberColumn("✍️ Precio Libre", format="$ %.0f", help="Si escribes un monto > 0 aquí, este se enviará al portal en lugar del sugerido.", width="small"),
                             'Codigo_Hub': st.column_config.TextColumn("Código Portal", width="small"),
@@ -5999,8 +6001,8 @@ elif vista_actual == "🛠️ Cuartel General":
                         origen_b = str(fila_ed['Origen_Portal']).strip().upper()
                         validar_b = "TRUE" if fila_ed['Validar_Bool'] else "FALSE"
 
-                        nuevo_sug = round((costo_b + flete_b) * (1.0 + margen_b / 100.0)) if costo_b > 0 else 0
-                        precio_final_env = round(libre_b) if libre_b > 0 else nuevo_sug
+                        nuevo_sug = max(1000, round((costo_b + flete_b) * (1.0 + margen_b / 100.0))) if costo_b > 0 else 0
+                        precio_final_env = max(1000, round(libre_b)) if libre_b > 0 else nuevo_sug
 
                         cod_actual = str(fila_ed['Codigo_Hub']).strip().upper()
                         sufijo_num = re.findall(r'\d{3}$', cod_actual)

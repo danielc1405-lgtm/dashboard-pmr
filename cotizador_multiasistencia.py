@@ -397,45 +397,63 @@ def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc
     return resultados_ia
 
 def buscar_web_playwright_respaldo(page_buscador, query, marca, modelo):
-    """
-    Capa 2: Busca en Yahoo México y Bing anuncios de Mercado Libre y Radec,
-    probando el modelo sin guion (ej. S-10 -> S10, BR-V -> BRV).
-    """
+    """Devuelve los 3 precios y los 3 enlaces exactos (Original, Seminueva y Genérica)."""
     precios_orig, precios_semi, precios_gen = [], [], []
-    link_hallado = ""
+    mejor_link_orig, mejor_link_semi, mejor_link_gen = "", "", ""
 
-    variantes_q = [query]
-    if "-" in modelo:
-        variantes_q.insert(0, query.replace(modelo, modelo.replace("-", "")))
+    q_clean = query.replace(modelo, modelo.replace("-", "")) if "-" in modelo else query
+    url_fallback_ml = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_clean.replace(' ', '-'))}"
+    consultas_web = [
+        f"{q_clean} radec OR mercadolibre precio",
+        f"site:mercadolibre.com.mx {q_clean}"
+    ]
 
-    for q_var in variantes_q:
+    for q_w in consultas_web:
         try:
-            url_yh = f"https://mx.search.yahoo.com/search?p={urllib.parse.quote('site:mercadolibre.com.mx ' + q_var)}"
+            url_yh = f"https://mx.search.yahoo.com/search?p={urllib.parse.quote(q_w)}"
             page_buscador.goto(url_yh, timeout=12000, wait_until="domcontentloaded")
             time.sleep(0.9)
             bloques = page_buscador.evaluate("""
                 () => Array.from(document.querySelectorAll('div.algo, li'))
-                    .map(el => ({
-                        txt: (el.innerText || '').replace(/\\s+/g, ' ').toUpperCase(),
-                        href: (el.querySelector('a') ? el.querySelector('a').href : '')
-                    }))
-                    .filter(x => x.txt.includes('$'))
+                    .map(el => {
+                        let a = el.querySelector('a');
+                        let t = el.querySelector('h3') ? el.querySelector('h3').innerText : '';
+                        return {
+                            titulo: t.replace(/\\s+/g, ' ').trim(),
+                            txt: (el.innerText || '').replace(/\\s+/g, ' ').toUpperCase(),
+                            href: a ? a.href : ''
+                        };
+                    })
+                    .filter(x => x.txt.includes('$') && x.href.startsWith('http'))
                     .slice(0, 12)
             """)
             for b in bloques:
-                montos = re.findall(r'\$\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]{3,5})', b['txt'])
+                link_real = b['href']
+                m_ru = re.search(r'/RU=([^/]+)/', link_real)
+                if m_ru:
+                    link_real = urllib.parse.unquote(m_ru.group(1))
+                if "yahoo.com" in link_real:
+                    continue
+
+                montos = re.findall(r'\$\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?|[0-9]{3,5}\.[0-9]{2}|[0-9]{4,5})', b['txt'])
                 for m in montos:
                     val = float(m.replace(',', ''))
                     if 250 <= val <= 65000:
-                        if not link_hallado and "http" in b['href']:
-                            m_ru = re.search(r'/RU=([^/]+)/', b['href'])
-                            link_hallado = urllib.parse.unquote(m_ru.group(1)) if m_ru else b['href']
                         if any(k in b['txt'] for k in ["USADO", "USADA", "SEMINUEV", "YONKE"]):
                             precios_semi.append(val)
-                        elif any(k in b['txt'] for k in ["ORIGINAL", "OEM", "GENUIN", "AGENCIA"]):
+                            if not mejor_link_semi:
+                                mejor_link_semi = link_real
+                                print(f"        🔗 [Semi ${val:,.0f}]: {b['titulo'][:50]} -> {link_real[:60]}")
+                        elif any(k in b['txt'] for k in ["ORIGINAL", "OEM", "GENUIN", "AGENCIA"]) and "RADEC" not in b['txt'] and "TONG YANG" not in b['txt']:
                             precios_orig.append(val)
+                            if not mejor_link_orig:
+                                mejor_link_orig = link_real
+                                print(f"        🔗 [Orig ${val:,.0f}]: {b['titulo'][:50]} -> {link_real[:60]}")
                         else:
                             precios_gen.append(val)
+                            if not mejor_link_gen:
+                                mejor_link_gen = link_real
+                                print(f"        🔗 [Gen ${val:,.0f}]: {b['titulo'][:50]} -> {link_real[:60]}")
             if precios_orig or precios_semi or precios_gen:
                 break
         except Exception:
@@ -444,7 +462,13 @@ def buscar_web_playwright_respaldo(page_buscador, query, marca, modelo):
     p_o = round(sum(sorted(precios_orig)[:3]) / len(precios_orig[:3])) if precios_orig else 0
     p_s = round(sum(sorted(precios_semi)[:3]) / len(precios_semi[:3])) if precios_semi else 0
     p_g = round(sum(sorted(precios_gen)[:3]) / len(precios_gen[:3])) if precios_gen else 0
-    return p_o, p_s, p_g, link_hallado
+
+    l_o = mejor_link_orig or f"https://www.google.com/search?q={urllib.parse.quote(q_clean + ' OEM original precio')}"
+    l_s = mejor_link_semi or url_fallback_ml
+    l_g = mejor_link_gen or f"https://www.google.com/search?q={urllib.parse.quote('site:radec.com.mx OR site:mercadolibre.com.mx ' + q_clean)}"
+    links_empaquetados = f"{l_o} || {l_s} || {l_g}"
+
+    return p_o, p_s, p_g, links_empaquetados
 
 def obtener_ws_cotizaciones(doc):
     try:
@@ -699,9 +723,12 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                             if link_web:
                                 link_directo = link_web
 
-                        if not link_directo or not link_directo.startswith("http"):
+                        if "||" not in str(link_directo):
                             q_sin_guion = q.replace(mod_comercial, mod_comercial.replace("-", ""))
-                            link_directo = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_sin_guion.replace(' ', '-'))}"
+                            l_base_ml = link_directo if (link_directo and str(link_directo).startswith("http")) else f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_sin_guion.replace(' ', '-'))}"
+                            l_orig_def = f"https://www.google.com/search?q={urllib.parse.quote(q_sin_guion + ' OEM original partsouq')}"
+                            l_gen_def = f"https://www.google.com/search?q={urllib.parse.quote('site:radec.com.mx OR site:mercadolibre.com.mx ' + q_sin_guion)}"
+                            link_directo = f"{l_orig_def} || {l_base_ml} || {l_gen_def}"
 
                         # CAPA 3: Historial exacto en tu base
                         p_hist = buscar_en_historial(registros_hist, desc_p, mod_comercial)

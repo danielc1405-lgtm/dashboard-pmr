@@ -65,13 +65,7 @@ st.markdown("""
             box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.92) !important;
             margin-top: 0px !important;
         }
-        /* Espacio superior automático para que el encabezado fijo nunca tape los títulos ni las tablas */
-        .block-container,
-        div[data-testid="stMainBlockContainer"],
-        div[data-testid="stAppViewBlockContainer"] {
-            padding-top: 6.8rem !important;
-        }
-
+        
         /* 4. Menú de Navegación (st.radio) en una sola línea */
         div[data-testid="stRadio"] > div[role="radiogroup"] {
             display: flex !important;
@@ -5894,13 +5888,43 @@ elif vista_actual == "🛠️ Cuartel General":
                     f"⏰ **Cierre Subasta:** {primera.get('Fecha_Fin','')}"
                 )
 
+                # Convertir las 3 columnas de precios en hipervínculos directos con el monto visible
+                def construir_celdas_precio_link(row):
+                    raw_links = str(row.get('Link_Referencia', '')).strip()
+                    partes_l = [x.strip() for x in raw_links.split('||')] if '||' in raw_links else [raw_links, raw_links, raw_links]
+                    while len(partes_l) < 3:
+                        partes_l.append(partes_l[0] if partes_l else "")
+
+                    q_raw = str(row.get('Busqueda_Sugerida', row.get('Descripcion_Portal', ''))).strip()
+                    url_fb_orig = f"https://www.google.com/search?q={urllib.parse.quote(q_raw + ' OEM original partsouq')}"
+                    url_fb_semi = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_raw.replace(' ', '-'))}"
+                    url_fb_gen = f"https://www.google.com/search?q={urllib.parse.quote('site:radec.com.mx OR site:mercadolibre.com.mx ' + q_raw)}"
+                    fallbacks = [url_fb_orig, url_fb_semi, url_fb_gen]
+
+                    res = []
+                    for idx_c, col_p in enumerate(['Precio_Original', 'Precio_No_Original', 'Precio_Generica']):
+                        val_p = float(row.get(col_p, 0) or 0)
+                        cand_url = partes_l[idx_c]
+                        if not cand_url or not cand_url.startswith('http') or ('||' not in raw_links and idx_c != 1):
+                            url_c = fallbacks[idx_c]
+                        else:
+                            url_c = cand_url
+                        url_c = url_c.split('#')[0]
+                        if val_p > 0:
+                            res.append(f"{url_c}#$ {val_p:,.0f}")
+                        else:
+                            res.append(f"{url_c}#$ 0")
+                    return pd.Series(res)
+
+                df_pend_cot[['Link_Precio_Orig', 'Link_Precio_Semi', 'Link_Precio_Gen']] = df_pend_cot.apply(construir_celdas_precio_link, axis=1)
+
                 cols_tabla_cot = [
                     c for c in [
                         'Siniestro', 'Partida_Idx', 'Cantidad', 'Descripcion_Portal',
-                        'Precio_Original', 'Precio_No_Original', 'Precio_Generica', 'Precio_Historial',
+                        'Link_Precio_Orig', 'Link_Precio_Semi', 'Link_Precio_Gen', 'Precio_Historial',
                         'Flete_Estimado', 'Fuente_Seleccionada', 'Origen_Portal',
                         'Costo_Base', 'Margen_Pct', 'Precio_Sugerido', 'Precio_Libre',
-                        'Codigo_Hub', 'Link_Referencia', 'Validar_Bool'
+                        'Codigo_Hub', 'Validar_Bool'
                     ] if c in df_pend_cot.columns
                 ]
 
@@ -5914,9 +5938,9 @@ elif vista_actual == "🛠️ Cuartel General":
                             'Partida_Idx': st.column_config.NumberColumn("#", disabled=True, width="small"),
                             'Cantidad': st.column_config.TextColumn("Cant", disabled=True, width="small"),
                             'Descripcion_Portal': st.column_config.TextColumn("Pieza", disabled=True, width="medium"),
-                            'Precio_Original': st.column_config.NumberColumn("1. ORIGINAL", format="$ %.0f", disabled=True, width="small"),
-                            'Precio_No_Original': st.column_config.NumberColumn("2. NO ORIG (Semi)", format="$ %.0f", disabled=True, width="small"),
-                            'Precio_Generica': st.column_config.NumberColumn("3. GENÉRICA", format="$ %.0f", disabled=True, width="small"),
+                            'Link_Precio_Orig': st.column_config.LinkColumn("1. ORIGINAL", display_text=r"#(.*)$", disabled=True, width="small"),
+                            'Link_Precio_Semi': st.column_config.LinkColumn("2. NO ORIG (Semi)", display_text=r"#(.*)$", disabled=True, width="small"),
+                            'Link_Precio_Gen': st.column_config.LinkColumn("3. GENÉRICA", display_text=r"#(.*)$", disabled=True, width="small"),
                             'Precio_Historial': st.column_config.NumberColumn("Hist. PMR", format="$ %.0f", disabled=True, width="small"),
                             'Flete_Estimado': st.column_config.NumberColumn("🚚 Flete", format="$ %.0f", width="small"),
                             'Fuente_Seleccionada': st.column_config.SelectboxColumn("Dónde Comprar", options=["ML", "EB", "RADEC", "PARTSOUQ", "INV", "LOC", "AGENCIA", "MAN"], width="small"),
@@ -5926,7 +5950,6 @@ elif vista_actual == "🛠️ Cuartel General":
                             'Precio_Sugerido': st.column_config.NumberColumn("💡 Sugerido", format="$ %.0f", disabled=True, width="small"),
                             'Precio_Libre': st.column_config.NumberColumn("✍️ Precio Libre", format="$ %.0f", help="Si escribes un monto > 0 aquí, este se enviará al portal en lugar del sugerido.", width="small"),
                             'Codigo_Hub': st.column_config.TextColumn("Código Portal", width="small"),
-                            'Link_Referencia': st.column_config.LinkColumn("🔗 Producto", display_text="Ver Producto", width="small"),
                             'Validar_Bool': st.column_config.CheckboxColumn("✅ Validar", default=False, width="small")
                         },
                         key="editor_mesa_cotizador"

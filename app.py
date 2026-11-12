@@ -5852,8 +5852,31 @@ elif vista_actual == "🛠️ Cuartel General":
             df_cot_ui['_GS_Row'] = df_cot_ui.index + 2
             df_cot_ui = df_cot_ui.drop_duplicates(subset=['Siniestro', 'Partida_Idx'], keep='last').copy()
 
+            import urllib.parse
+
+            # Archivar automáticamente en Historial las cotizaciones cuya Fecha_Fin ya venció
+            if 'Fecha_Fin' in df_cot_ui.columns:
+                hoy_cot_dt = pd.to_datetime(datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-6))).date())
+                fechas_fin_dt = df_cot_ui['Fecha_Fin'].apply(parse_dt_safe_op)
+                mask_vencidas_cot = (df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() == 'PENDIENTE') & fechas_fin_dt.notna() & (fechas_fin_dt < hoy_cot_dt)
+                if mask_vencidas_cot.any():
+                    try:
+                        doc_arch = init_connection()
+                        ws_arch = doc_arch.worksheet("BD_COTIZACIONES")
+                        idx_est_col = [str(h).strip() for h in datos_cot_ui[0]].index("Estatus_Cotizacion") + 1
+                        celdas_arch = [
+                            gspread.Cell(row=int(r_gs), col=idx_est_col, value="HISTORIAL / CERRADA")
+                            for r_gs in df_cot_ui.loc[mask_vencidas_cot, '_GS_Row']
+                        ]
+                        if celdas_arch:
+                            ws_arch.update_cells(celdas_arch, value_input_option='USER_ENTERED')
+                            leer_cotizaciones_cache.clear()
+                            df_cot_ui.loc[mask_vencidas_cot, 'Estatus_Cotizacion'] = "HISTORIAL / CERRADA"
+                    except Exception:
+                        pass
+
             df_pend_cot = df_cot_ui[df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() == 'PENDIENTE'].copy()
-            df_hist_cot = df_cot_ui[df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() == 'ENVIADA PORTAL'].copy()
+            df_hist_cot = df_cot_ui[df_cot_ui['Estatus_Cotizacion'].astype(str).str.upper() != 'PENDIENTE'].copy()
 
             if not df_pend_cot.empty:
                 for col_num in ['Precio_Original', 'Precio_No_Original', 'Precio_Generica', 'Precio_Historial', 'Flete_Estimado', 'Costo_Base', 'Margen_Pct', 'Precio_Sugerido', 'Precio_Libre', 'Precio_Final_Enviar']:

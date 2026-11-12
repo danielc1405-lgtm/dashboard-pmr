@@ -553,20 +553,13 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
         if len(filas_todas) > 1:
             for r in filas_todas[1:]:
                 if len(r) >= 32:
-                    est_cot = str(r[31]).strip().upper()
                     ciu_r, edo_r, tal_r = str(r[9]), str(r[10]), str(r[8])
                     excluido, _ = es_siniestro_excluido(ciu_r, edo_r, tal_r, cfg)
                     es_llanta_parab = es_pieza_convenio_excluida(r[14])
                     llave_unica = f"{str(r[2]).strip()}_{str(r[12]).strip()}"
-                    tiene_precios_web = any(float(str(r[c_i]).replace('$', '').replace(',', '').strip() or 0) > 0 for c_i in [16, 17, 18, 19, 23])
                     if not excluido and not es_llanta_parab and llave_unica not in existentes:
-                        if est_cot == "ENVIADA PORTAL" or (est_cot == "PENDIENTE" and tiene_precios_web):
-                            filas_sanas.append(r[:32])
-                            existentes.add(llave_unica)
-            if len(filas_sanas) != len(filas_todas):
-                ws_cot.clear()
-                ws_cot.update(range_name='A1', values=filas_sanas, value_input_option='USER_ENTERED')
-                print(f"🧹 Se depuraron {len(filas_todas) - len(filas_sanas)} filas previas sin precio o de talleres excluidos.")
+                        filas_sanas.append(r[:32])
+                        existentes.add(llave_unica)
     except Exception as e_sh:
         print(f"❌ [ERROR GOOGLE SHEETS]: {e_sh}")
         traceback.print_exc()
@@ -598,7 +591,21 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
             frame = obtener_frame_derecho(page, espera_seg=12)
             enlaces_txt = frame.locator("a.cvi").all_inner_texts()
             lista_siniestros = [t.strip() for t in enlaces_txt if len(t.strip()) >= 5]
-            print(f"-> Siniestros en bandeja: {len(lista_siniestros)}")
+            print(f"-> Siniestros activos en bandeja del portal: {len(lista_siniestros)}")
+
+            # Mover automáticamente al Historial los siniestros que estaban PENDIENTE pero ya cerraron en el portal
+            activos_set = set(lista_siniestros)
+            archivadas_cnt = 0
+            for r_sana in filas_sanas[1:]:
+                if str(r_sana[31]).strip().upper() == "PENDIENTE" and str(r_sana[2]).strip() not in activos_set:
+                    r_sana[31] = "HISTORIAL / CERRADA"
+                    archivadas_cnt += 1
+
+            if archivadas_cnt > 0 or len(filas_sanas) != len(filas_todas):
+                ws_cot.clear()
+                ws_cot.update(range_name='A1', values=filas_sanas, value_input_option='USER_ENTERED')
+                if archivadas_cnt > 0:
+                    print(f"📁 Se movieron {archivadas_cnt} partida(s) que ya no están por cotizar al Historial como respaldo.")
 
             for idx, num_sin in enumerate(lista_siniestros):
                 print(f"\n[{idx+1}/{len(lista_siniestros)}] Revisando interior del Siniestro {num_sin}...")

@@ -1303,6 +1303,8 @@ def abrir_centro_tareas():
 
     # 3. Extraer Siniestros y Refacciones ACTIVOS reusando la caché de BD_UNIFICADA
     try:
+        mapa_taller_sin = {}
+    try:
         if 'cargar_base_viva' in globals():
             df_uni_local = cargar_base_viva().copy()
         else:
@@ -1311,10 +1313,20 @@ def abrir_centro_tareas():
             df_uni_local = pd.DataFrame(datos_uni[1:], columns=[str(h).strip() for h in datos_uni[0]]) if len(datos_uni) > 1 else pd.DataFrame()
         
         col_sin_loc = next((c for c in df_uni_local.columns if "SINIESTRO" in str(c).upper() or "PEDIDO" in str(c).upper()), None)
+        col_tall_loc = next((c for c in df_uni_local.columns if "TALLER" in str(c).upper() or "CDR" in str(c).upper()), None)
         col_marca_loc = next((c for c in df_uni_local.columns if "MARCA" in str(c).upper()), None)
         col_mod_loc = next((c for c in df_uni_local.columns if "MODELO" in str(c).upper() or "VEH" in str(c).upper()), None)
         col_desc_loc = next((c for c in df_uni_local.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
         col_est_loc = next((c for c in df_uni_local.columns if "ESTATUS" in str(c).upper() and "ENV" not in str(c).upper() and "PAGO" not in str(c).upper()), None)
+
+        # Guardar el mapa Siniestro -> Taller antes de filtrar inactivos para cubrir todos los chats
+        if not df_uni_local.empty and col_sin_loc and col_tall_loc:
+            for _, r_t in df_uni_local.drop_duplicates(subset=[col_sin_loc]).iterrows():
+                s_k = str(r_t.get(col_sin_loc, '')).strip().upper()
+                if s_k.endswith('.0'): s_k = s_k[:-2]
+                t_v = str(r_t.get(col_tall_loc, '')).strip()
+                if s_k and t_v and t_v.lower() != "nan":
+                    mapa_taller_sin[s_k] = t_v
 
         estatus_inactivos = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"]
         if not df_uni_local.empty and col_est_loc:
@@ -1416,11 +1428,17 @@ def abrir_centro_tareas():
                 soy_emisor_chat = es_mismo_usuario(usuario_activo_real, row_activa.get('Emisor', ''), grupos_identidad)
                 st_chat = str(row_activa.get('Status', '')).strip().lower()
 
+                ref_completa_chat = str(row_activa.get("Siniestro / Taller / Piezas", "General")).strip()
+                id_sin_chat = ref_completa_chat.split("|")[0].strip().upper()
+                if id_sin_chat.endswith('.0'): id_sin_chat = id_sin_chat[:-2]
+                taller_chat = mapa_taller_sin.get(id_sin_chat, "")
+                html_taller_chat = f'  |  🏢 <b>Taller:</b> <span style="color:#E9EDEF; font-weight:600;">{taller_chat}</span>' if taller_chat else ""
+
                 st.markdown(
                     f'<div style="background-color:#1F2C34; padding:10px 14px; border-radius:8px; margin-bottom:4px; border-left:4px solid #00A884;">'
-                    f'<div style="font-size:0.95rem; font-weight:700; color:#E9EDEF;">🚗 {row_activa.get("Siniestro / Taller / Piezas", "General")}</div>'
+                    f'<div style="font-size:0.95rem; font-weight:700; color:#E9EDEF;">🚗 {ref_completa_chat}</div>'
                     f'<div style="font-size:0.78rem; color:#8696A0;">'
-                    f'👤 <b>Emisor:</b> {row_activa.get("Emisor", "N/A")}  |  🎯 <b>Para:</b> {row_activa.get("Receptor", "N/A")}  |  📌 <b>Estatus:</b> {st_chat.upper()}'
+                    f'👤 <b>Emisor:</b> {row_activa.get("Emisor", "N/A")}  |  🎯 <b>Para:</b> {row_activa.get("Receptor", "N/A")}  |  📌 <b>Estatus:</b> {st_chat.upper()}{html_taller_chat}'
                     f'</div></div>',
                     unsafe_allow_html=True
                 )

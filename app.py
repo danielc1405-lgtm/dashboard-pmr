@@ -6143,9 +6143,10 @@ elif vista_actual == "🛠️ Cuartel General":
 # ==============================================================================
 trigger_rem = st.session_state.pop('trigger_remision_manual', None)
 
-if (btn_guardar or trigger_rem) and permiso_edicion:
-    st.session_state['pdfs_list'] = []
-    st.session_state['avisos_remision'] = []
+if permiso_edicion:
+    if btn_guardar or trigger_rem:
+        st.session_state['pdfs_list'] = []
+        st.session_state['avisos_remision'] = []
     
     def generar_llave(id_val, desc_val):
         id_str = str(id_val).strip().upper()
@@ -6174,7 +6175,6 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
     col_guia_univ = buscar_columna(df_completo, ["GUIA", "GUÍA", "NO. GUIA"], ["GUIA", "GUÍA"], excluidos=["RETORNO", "DEV", "ENV", "PAGO"])
     col_guia_dev_univ = buscar_columna(df_completo, ["GUIA RETORNO", "GUÍA RETORNO", "GUIA DEVOLUCION", "GUÍA DEVOLUCIÓN"], ["GUIA RET", "GUIA DEV"])
     col_rem_univ = buscar_columna(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
-    col_rem_univ = buscar_columna(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
     col_coment_univ = buscar_columna(df_completo, ["COMENTARIOS", "OBSERVACIONES", "COMENTARIO", "OBSERVACION"], ["COMENTARIO", "OBSERVACION"])
     col_venc_univ = buscar_columna(df_completo, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"])
     col_asig_univ = buscar_columna(df_completo, ["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"])
@@ -6195,6 +6195,20 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             'vencimiento_db': venc_formateada,
             'asignacion_db': str(r.get(col_asig_univ, '')).strip() if col_asig_univ else ''
         }
+
+    # Mapa de compras previas para detectar solo cambios reales de Proveedor o Costo en Asignados
+    compras_previas_map = {}
+    if not df_compras.empty:
+        for _, r_cp in df_compras.iterrows():
+            k_cp = generar_llave(r_cp.get('Siniestro', ''), r_cp.get('Descripción Pieza', ''))
+            try:
+                c_cp_f = float(str(r_cp.get('Costo Compra', '0')).replace('$', '').replace(',', '').strip() or 0.0)
+            except Exception:
+                c_cp_f = 0.0
+            compras_previas_map[k_cp] = {
+                'prov': str(r_cp.get('Proveedor', '')).strip(),
+                'costo': round(c_cp_f, 2)
+            }
         
     cambios_a_guardar = {}
     cambios_bd_compras = {}
@@ -6208,7 +6222,7 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
             cambios_a_guardar.setdefault(k, {}).update({'estatus': 'EN TRANSITO', 'imprimir_remision': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
             if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
 
-    if btn_guardar:
+    if True:
         if not df_editado_conf.empty:
             for _, row in df_editado_conf.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))
@@ -6395,7 +6409,14 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                     if asig_actual and asig_actual != orig['asignacion_db']: cambios_a_guardar.setdefault(k, {})['asignacion'] = asig_actual
                     
                     prov_asignado = str(row.get('Proveedor', '')).strip()
-                    if prov_asignado != '' and cambios_a_guardar.get(k, {}).get('estatus', orig['estatus_db']) != "CANCELADO":
+                    try:
+                        costo_asig_num = round(float(str(row.get('Costo Compra', '0')).replace('$', '').replace(',', '').strip() or 0.0), 2)
+                    except Exception:
+                        costo_asig_num = 0.0
+                    prev_cp = compras_previas_map.get(k, {'prov': '', 'costo': 0.0})
+                    cambio_compra_real = (prov_asignado != prev_cp['prov']) or (costo_asig_num != prev_cp['costo'])
+
+                    if prov_asignado != '' and cambio_compra_real and cambios_a_guardar.get(k, {}).get('estatus', orig['estatus_db']) != "CANCELADO":
                         cambios_a_guardar.setdefault(k, {})['crear_compra'] = True
                         cambios_a_guardar[k]['compra_prov'] = prov_asignado
                         cambios_a_guardar[k]['compra_costo'] = str(row.get('Costo Compra', '0')).strip()
@@ -6439,14 +6460,20 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                             cambios_a_guardar[k_cap]['compra_vehiculo'] = veh_hom
 
             df_editado_compras = st.session_state.get('df_editado_compras_temp', pd.DataFrame())
-            if not df_editado_compras.empty:
-                for _, row in df_editado_compras.iterrows():
+            filas_mod_comp = [
+                int(i) for i in st.session_state.get("ed_compras_main", {}).get("edited_rows", {}).keys()
+                if str(i).isdigit() and int(i) < len(df_editado_compras)
+            ]
+            df_editado_compras_mod = df_editado_compras.iloc[filas_mod_comp] if (not df_editado_compras.empty and filas_mod_comp) else pd.DataFrame()
+
+            if not df_editado_compras_mod.empty:
+                for _, row in df_editado_compras_mod.iterrows():
                     k = generar_llave(row.get('Siniestro', ''), row.get('Descripción Pieza', ''))
                     orig = originales.get(k, {'comentario': ''})
                     obs_comp = str(row.get('Observaciones', '')).strip()
                     if obs_comp not in ['nan', 'None'] and obs_comp != orig.get('comentario', ''):
                         cambios_a_guardar.setdefault(k, {})['comentario'] = obs_comp
-                        
+
                     cambios_bd_compras.setdefault(k, {})
                     if row.get('Cancelar Compra'):
                         cambios_bd_compras[k]['cancelar_compra'] = True
@@ -6459,9 +6486,70 @@ if (btn_guardar or trigger_rem) and permiso_edicion:
                         cambios_bd_compras[k]['estatus_pago'] = row.get('Estatus Pago', '')
                         cambios_bd_compras[k]['prov'] = row.get('Proveedor', '')
                         cambios_bd_compras[k]['recibido'] = 'SI' if row.get('Recibido') else 'NO'
-                        if row.get('Recibido'): cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO" 
+                        if row.get('Recibido'): cambios_a_guardar.setdefault(k, {})['estatus'] = "EN PROCESAMIENTO"
 
-    if cambios_a_guardar or cambios_bd_compras:
+    # --- POP-UP INTERCEPTOR DE CAMBIOS SIN GUARDAR AL CAMBIAR DE PESTAÑA ---
+    vista_previa_ux = st.session_state.get('_vista_ux_anterior', vista_actual)
+    cambio_de_pestana = (vista_actual != vista_previa_ux)
+    st.session_state['_vista_ux_anterior'] = vista_actual
+
+    ejecutar_guardado_popup = st.session_state.pop('_ux_confirmar_guardado', False)
+    if ejecutar_guardado_popup:
+        cambios_a_guardar = st.session_state.pop('_ux_pend_uni', {})
+        cambios_bd_compras = st.session_state.pop('_ux_pend_comp', {})
+        st.session_state.pop('_ux_mostrar_popup', None)
+        st.session_state.pop('_ux_vista_origen', None)
+    elif btn_guardar or trigger_rem:
+        st.session_state.pop('_ux_pend_uni', None)
+        st.session_state.pop('_ux_pend_comp', None)
+        st.session_state.pop('_ux_mostrar_popup', None)
+        st.session_state.pop('_ux_vista_origen', None)
+    else:
+        if not cambio_de_pestana:
+            if cambios_a_guardar or cambios_bd_compras:
+                st.session_state['_ux_pend_uni'] = cambios_a_guardar
+                st.session_state['_ux_pend_comp'] = cambios_bd_compras
+                st.session_state['_ux_vista_origen'] = vista_actual
+            elif st.session_state.get('_ux_vista_origen') == vista_actual and not st.session_state.get('_ux_mostrar_popup'):
+                st.session_state.pop('_ux_pend_uni', None)
+                st.session_state.pop('_ux_pend_comp', None)
+                st.session_state.pop('_ux_vista_origen', None)
+        else:
+            if st.session_state.get('_ux_pend_uni') or st.session_state.get('_ux_pend_comp'):
+                st.session_state['_ux_mostrar_popup'] = True
+
+    @st.dialog("⚠️ Cambios pendientes por guardar")
+    def abrir_popup_cambios_sin_guardar():
+        pend_u = st.session_state.get('_ux_pend_uni', {})
+        pend_c = st.session_state.get('_ux_pend_comp', {})
+        vista_orig_txt = st.session_state.get('_ux_vista_origen', 'la pestaña anterior')
+        llaves_mod = list(set(list(pend_u.keys()) + list(pend_c.keys())))
+
+        st.warning(f"Realizaste modificaciones en **{len(llaves_mod)} partida(s)** dentro de **{vista_orig_txt}** y cambiaste de pestaña sin guardar.")
+        with st.container(border=True):
+            st.caption("📋 **Partidas con cambios pendientes:**")
+            for k_s, k_d in llaves_mod[:8]:
+                st.markdown(f"- **`{k_s}`** — {k_d}")
+            if len(llaves_mod) > 8:
+                st.caption(f"... y {len(llaves_mod) - 8} partida(s) más.")
+
+        col_p_save, col_p_cancel = st.columns(2)
+        if col_p_save.button("💾 Guardar Cambios", type="primary", use_container_width=True, key="btn_pop_ux_save"):
+            st.session_state['_ux_confirmar_guardado'] = True
+            st.session_state['_ux_mostrar_popup'] = False
+            st.rerun()
+        if col_p_cancel.button("🚫 Descartar / Cancelar", use_container_width=True, key="btn_pop_ux_discard"):
+            st.session_state.pop('_ux_pend_uni', None)
+            st.session_state.pop('_ux_pend_comp', None)
+            st.session_state.pop('_ux_mostrar_popup', None)
+            st.session_state.pop('_ux_vista_origen', None)
+            st.toast("🗑️ Cambios no guardados descartados.", icon="🗑️")
+            st.rerun()
+
+    if st.session_state.get('_ux_mostrar_popup') and (st.session_state.get('_ux_pend_uni') or st.session_state.get('_ux_pend_comp')):
+        abrir_popup_cambios_sin_guardar()
+
+    if (cambios_a_guardar or cambios_bd_compras) and (btn_guardar or trigger_rem or ejecutar_guardado_popup):
         with espacio_spinner:
             with st.spinner("Sincronizando con BD_UNIFICADA y BD_HISTORICO..."):
                 try:

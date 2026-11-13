@@ -160,6 +160,10 @@ def limpiar_modelo_comercial(marca, vehiculo_raw, ano):
             pass
         return "SEDAN"
 
+    # Unificar modelos compuestos separados por espacio (ej. CX 30 -> CX-30, CR V -> CR-V, F 150 -> F-150, S 10 -> S-10)
+    v = re.sub(r'\b(CX|CR|HR|BR|MX|RX|NX|UX|GX|LX|FX|QX|XT|CT|ES|IS|LS|GS|RC|LC|GLC|GLE|GLA|GLB|GLS|CLA|CLS)\s*[\-\s]?\s*([0-9A-Z]{1,3})\b', r'\1-\2', v)
+    v = re.sub(r'\b([FS])\s*[\-\s]?\s*(10|150|250|350|450|550)\b', r'\1-\2', v)
+
     v = re.sub(r'\([^\)]*\)', ' ', v)
     v = re.sub(r'\b\d+\.\d+\s*[LT]?\b', ' ', v)
     v = re.sub(r'["\'\.\(\)]', ' ', v)
@@ -174,7 +178,7 @@ def limpiar_modelo_comercial(marca, vehiculo_raw, ano):
     for b in basura:
         v = re.sub(b, ' ', v)
 
-    modelos_cortos_validos = {"2", "3", "5", "6", "K3", "K4", "K5", "A1", "A3", "A4", "Q3", "Q5", "X1", "X3", "X5", "MG", "GT"}
+    modelos_cortos_validos = {"2", "3", "5", "6", "K3", "K4", "K5", "A1", "A3", "A4", "Q2", "Q3", "Q5", "Q7", "X1", "X3", "X4", "X5", "MG", "GT", "J7", "T6", "T8"}
     palabras_limpias = [w for w in v.split() if len(w) >= 3 or w in modelos_cortos_validos]
     return palabras_limpias[0] if palabras_limpias else ""
 
@@ -867,10 +871,14 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
         ctx = browser.new_context(viewport={"width": 1366, "height": 950})
         page = ctx.new_page()
 
-        ultimo_dialogo = {"msg": ""}
+        ultimo_dialogo = {"error": ""}
         def manejar_dialogo(d):
-            ultimo_dialogo["msg"] = d.message
-            print(f"   🔔 [ALERTA PORTAL]: {d.message}")
+            msg_d = d.message.strip()
+            if "seguro de guardar" in msg_d.lower() or "exito" in msg_d.lower() or "guardaron" in msg_d.lower():
+                print(f"   ✅ [CONFIRMACIÓN PORTAL ACEPTADA]: {msg_d}")
+            else:
+                ultimo_dialogo["error"] = msg_d
+                print(f"   🔔 [ALERTA PORTAL]: {msg_d}")
             d.accept()
 
         page.on("dialog", manejar_dialogo)
@@ -887,11 +895,14 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
 
             for sin, dict_partidas in por_enviar.items():
                 try:
-                    ultimo_dialogo["msg"] = ""
+                    ultimo_dialogo["error"] = ""
                     print(f"-> Abriendo Siniestro {sin} para inyectar {len(dict_partidas)} partida(s) validadas...")
                     frame = obtener_frame_derecho(page, espera_seg=8)
                     link = frame.locator(f"a.cvi:has-text('{sin}')")
                     if link.count() == 0:
+                        print(f"   ℹ️ El Siniestro {sin} ya no está en bandeja (ya fue cotizado o cerró subasta). Moviendo a Historial...")
+                        for it in dict_partidas.values():
+                            actualizar.append(gspread.Cell(row=it['gs_row'], col=idx_est + 1, value="HISTORIAL / CERRADA"))
                         continue
                     link.first.click(timeout=10000)
                     time.sleep(2.2)
@@ -934,11 +945,11 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                         btn.first.click()
                         time.sleep(3.0)
 
-                        if "Fecha Promesa" in ultimo_dialogo["msg"]:
-                            m_fec = re.search(r'\(\s*([0-9]{1,2}\s+[a-zA-Z]{3}\s+[0-9]{4})\s*\)', ultimo_dialogo["msg"])
+                        if "Fecha Promesa" in ultimo_dialogo["error"]:
+                            m_fec = re.search(r'\(\s*([0-9]{1,2}\s+[a-zA-Z]{3}\s+[0-9]{4})\s*\)', ultimo_dialogo["error"])
                             if m_fec:
                                 fecha_corregida = m_fec.group(1).strip().upper()
-                                ultimo_dialogo["msg"] = ""
+                                ultimo_dialogo["error"] = ""
                                 for idx_fila in dict_partidas.keys():
                                     frame.evaluate(
                                         """(args) => {
@@ -954,10 +965,12 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
 
                         page.screenshot(path="evidencia_despues_grabar.png", full_page=True)
 
-                        if not ultimo_dialogo["msg"]:
+                        if not ultimo_dialogo["error"]:
                             print(f"   💾 Siniestro {sin} GRABADO exitosamente en el portal.")
                             for it in dict_partidas.values():
                                 actualizar.append(gspread.Cell(row=it['gs_row'], col=idx_est + 1, value="ENVIADA PORTAL"))
+                        else:
+                            print(f"   ❌ El portal rechazó el guardado con la alerta: {ultimo_dialogo['error']}")
 
                     regresar_a_lista_siniestros(page, frame)
                 except Exception as e:

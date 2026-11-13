@@ -1302,8 +1302,7 @@ def abrir_centro_tareas():
     df_tareas, headers_tareas = leer_tareas_normalizadas()
 
     # 3. Extraer Siniestros y Refacciones ACTIVOS reusando la caché de BD_UNIFICADA
-    try:
-        mapa_taller_sin = {}
+    mapa_taller_sin = {}
     try:
         if 'cargar_base_viva' in globals():
             df_uni_local = cargar_base_viva().copy()

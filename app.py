@@ -997,12 +997,10 @@ with col_derecha:
     )
 
 with col_aseg:
-    vistas_con_aseguradora = ["📊 Analítico", "⚙️ Panel Operativo", "🧾 Facturación", "🔍 Consultas"]
-    if vista_actual in vistas_con_aseguradora:
-        opciones_aseg = ["Multiasistencias", "GNP", "Todas (Consolidado)"] if vista_actual == "📊 Analítico" else ["Multiasistencias", "GNP"]
-        aseguradora_sel = st.selectbox("Aseguradora", opciones_aseg, label_visibility="collapsed")
+    if vista_actual == "📊 Analítico":
+        aseguradora_sel = st.selectbox("Aseguradora", ["Multiasistencias", "GNP", "Todas (Consolidado)"], label_visibility="collapsed")
     else:
-        aseguradora_sel = "MULTI" 
+        aseguradora_sel = "Todas (Consolidado)" 
 
 with col_btn_ref:
     if st.button("🔄", help="Forzar recarga de datos desde Google Sheets", use_container_width=True):
@@ -1072,7 +1070,7 @@ def es_mismo_usuario(u1, u2, grupos_identidad=None):
             return True
     return False
 
-@st.cache_data(ttl=20)
+@st.cache_data(ttl=180)
 def leer_tareas_normalizadas():
     """Lee Gestor_Tareas con caché de 20 seg para evitar bloqueos por exceso de consultas (Error 429)."""
     try:
@@ -1629,6 +1627,7 @@ tipo_btn_tareas = "primary" if pendientes_badge > 0 else "secondary"
 
 with col_btn_tar:
     if st.button(label_btn_tareas, type=tipo_btn_tareas, use_container_width=True):
+        leer_tareas_normalizadas.clear()
         abrir_centro_tareas()
 
 with col_btn_gua:
@@ -2855,14 +2854,17 @@ elif vista_actual == "⚙️ Panel Operativo":
 
                     # 2. Tu ciclo for principal modificado
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
+                        aseg_raw_g = str(df_grupo[col_aseg].iloc[0]).strip().upper() if (col_aseg and col_aseg in df_grupo.columns) else "MULTI"
+                        badge_aseg = "🟠 GNP" if "GNP" in aseg_raw_g else "🔵 MULTI"
+
                         col_tit, col_btn_wa = st.columns([4, 1.2])
                         with col_tit:
-                            # Se muestra el título una sola vez
-                            st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
+                            st.markdown(f"**{badge_aseg} | 🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         with col_btn_wa:
                             if st.button("📱 Generar Mensaje WA", key=f"wa_btn_{taller}_{siniestro_auto}", use_container_width=True):
                                 vehiculo_str = df_grupo['Vehiculo_Info'].iloc[0]
                                 msg = "🚨 NUEVA ASIGNACIÓN 🚨\n"
+                                msg += f"🛡️ Aseguradora: {'GNP' if 'GNP' in aseg_raw_g else 'MULTIASISTENCIA'}\n"
                                 msg += f"🏢 Taller: {taller}\n"
                                 msg += f"📄 Siniestro: {siniestro_auto}\n"
                                 msg += f"🚗 Vehículo: {vehiculo_str}\n\n"
@@ -2874,22 +2876,21 @@ elif vista_actual == "⚙️ Panel Operativo":
                                     desc_pza = str(fila_pza.get(col_desc, '')).strip()
                                     msg += f"🔹 {cant_str}x {desc_pza}\n"
             
-                                # Lanzamos el popup con el mensaje generado
                                 mostrar_dialogo_wa(msg)
 
-                        # -----------------------------------------------------------------------------
-                        # AQUÍ CONTINÚA DIRECTAMENTE TU TABLA (st.data_editor o st.dataframe)
-                                               
                         if permiso_edicion: 
                             df_grupo['Confirmar Surtido'] = False; df_grupo['Pago_Danos'] = False; df_grupo['Cancelar'] = False; df_grupo['Pérdida Total'] = False; df_grupo['PDD'] = False
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Pago_Danos', 'Cancelar', 'Pérdida Total', 'PDD'] + [c for c in [col_comentarios] if c in df_grupo.columns]
                             config_conf = base_config.copy()
                             config_conf.update({"Confirmar Surtido": st.column_config.CheckboxColumn("✅ Confirmar", default=False), "Pago_Danos": st.column_config.CheckboxColumn("💵 Pago *", default=False), "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False), "Pérdida Total": st.column_config.CheckboxColumn("💥 PT", default=False), "PDD": st.column_config.CheckboxColumn("💸 PDD", default=False), "Proveedor": st.column_config.SelectboxColumn("🏢 Proveedor", options=lista_proveedores), "Costo Compra": st.column_config.NumberColumn("💲 Costo ($)", format="%.2f")})
                             columnas_editables = ['Proveedor', 'Costo Compra', 'Confirmar Surtido', 'Pago_Danos', 'Cancelar', 'Pérdida Total', 'PDD', col_comentarios]
-                            df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_conf, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_conf_{taller}_{siniestro_auto}")
+                            k_ed_conf = f"ed_conf_{taller}_{siniestro_auto}"
+                            df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_conf, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=k_ed_conf)
                             for col in df_grupo.columns:
                                 if col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
-                            dfs_editados_conf.append(df_editado_parcial)
+                            filas_mod_c = [int(i) for i in st.session_state.get(k_ed_conf, {}).get("edited_rows", {}).keys() if str(i).isdigit() and int(i) < len(df_editado_parcial)]
+                            if filas_mod_c:
+                                dfs_editados_conf.append(df_editado_parcial.iloc[filas_mod_c].copy())
                         else:
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento, col_comentarios] if c in df_grupo.columns]
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
@@ -2970,7 +2971,9 @@ elif vista_actual == "⚙️ Panel Operativo":
                 n_sin_t = df_taller['Agrupador_Visual'].nunique()
                 with st.expander(f"🏢 {taller} — 🚗 {n_sin_t} Pedido(s) | 📦 {len(df_taller)} Pieza(s)", expanded=False):
                     for siniestro_auto, df_grupo in df_taller.groupby('Agrupador_Visual'):
-                        st.markdown(f"**🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
+                        aseg_raw_g = str(df_grupo[col_aseg].iloc[0]).strip().upper() if (col_aseg and col_aseg in df_grupo.columns) else "MULTI"
+                        badge_aseg = "🟠 GNP" if "GNP" in aseg_raw_g else "🔵 MULTI"
+                        st.markdown(f"**{badge_aseg} | 🚗 Pedido / Siniestro: `{siniestro_auto}` | {df_grupo['Vehiculo_Info'].iloc[0]}**")
                         if permiso_edicion:
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento] if c in df_grupo.columns] + ['Proveedor', 'Costo Compra'] + [c for c in [col_paqueteria, col_guia, col_estatus_envio, col_remision] if c in df_grupo.columns] + ['Entregado', 'Recibido', 'Pago_Danos', 'Cancelar'] + [c for c in [col_comentarios] if c in df_grupo.columns]
                             config_pedidos = base_config.copy()
@@ -2984,10 +2987,13 @@ elif vista_actual == "⚙️ Panel Operativo":
                                 "Cancelar": st.column_config.CheckboxColumn("🚫 Can", default=False) 
                             })
                             columnas_editables = ['Proveedor', 'Costo Compra', col_paqueteria, col_guia, col_remision, 'Entregado', 'Recibido', 'Pago_Danos', 'Cancelar', col_comentarios, col_vencimiento]
-                            df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_pedidos, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=f"ed_{taller}_{siniestro_auto}")
+                            k_ed_asig = f"ed_{taller}_{siniestro_auto}"
+                            df_editado_parcial = st.data_editor(df_grupo[cols_visibles], column_config=config_pedidos, disabled=[c for c in cols_visibles if c not in columnas_editables], hide_index=True, use_container_width=True, key=k_ed_asig)
                             for col in df_grupo.columns:
                                 if col not in df_editado_parcial.columns: df_editado_parcial[col] = df_grupo[col].values
-                            dfs_editados.append(df_editado_parcial)
+                            filas_mod_a = [int(i) for i in st.session_state.get(k_ed_asig, {}).get("edited_rows", {}).keys() if str(i).isdigit() and int(i) < len(df_editado_parcial)]
+                            if filas_mod_a:
+                                dfs_editados.append(df_editado_parcial.iloc[filas_mod_a].copy())
                         else:
                             cols_visibles = [c for c in [col_id, col_cant, col_desc, col_origen, col_precio, col_vencimiento, col_paqueteria, col_guia, col_estatus_envio, col_remision, col_comentarios] if c in df_grupo.columns]
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
@@ -6196,37 +6202,73 @@ if permiso_edicion:
     col_venc_univ = buscar_columna(df_completo, ["VENCIMIENTO", "FECHA VENCIMIENTO", "PROMESA"], ["VENCIMIENTO", "PROMESA"])
     col_asig_univ = buscar_columna(df_completo, ["ASIGNACION", "FECHA ASIGNACION"], ["ASIGNACI"])
     
+    # Filtrar todas las tablas operativas estrictamente por edited_rows (Cero falsos positivos y máxima velocidad)
+    def filtrar_solo_editadas(df_ed, state_key):
+        if df_ed is None or not isinstance(df_ed, pd.DataFrame) or df_ed.empty:
+            return pd.DataFrame()
+        filas_idx = [
+            int(i) for i in st.session_state.get(state_key, {}).get("edited_rows", {}).keys()
+            if str(i).isdigit() and int(i) < len(df_ed)
+        ]
+        return df_ed.iloc[filas_idx].copy() if filas_idx else pd.DataFrame()
+
+    df_editado_venc = filtrar_solo_editadas(df_editado_venc, "ed_venc")
+    df_editado_atrasadas = filtrar_solo_editadas(df_editado_atrasadas, "ed_atr")
+    df_editado_cobro = filtrar_solo_editadas(df_editado_cobro, "ed_entregados_op_dia" if vista_actual == "🚚 Operación del Día" else "ed_cobro")
+    df_editado_reemb = filtrar_solo_editadas(df_editado_reemb, "ed_reemb")
+    if 'df_editado_rec' in locals():
+        df_editado_rec = filtrar_solo_editadas(df_editado_rec, "ed_rec_panel")
+    if 'df_editado_transito_op' in locals():
+        df_editado_transito_op = filtrar_solo_editadas(df_editado_transito_op, "ed_transito_op_dia")
+    df_editado_fact = filtrar_solo_editadas(df_editado_fact, "ed_facturacion")
+
+    if vista_actual == "🛒 Compras":
+        k_cap_fast = f"ed_pendientes_compra_rapida_{st.session_state.get('reset_key_compras', 0)}"
+        st.session_state['df_cap_edit_temp'] = filtrar_solo_editadas(st.session_state.get('df_cap_edit_temp', pd.DataFrame()), k_cap_fast)
+
+    hay_ediciones_activas = any(
+        isinstance(d, pd.DataFrame) and not d.empty for d in [
+            df_editado_conf, df_editado_venc, df_editado_atrasadas, df_editado_cobro,
+            df_editado, df_editado_reemb,
+            locals().get('df_editado_rec', pd.DataFrame()),
+            locals().get('df_editado_transito_op', pd.DataFrame()),
+            df_editado_fact,
+            st.session_state.get('df_cap_edit_temp', pd.DataFrame()) if vista_actual == "🛒 Compras" else pd.DataFrame(),
+            filtrar_solo_editadas(st.session_state.get('df_editado_compras_temp', pd.DataFrame()), "ed_compras_main") if vista_actual == "🛒 Compras" else pd.DataFrame()
+        ]
+    )
+
     originales = {}
-    for _, r in df_completo.iterrows():
-        k = generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, ''))
-        raw_venc = str(r.get(col_venc_univ, '')).strip() if col_venc_univ else ""
-        venc_formateada = estandarizar_fechas_mx(raw_venc) if raw_venc else ""
-
-        originales[k] = {
-            'comentario': str(r.get(col_coment_univ, '')).strip() if col_coment_univ else '',
-            'paqueteria': str(r.get(col_paqueteria_univ, '')).strip() if col_paqueteria_univ else '',
-            'guia': str(r.get(col_guia_univ, '')).strip() if col_guia_univ else '',
-            'guia_retorno': str(r.get(col_guia_dev_univ, '')).strip() if col_guia_dev_univ else '',
-            'estatus_db': str(r.get(col_estatus_univ, '')).strip().upper() if col_estatus_univ else '',
-            'remision_bool': str(r.get(col_rem_univ, '')).strip() != '' if col_rem_univ else False,
-            'vencimiento_db': venc_formateada,
-            'asignacion_db': str(r.get(col_asig_univ, '')).strip() if col_asig_univ else ''
-        }
-
-    # Mapa de compras previas para detectar solo cambios reales de Proveedor o Costo en Asignados
     compras_previas_map = {}
-    if not df_compras.empty:
-        for _, r_cp in df_compras.iterrows():
-            k_cp = generar_llave(r_cp.get('Siniestro', ''), r_cp.get('Descripción Pieza', ''))
-            try:
-                c_cp_f = float(str(r_cp.get('Costo Compra', '0')).replace('$', '').replace(',', '').strip() or 0.0)
-            except Exception:
-                c_cp_f = 0.0
-            compras_previas_map[k_cp] = {
-                'prov': str(r_cp.get('Proveedor', '')).strip(),
-                'costo': round(c_cp_f, 2)
+    if hay_ediciones_activas or btn_guardar or trigger_rem:
+        for _, r in df_completo.iterrows():
+            k = generar_llave(r.get(col_id_univ, ''), r.get(col_desc_univ, ''))
+            raw_venc = str(r.get(col_venc_univ, '')).strip() if col_venc_univ else ""
+            venc_formateada = estandarizar_fechas_mx(raw_venc) if raw_venc else ""
+
+            originales[k] = {
+                'comentario': str(r.get(col_coment_univ, '')).strip() if col_coment_univ else '',
+                'paqueteria': str(r.get(col_paqueteria_univ, '')).strip() if col_paqueteria_univ else '',
+                'guia': str(r.get(col_guia_univ, '')).strip() if col_guia_univ else '',
+                'guia_retorno': str(r.get(col_guia_dev_univ, '')).strip() if col_guia_dev_univ else '',
+                'estatus_db': str(r.get(col_estatus_univ, '')).strip().upper() if col_estatus_univ else '',
+                'remision_bool': str(r.get(col_rem_univ, '')).strip() != '' if col_rem_univ else False,
+                'vencimiento_db': venc_formateada,
+                'asignacion_db': str(r.get(col_asig_univ, '')).strip() if col_asig_univ else ''
             }
-        
+
+        if not df_compras.empty:
+            for _, r_cp in df_compras.iterrows():
+                k_cp = generar_llave(r_cp.get('Siniestro', ''), r_cp.get('Descripción Pieza', ''))
+                try:
+                    c_cp_f = float(str(r_cp.get('Costo Compra', '0')).replace('$', '').replace(',', '').strip() or 0.0)
+                except Exception:
+                    c_cp_f = 0.0
+                compras_previas_map[k_cp] = {
+                    'prov': str(r_cp.get('Proveedor', '')).strip(),
+                    'costo': round(c_cp_f, 2)
+                }
+
     cambios_a_guardar = {}
     cambios_bd_compras = {}
     tz_mx = datetime.timezone(datetime.timedelta(hours=-6))
@@ -6239,7 +6281,7 @@ if permiso_edicion:
             cambios_a_guardar.setdefault(k, {}).update({'estatus': 'EN TRANSITO', 'imprimir_remision': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
             if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
 
-    if True:
+    if hay_ediciones_activas:
         if not df_editado_conf.empty:
             for _, row in df_editado_conf.iterrows():
                 k = generar_llave(row.get(col_id, ''), row.get(col_desc, ''))

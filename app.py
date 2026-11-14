@@ -489,10 +489,12 @@ def abrir_popup_monitor():
             except Exception: return pd.NaT
 
         def generar_excel_corporativo_pmr(hojas_bloques, titulo_reporte):
-            """
-            Soporta 1 o varias tablas apiladas en una misma hoja de Excel (.xlsx) o múltiples hojas.
-            Formato de entrada: {"Nombre_Hoja": [("Título Tabla 1", df1), ("Título Tabla 2", df2)]}
-            """
+            try:
+                import xlsxwriter
+            except ImportError:
+                import subprocess, sys
+                subprocess.run([sys.executable, "-m", "pip", "install", "xlsxwriter"], check=False)
+
             buffer_xl = io.BytesIO()
             with pd.ExcelWriter(buffer_xl, engine='xlsxwriter') as writer:
                 wb = writer.book

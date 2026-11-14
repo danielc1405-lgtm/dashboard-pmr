@@ -427,6 +427,7 @@ def abrir_popup_monitor():
     # PESTAÑA 2: CENTRO DE REPORTERÍA (CON CALENDARIO DE INICIO Y FIN)
     # =========================================================================
     with tab_reporte:
+        import io
         if 'reporte_activo_popup' not in st.session_state:
             st.session_state['reporte_activo_popup'] = "Informe de Tiempos y SLA por Plaza (Auditoría BBVA)"
 
@@ -435,33 +436,24 @@ def abrir_popup_monitor():
 
         with st.container(border=True):
             st.markdown("**1. Lanzador de Reportes Ejecutivos**")
-            c_sel_rep, c_aseg_rep, c_ini_rep, c_fin_rep, c_btn_rep = st.columns([2.0, 0.9, 1.0, 1.0, 1.0], vertical_alignment="bottom")
+            c_sel_rep, c_aseg_rep, c_ini_rep, c_fin_rep, c_btn_rep = st.columns([2.2, 0.8, 1.0, 1.0, 1.0], vertical_alignment="bottom")
             with c_sel_rep:
                 tipo_rep_sel = st.selectbox(
                     "Selecciona el Reporte:",
-                    ["Informe de Tiempos y SLA por Plaza (Auditoría BBVA)", "Reporte Operativo"],
+                    [
+                        "Informe de Tiempos y SLA por Plaza (Auditoría BBVA)",
+                        "Reporte Operativo",
+                        "Reporte de Compras (Pendientes y Por Llegar)",
+                        "Reporte de Préstamos del Personal"
+                    ],
                     key="sel_tipo_rep_pop"
                 )
             with c_aseg_rep:
-                aseg_rep_sel = st.selectbox(
-                    "Aseguradora:",
-                    ["MULTI", "GNP", "TODAS"],
-                    key="sel_aseg_rep_pop"
-                )
+                aseg_rep_sel = st.selectbox("Aseguradora:", ["TODAS", "MULTI", "GNP"], key="sel_aseg_rep_pop")
             with c_ini_rep:
-                fecha_ini_rep = st.date_input(
-                    "📅 Fecha Inicio:",
-                    value=datetime.date(2026, 9, 1),
-                    format="DD/MM/YYYY",
-                    key="cal_ini_rep_pop"
-                )
+                fecha_ini_rep = st.date_input("📅 Fecha Inicio:", value=datetime.date(2026, 9, 1), format="DD/MM/YYYY", key="cal_ini_rep_pop")
             with c_fin_rep:
-                fecha_fin_rep = st.date_input(
-                    "📅 Fecha Fin:",
-                    value=datetime.date(2026, 10, 31),
-                    format="DD/MM/YYYY",
-                    key="cal_fin_rep_pop"
-                )
+                fecha_fin_rep = st.date_input("📅 Fecha Fin:", value=datetime.date(2026, 10, 31), format="DD/MM/YYYY", key="cal_fin_rep_pop")
             with c_btn_rep:
                 if st.button("📊 Ejecutar Reporte", type="primary", use_container_width=True, key="btn_ejecutar_rep_pop"):
                     st.session_state['reporte_activo_popup'] = tipo_rep_sel
@@ -470,8 +462,7 @@ def abrir_popup_monitor():
             try:
                 doc = init_connection()
                 datos = doc.worksheet(hoja).get_all_values()
-                if not datos: return pd.DataFrame()
-                return pd.DataFrame(datos[1:], columns=[str(h).strip() for h in datos[0]])
+                return pd.DataFrame(datos[1:], columns=[str(h).strip() for h in datos[0]]) if len(datos) > 1 else pd.DataFrame()
             except Exception:
                 return pd.DataFrame()
 
@@ -485,501 +476,528 @@ def abrir_popup_monitor():
         def limpiar_txt_pdf(txt):
             return str(txt).encode('latin-1', 'replace').decode('latin-1')
 
+        def parse_dt_rep_pop(val):
+            if pd.isna(val) or str(val).strip() == '': return pd.NaT
+            val_str = str(val).lower().replace('-', '/')
+            if val_str.replace('.', '', 1).isdigit():
+                v_num = float(val_str)
+                if v_num > 30000: return pd.to_datetime('1899-12-30') + pd.to_timedelta(v_num, unit='D')
+            meses_map = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
+            for m_es, m_num in meses_map.items():
+                if m_es in val_str: val_str = val_str.replace(m_es, m_num); break
+            try: return pd.to_datetime(val_str, dayfirst=True, errors='coerce')
+            except Exception: return pd.NaT
+
+        def generar_excel_corporativo_pmr(hojas_bloques, titulo_reporte):
+            """
+            Soporta 1 o varias tablas apiladas en una misma hoja de Excel (.xlsx) o múltiples hojas.
+            Formato de entrada: {"Nombre_Hoja": [("Título Tabla 1", df1), ("Título Tabla 2", df2)]}
+            """
+            buffer_xl = io.BytesIO()
+            with pd.ExcelWriter(buffer_xl, engine='xlsxwriter') as writer:
+                wb = writer.book
+                f_tit = wb.add_format({'bold': True, 'font_size': 12, 'font_color': '#FFFFFF', 'bg_color': '#0B2240', 'valign': 'vcenter'})
+                f_sec = wb.add_format({'bold': True, 'font_size': 10, 'font_color': '#0B2240', 'bg_color': '#D9E1F2', 'border': 1, 'valign': 'vcenter'})
+                f_hdr = wb.add_format({'bold': True, 'font_size': 9.5, 'font_color': '#FFFFFF', 'bg_color': '#1F4E78', 'border': 1, 'align': 'center', 'valign': 'vcenter'})
+                f_cel = wb.add_format({'font_size': 9, 'border': 1, 'valign': 'vcenter'})
+                f_zeb = wb.add_format({'font_size': 9, 'bg_color': '#F2F5F9', 'border': 1, 'valign': 'vcenter'})
+                f_mon = wb.add_format({'font_size': 9, 'border': 1, 'num_format': '$ #,##0.00', 'align': 'right', 'valign': 'vcenter'})
+                f_mzb = wb.add_format({'font_size': 9, 'bg_color': '#F2F5F9', 'border': 1, 'num_format': '$ #,##0.00', 'align': 'right', 'valign': 'vcenter'})
+                f_tlb = wb.add_format({'bold': True, 'font_size': 9.5, 'bg_color': '#D9E1F2', 'border': 1, 'align': 'right'})
+                f_tvl = wb.add_format({'bold': True, 'font_size': 9.5, 'bg_color': '#D9E1F2', 'border': 1, 'num_format': '$ #,##0.00', 'align': 'right'})
+
+                for nom_hoja, lista_tablas in hojas_bloques.items():
+                    sh_name = re.sub(r'[\\/*?:\[\]]', '', str(nom_hoja))[:31] or "Reporte"
+                    ws = wb.add_worksheet(sh_name)
+                    writer.sheets[sh_name] = ws
+                    max_cols_hoja = max([len(df_t.columns) for _, df_t in lista_tablas if df_t is not None and not df_t.empty] or [6])
+                    ws.merge_range(0, 0, 0, max(1, max_cols_hoja - 1), f"  PMR SERVICIOS AUTOMOTRICES — {titulo_reporte.upper()} ({hoy_cal_date.strftime('%d/%m/%Y')})", f_tit)
+                    ws.set_row(0, 24)
+
+                    curr_row = 2
+                    anchos_max = {}
+                    for tit_sec, df_t in lista_tablas:
+                        df_c = df_t.fillna("").copy() if (df_t is not None and not df_t.empty) else pd.DataFrame([{"Estado": "Sin registros en este apartado"}])
+                        n_r, n_c = df_c.shape
+                        ws.merge_range(curr_row, 0, curr_row, max(1, n_c - 1), f"  {tit_sec}", f_sec)
+                        ws.set_row(curr_row, 19)
+                        curr_row += 1
+
+                        cols_mon = set()
+                        ws.set_row(curr_row, 21)
+                        for c_i, col_nom in enumerate(df_c.columns):
+                            ws.write(curr_row, c_i, str(col_nom), f_hdr)
+                            anchos_max[c_i] = max(anchos_max.get(c_i, 10), len(str(col_nom)) + 4)
+                            if any(k in str(col_nom).upper() for k in ["PRECIO", "COSTO", "MONTO", "ADEUDADO", "AUTORIZADO", "TOTAL ($)"]):
+                                cols_mon.add(c_i)
+                        curr_row += 1
+
+                        totales = {}
+                        for r_i in range(n_r):
+                            es_par = (r_i % 2 == 1)
+                            ws.set_row(curr_row, 17)
+                            for c_i in range(n_c):
+                                val = df_c.iat[r_i, c_i]
+                                anchos_max[c_i] = max(anchos_max.get(c_i, 10), len(str(val)) + 3)
+                                if c_i in cols_mon:
+                                    try:
+                                        v_num = float(str(val).replace('$', '').replace(',', '').strip() or 0.0)
+                                        ws.write_number(curr_row, c_i, v_num, f_mzb if es_par else f_mon)
+                                        totales[c_i] = totales.get(c_i, 0.0) + v_num
+                                    except Exception:
+                                        ws.write(curr_row, c_i, str(val), f_zeb if es_par else f_cel)
+                                else:
+                                    ws.write(curr_row, c_i, val if isinstance(val, (int, float)) else str(val), f_zeb if es_par else f_cel)
+                            curr_row += 1
+
+                        if totales:
+                            ws.set_row(curr_row, 19)
+                            for c_i in range(n_c):
+                                if c_i in totales:
+                                    ws.write_number(curr_row, c_i, totales[c_i], f_tvl)
+                                elif c_i == max(0, min(cols_mon) - 1):
+                                    ws.write(curr_row, c_i, "TOTAL:", f_tlb)
+                                else:
+                                    ws.write(curr_row, c_i, "", f_tlb)
+                            curr_row += 1
+                        curr_row += 2
+
+                    for c_i, w_val in anchos_max.items():
+                        ws.set_column(c_i, c_i, min(max(w_val, 12), 42))
+            return buffer_xl.getvalue()
+
+        def crear_pdf_tablas_apiladas(titulo_doc, subtitulo_doc, bloques_pdf):
+            pdf = FPDF(orientation='L', unit='mm', format='A4')
+            pdf.set_auto_page_break(auto=True, margin=10)
+            pdf.add_page()
+            pdf.set_font("Arial", 'B', 11)
+            pdf.cell(0, 7, limpiar_txt_pdf(f"PMR SERVICIOS AUTOMOTRICES - {titulo_doc}"), ln=True, align='C')
+            pdf.set_font("Arial", '', 8)
+            pdf.cell(0, 5, limpiar_txt_pdf(subtitulo_doc), ln=True, align='C')
+            pdf.ln(2)
+            for tit_b, df_b, cols_w in bloques_pdf:
+                pdf.set_font("Arial", 'B', 9)
+                pdf.cell(0, 6, limpiar_txt_pdf(tit_b), ln=True)
+                if df_b is None or df_b.empty:
+                    pdf.set_font("Arial", 'I', 8)
+                    pdf.cell(0, 5, limpiar_txt_pdf("Sin registros en este apartado."), ln=True)
+                    pdf.ln(3)
+                    continue
+                pdf.set_fill_color(0, 51, 102); pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 7)
+                for h_t, w_t in cols_w:
+                    pdf.cell(w_t, 6, limpiar_txt_pdf(h_t[:20]), border=1, fill=True, align='C')
+                pdf.ln()
+                pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", '', 6.5)
+                tot_pdf = {}
+                for _, r_b in df_b.iterrows():
+                    for h_t, w_t in cols_w:
+                        es_dinero = any(k in h_t.upper() for k in ["PRECIO", "COSTO", "MONTO", "ADEUDADO", "AUTORIZADO"])
+                        if es_dinero:
+                            v_f = float(str(r_b.get(h_t, 0)).replace('$', '').replace(',', '').strip() or 0.0)
+                            tot_pdf[h_t] = tot_pdf.get(h_t, 0.0) + v_f
+                            pdf.cell(w_t, 5, f"${v_f:,.2f}", border=1, align='R')
+                        else:
+                            pdf.cell(w_t, 5, limpiar_txt_pdf(str(r_b.get(h_t, ''))[:34]), border=1)
+                    pdf.ln()
+                if tot_pdf:
+                    pdf.set_font("Arial", 'B', 7)
+                    for h_t, w_t in cols_w:
+                        if h_t in tot_pdf:
+                            pdf.cell(w_t, 5.5, f"${tot_pdf[h_t]:,.2f}", border=1, align='R')
+                        else:
+                            pdf.cell(w_t, 5.5, "", border=1)
+                    pdf.ln()
+                pdf.ln(3)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_f:
+                pdf.output(tmp_f.name)
+                with open(tmp_f.name, "rb") as f_r: return f_r.read()
+
         # ---------------------------------------------------------------------
-        # OPCIÓN A: REPORTE OPERATIVO
+        # 1. REPORTE OPERATIVO
         # ---------------------------------------------------------------------
         if st.session_state['reporte_activo_popup'] == "Reporte Operativo":
             st.markdown("### 📋 Reporte Operativo: Pedidos en Proceso")
-            with st.spinner("Generando Reporte Operativo..."):
-                df_rep_u = fetch_seguro_pop("BD_UNIFICADA")
-                df_rep_c = fetch_seguro_pop("BD_COMPRAS")
+            df_rep_u = fetch_seguro_pop("BD_UNIFICADA")
+            df_rep_c = fetch_seguro_pop("BD_COMPRAS")
+            if not df_rep_u.empty:
+                c_id, c_cdr = get_c_pop(df_rep_u, ["SINIESTRO", "PEDIDO"]), get_c_pop(df_rep_u, ["TALLER", "CDR"])
+                c_marca, c_modelo = get_c_pop(df_rep_u, ["MARCA"]), get_c_pop(df_rep_u, ["MODELO"])
+                c_ano, c_pieza = get_c_pop(df_rep_u, ["AÑO", "ANO"]), get_c_pop(df_rep_u, ["DESCRIPCI", "REFACCI"])
+                c_guia, c_rastreo = get_c_pop(df_rep_u, ["GUIA"], excluidos=["RET", "DEV"]), get_c_pop(df_rep_u, ["ESTATUS ENV", "RASTREO"])
+                c_venc, c_est = get_c_pop(df_rep_u, ["VENCIMIENTO", "PROMESA"]), get_c_pop(df_rep_u, ["ESTATUS", "STATUS"], excluidos=["ENV", "PAGO"])
+                c_aseg, c_obs = get_c_pop(df_rep_u, ["ASEGURADORA"]), get_c_pop(df_rep_u, ["COMENTARIO", "OBSERVACION"])
 
-                if not df_rep_u.empty:
-                    c_id = get_c_pop(df_rep_u, ["SINIESTRO", "PEDIDO"])
-                    c_cdr = get_c_pop(df_rep_u, ["TALLER", "CDR"])
-                    c_marca = get_c_pop(df_rep_u, ["MARCA"])
-                    c_modelo = get_c_pop(df_rep_u, ["MODELO"])
-                    c_ano = get_c_pop(df_rep_u, ["AÑO", "ANO"])
-                    c_pieza = get_c_pop(df_rep_u, ["DESCRIPCI", "REFACCI"])
-                    c_guia = get_c_pop(df_rep_u, ["GUIA"], excluidos=["RET", "DEV"])
-                    c_rastreo = get_c_pop(df_rep_u, ["ESTATUS ENV", "RASTREO"])
-                    c_venc = get_c_pop(df_rep_u, ["VENCIMIENTO", "PROMESA"])
-                    c_est = get_c_pop(df_rep_u, ["ESTATUS", "STATUS"], excluidos=["ENV", "PAGO"])
-                    c_aseg = get_c_pop(df_rep_u, ["ASEGURADORA"])
-                    c_obs = get_c_pop(df_rep_u, ["COMENTARIO", "OBSERVACION"])
+                estatus_excluir = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "PERDIDA TOTAL"]
+                df_rep = df_rep_u[~df_rep_u[c_est].astype(str).str.upper().isin(estatus_excluir)].copy()
 
-                    estatus_excluir = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "PERDIDA TOTAL"]
-                    df_rep = df_rep_u[~df_rep_u[c_est].astype(str).str.upper().isin(estatus_excluir)].copy()
+                dict_prov_rep = {}
+                if not df_rep_c.empty:
+                    cc_sin, cc_pz, cc_pr = get_c_pop(df_rep_c, ["SINIESTRO", "PEDIDO"]), get_c_pop(df_rep_c, ["DESCRIPCI", "PIEZA"]), get_c_pop(df_rep_c, ["PROVEEDOR"])
+                    if cc_sin and cc_pz and cc_pr:
+                        for _, rc in df_rep_c.iterrows():
+                            sv = str(rc.get(cc_sin, '')).strip().upper().removesuffix('.0')
+                            pv = ' '.join(str(rc.get(cc_pz, '')).strip().upper().split())
+                            dict_prov_rep[f"{sv}_{pv}"] = str(rc.get(cc_pr, '')).strip()
 
-                    dict_prov_rep = {}
-                    if not df_rep_c.empty:
-                        cc_sin = get_c_pop(df_rep_c, ["SINIESTRO", "PEDIDO"])
-                        cc_pz = get_c_pop(df_rep_c, ["DESCRIPCI", "REFACCI", "PIEZA"])
-                        cc_pr = get_c_pop(df_rep_c, ["PROVEEDOR"])
-                        if cc_sin and cc_pz and cc_pr:
-                            for _, rc in df_rep_c.iterrows():
-                                s_v = str(rc.get(cc_sin, '')).strip().upper()
-                                if s_v.endswith('.0'): s_v = s_v[:-2]
-                                p_v = ' '.join(str(rc.get(cc_pz, '')).strip().upper().split())
-                                dict_prov_rep[f"{s_v}_{p_v}"] = str(rc.get(cc_pr, '')).strip()
+                df_rep['PROVEEDOR'] = df_rep.apply(lambda r: dict_prov_rep.get(f"{str(r.get(c_id,'')).strip().upper().removesuffix('.0')}_{' '.join(str(r.get(c_pieza,'')).strip().upper().split())}", ""), axis=1)
+                df_rep['COMPAÑÍA'] = df_rep[c_aseg].astype(str).str.upper().apply(lambda x: "GNP" if "GNP" in x else "MULTI") if c_aseg else "MULTI"
+                if aseg_rep_sel != "TODAS":
+                    df_rep = df_rep[df_rep['COMPAÑÍA'] == aseg_rep_sel].copy()
 
-                    def map_prv(row):
-                        sv = str(row.get(c_id, '')).strip().upper()
-                        if sv.endswith('.0'): sv = sv[:-2]
-                        pv = ' '.join(str(row.get(c_pieza, '')).strip().upper().split())
-                        return dict_prov_rep.get(f"{sv}_{pv}", "")
+                df_rep.rename(columns={c_id: 'SINIESTRO/PEDIDO', c_cdr: 'CDR', c_marca: 'MARCA', c_modelo: 'MODELO', c_ano: 'AÑO', c_pieza: 'PIEZA', c_guia: 'GUÍA', c_rastreo: 'ESTATUS GUÍA', c_venc: 'FECHA VENCIMIENTO', c_est: 'ESTATUS', c_obs: 'OBSERVACIONES'}, inplace=True)
+                cols_op = ['COMPAÑÍA', 'ESTATUS', 'SINIESTRO/PEDIDO', 'CDR', 'MARCA', 'MODELO', 'AÑO', 'PIEZA', 'PROVEEDOR', 'GUÍA', 'ESTATUS GUÍA', 'FECHA VENCIMIENTO', 'OBSERVACIONES']
+                for col in cols_op:
+                    if col not in df_rep.columns: df_rep[col] = ""
+                df_rep = df_rep[cols_op].sort_values(by=['COMPAÑÍA', 'ESTATUS'])
+                st.dataframe(df_rep, use_container_width=True, hide_index=True)
 
-                    df_rep['PROVEEDOR'] = df_rep.apply(map_prv, axis=1)
-                    df_rep['COMPAÑÍA'] = df_rep[c_aseg].astype(str).str.upper().apply(lambda x: "MULTI" if "MULTI" in x else ("GNP" if "GNP" in x else "OTRA")) if c_aseg else "MULTI"
-
-                    if aseg_rep_sel != "TODAS":
-                        df_rep = df_rep[df_rep['COMPAÑÍA'] == aseg_rep_sel].copy()
-
-                    rename_rep = {
-                        c_id: 'SINIESTRO/PEDIDO', c_cdr: 'CDR', c_marca: 'MARCA', c_modelo: 'MODELO',
-                        c_ano: 'AÑO', c_pieza: 'PIEZA', c_guia: 'GUÍA', c_rastreo: 'ESTATUS GUÍA',
-                        c_venc: 'FECHA VENCIMIENTO', c_est: 'ESTATUS', c_obs: 'OBSERVACIONES'
-                    }
-                    df_rep.rename(columns=rename_rep, inplace=True)
-
-                    columnas_solicitadas = ['COMPAÑÍA', 'ESTATUS', 'SINIESTRO/PEDIDO', 'CDR', 'MARCA', 'MODELO', 'AÑO', 'PIEZA', 'PROVEEDOR', 'GUÍA', 'ESTATUS GUÍA', 'FECHA VENCIMIENTO', 'OBSERVACIONES']
-                    for col in columnas_solicitadas:
-                        if col not in df_rep.columns: df_rep[col] = ""
-
-                    df_rep = df_rep[columnas_solicitadas].sort_values(by=['COMPAÑÍA', 'ESTATUS'])
-                    st.dataframe(df_rep, use_container_width=True, hide_index=True)
-
-                    pdf_op = FPDF(orientation='L', unit='mm', format='A4')
-                    pdf_op.set_auto_page_break(auto=True, margin=10)
-                    pdf_op.add_page()
-                    pdf_op.set_font("Arial", 'B', 11)
-                    pdf_op.cell(0, 7, limpiar_txt_pdf("PMR SERVICIOS AUTOMOTRICES - REPORTE OPERATIVO"), ln=True, align='C')
-                    pdf_op.set_font("Arial", '', 8)
-                    pdf_op.cell(0, 5, limpiar_txt_pdf(f"Fecha: {hoy_cal_date.strftime('%d/%m/%Y')} | Partidas: {len(df_rep)}"), ln=True, align='C')
-                    pdf_op.ln(2)
-                    pdf_op.set_fill_color(0, 51, 102); pdf_op.set_text_color(255, 255, 255); pdf_op.set_font("Arial", 'B', 7)
-                    cols_pdf_op = [('COMPAÑÍA', 16), ('ESTATUS', 28), ('SINIESTRO/PEDIDO', 25), ('CDR', 48), ('MODELO', 32), ('PIEZA', 55), ('PROVEEDOR', 35), ('FECHA VENCIMIENTO', 22)]
-                    for h_t, w_t in cols_pdf_op:
-                        pdf_op.cell(w_t, 6, limpiar_txt_pdf(h_t[:16]), border=1, fill=True, align='C')
-                    pdf_op.ln()
-                    pdf_op.set_text_color(0, 0, 0); pdf_op.set_font("Arial", '', 6.5)
-                    for _, r_op in df_rep.iterrows():
-                        for h_t, w_t in cols_pdf_op:
-                            pdf_op.cell(w_t, 5, limpiar_txt_pdf(str(r_op.get(h_t, ''))[:28]), border=1)
-                        pdf_op.ln()
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_op:
-                        pdf_op.output(tmp_op.name)
-                        with open(tmp_op.name, "rb") as f_op: bytes_pdf_op = f_op.read()
-
-                    c_dl1, c_dl2 = st.columns(2)
-                    c_dl1.download_button(
-                        label="🖨️ Descargar Reporte Operativo (PDF)",
-                        data=bytes_pdf_op,
-                        file_name=f"Reporte_Operativo_PMR_{hoy_cal_date.strftime('%d%m%Y')}.pdf",
-                        mime="application/pdf",
-                        type="primary",
-                        use_container_width=True
-                    )
-                    c_dl2.download_button(
-                        label="📥 Descargar Reporte Operativo (CSV / Excel)",
-                        data=df_rep.to_csv(index=False).encode('utf-8-sig'),
-                        file_name=f"Reporte_Operativo_PMR_{hoy_cal_date.strftime('%d%m%Y')}.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-                else:
-                    st.warning("No hay datos en la base principal para generar el reporte.")
+                b_pdf = crear_pdf_tablas_apiladas("REPORTE OPERATIVO", f"Emisión: {hoy_cal_date.strftime('%d/%m/%Y')} | Partidas: {len(df_rep)}", [("PEDIDOS ACTIVOS EN PROCESO", df_rep, [('COMPAÑÍA', 16), ('ESTATUS', 28), ('SINIESTRO/PEDIDO', 25), ('CDR', 48), ('MODELO', 32), ('PIEZA', 55), ('PROVEEDOR', 35), ('FECHA VENCIMIENTO', 22)])])
+                b_xlsx = generar_excel_corporativo_pmr({"Reporte_Operativo": [("1. PEDIDOS EN PROCESO", df_rep)]}, "Reporte Operativo")
+                c1, c2 = st.columns(2)
+                c1.download_button("🖨️ Descargar Reporte Operativo (PDF)", data=b_pdf, file_name=f"Reporte_Operativo_PMR_{hoy_cal_date.strftime('%d%m%Y')}.pdf", mime="application/pdf", type="primary", use_container_width=True)
+                c2.download_button("📊 Descargar Reporte Operativo (.XLSX)", data=b_xlsx, file_name=f"Reporte_Operativo_PMR_{hoy_cal_date.strftime('%d%m%Y')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
         # ---------------------------------------------------------------------
-        # OPCIÓN B: INFORME DETALLADO DE TIEMPOS Y SLA POR PLAZA / TALLER / SINIESTRO
+        # 2. REPORTE DE COMPRAS (2 TABLAS APILADAS EN 1 SOLA VISTA / HOJA)
+        # ---------------------------------------------------------------------
+        elif st.session_state['reporte_activo_popup'] == "Reporte de Compras (Pendientes y Por Llegar)":
+            st.markdown("### 🛒 Reporte Ejecutivo de Compras (1 Sola Vista Consolidada)")
+            df_rc_u = fetch_seguro_pop("BD_UNIFICADA")
+            df_rc_c = fetch_seguro_pop("BD_COMPRAS")
+            if not df_rc_u.empty:
+                c_id_u, c_tal_u = get_c_pop(df_rc_u, ["SINIESTRO", "PEDIDO"]), get_c_pop(df_rc_u, ["TALLER", "CDR"])
+                c_mar_u, c_mod_u = get_c_pop(df_rc_u, ["MARCA"]), get_c_pop(df_rc_u, ["MODELO"])
+                c_ano_u, c_vin_u = get_c_pop(df_rc_u, ["AÑO", "ANO"]), get_c_pop(df_rc_u, ["VIN", "SERIE"])
+                c_pza_u, c_pre_u = get_c_pop(df_rc_u, ["DESCRIPCI", "REFACCI"]), get_c_pop(df_rc_u, ["PRECIO", "COSTO"])
+                c_est_u, c_ase_u = get_c_pop(df_rc_u, ["ESTATUS", "STATUS"], excluidos=["ENV", "PAGO"]), get_c_pop(df_rc_u, ["ASEGURADORA"])
+                c_obs_u, c_gui_u, c_rem_u = get_c_pop(df_rc_u, ["COMENTARIO", "OBSERVACION"]), get_c_pop(df_rc_u, ["GUIA"], excluidos=["RET", "DEV"]), get_c_pop(df_rc_u, ["REMISION"])
+
+                def norm_k_rc(s, d):
+                    return f"{str(s).strip().upper().removesuffix('.0')}_{' '.join(str(d).strip().upper().split())}"
+
+                llaves_compradas_rc = set()
+                if not df_rc_c.empty:
+                    cc_s, cc_d, cc_p = get_c_pop(df_rc_c, ["SINIESTRO", "PEDIDO"]), get_c_pop(df_rc_c, ["DESCRIPCI", "PIEZA"]), get_c_pop(df_rc_c, ["PROVEEDOR"])
+                    if cc_s and cc_d:
+                        for _, r_c in df_rc_c.iterrows():
+                            if str(r_c.get(cc_s, '')).strip() and str(r_c.get(cc_p, '')).strip() not in ['', 'nan', 'None', 'NAN']:
+                                llaves_compradas_rc.add(norm_k_rc(r_c.get(cc_s, ''), r_c.get(cc_d, '')))
+
+                df_en_proc_rc = df_rc_u[df_rc_u[c_est_u].astype(str).str.strip().str.upper() == "EN PROCESAMIENTO"].copy() if c_est_u else pd.DataFrame()
+                if not df_en_proc_rc.empty:
+                    df_en_proc_rc['_k_rc'] = df_en_proc_rc.apply(lambda r: norm_k_rc(r.get(c_id_u, ''), r.get(c_pza_u, '')), axis=1)
+                    df_pend_comp_rep = df_en_proc_rc[~df_en_proc_rc['_k_rc'].isin(llaves_compradas_rc)].copy()
+                else:
+                    df_pend_comp_rep = pd.DataFrame()
+
+                if not df_pend_comp_rep.empty:
+                    df_pend_comp_rep['Compañía'] = df_pend_comp_rep[c_ase_u].astype(str).str.upper().apply(lambda x: "GNP" if "GNP" in x else "MULTI") if c_ase_u else "MULTI"
+                    if aseg_rep_sel != "TODAS":
+                        df_pend_comp_rep = df_pend_comp_rep[df_pend_comp_rep['Compañía'] == aseg_rep_sel].copy()
+                    df_pend_out = pd.DataFrame({
+                        'Compañía': df_pend_comp_rep['Compañía'],
+                        'Siniestro': df_pend_comp_rep[c_id_u].astype(str).str.strip(),
+                        'Taller (CDR)': df_pend_comp_rep[c_tal_u].astype(str).str.strip(),
+                        'Vehículo': (df_pend_comp_rep[c_mar_u].astype(str).str.strip() + " " + df_pend_comp_rep[c_mod_u].astype(str).str.strip()).str.strip(),
+                        'Año': df_pend_comp_rep[c_ano_u].astype(str).str.replace('.0', '', regex=False).str.strip() if c_ano_u else "",
+                        'VIN / Serie': df_pend_comp_rep[c_vin_u].astype(str).str.strip() if c_vin_u else "",
+                        'Pieza': df_pend_comp_rep[c_pza_u].astype(str).str.strip(),
+                        'Precio Autorizado ($)': pd.to_numeric(df_pend_comp_rep[c_pre_u].astype(str).str.replace('$', '').str.replace(',', '').str.strip(), errors='coerce').fillna(0.0) if c_pre_u else 0.0,
+                        'Observaciones': df_pend_comp_rep[c_obs_u].astype(str).replace(['nan', 'None'], '').str.strip() if c_obs_u else ""
+                    })
+                else:
+                    df_pend_out = pd.DataFrame(columns=['Compañía', 'Siniestro', 'Taller (CDR)', 'Vehículo', 'Año', 'VIN / Serie', 'Pieza', 'Precio Autorizado ($)', 'Observaciones'])
+
+                df_lleg_out = pd.DataFrame(columns=['Siniestro', 'Taller (CDR)', 'Vehículo', 'Pieza', 'Proveedor', 'Costo Compra ($)', 'Fecha Compra', 'Llegada Estimada', 'Condición Pago', 'Estatus Pago', 'Observaciones'])
+                if not df_rc_c.empty:
+                    df_c_work = df_rc_c.copy()
+                    df_c_work['Recibido_Bool'] = df_c_work.get('Recibido', pd.Series(['NO']*len(df_c_work))).astype(str).str.strip().str.upper().isin(['TRUE', 'SI', '1', 'YES', 'V', 'X'])
+                    llaves_fin_u, llaves_rem_u, dict_obs_u = set(), set(), {}
+                    for _, ru in df_rc_u.iterrows():
+                        ku = norm_k_rc(ru.get(c_id_u, ''), ru.get(c_pza_u, ''))
+                        est_u_v = str(ru.get(c_est_u, '')).strip().upper() if c_est_u else ''
+                        if c_obs_u and str(ru.get(c_obs_u, '')).strip() not in ['', 'nan', 'None']: dict_obs_u[ku] = str(ru.get(c_obs_u, '')).strip()
+                        if est_u_v in ['ENTREGADO', 'RECIBIDO', 'FACTURADO', 'CANCELADO', 'PÉRDIDA TOTAL', 'PAGO DE DAÑOS'] or (c_gui_u and str(ru.get(c_gui_u, '')).strip() not in ['', 'nan', 'None', 'NAN']):
+                            llaves_fin_u.add(ku)
+                        if (c_rem_u and str(ru.get(c_rem_u, '')).strip() not in ['', 'nan', 'None', 'NAN']) or est_u_v == 'EN TRANSITO':
+                            llaves_rem_u.add(ku)
+
+                    df_c_work['_k_rc'] = df_c_work.apply(lambda r: norm_k_rc(r.get('Siniestro', ''), r.get('Descripción Pieza', '')), axis=1)
+                    es_inv_c = df_c_work.get('Proveedor', pd.Series(['']*len(df_c_work))).astype(str).str.strip().str.upper() == 'INVENTARIO'
+                    df_c_work.loc[df_c_work['_k_rc'].isin(llaves_fin_u) | (es_inv_c & df_c_work['_k_rc'].isin(llaves_rem_u)), 'Recibido_Bool'] = True
+                    df_c_act = df_c_work[df_c_work['Recibido_Bool'] == False].copy()
+                    if aseg_rep_sel != "TODAS" and 'Aseguradora' in df_c_act.columns:
+                        df_c_act = df_c_act[df_c_act['Aseguradora'].astype(str).str.upper().str.contains(aseg_rep_sel, na=False)].copy()
+
+                    if not df_c_act.empty:
+                        f_dt = df_c_act['Fecha Compra'].apply(parse_dt_rep_pop)
+                        eta_n = pd.to_numeric(df_c_act.get('Tiempo Entrega (Días)', 0), errors='coerce').fillna(0)
+                        df_lleg_out = pd.DataFrame({
+                            'Siniestro': df_c_act['Siniestro'].astype(str).str.strip(),
+                            'Taller (CDR)': df_c_act['Taller'].astype(str).str.strip(),
+                            'Vehículo': df_c_act.get('Vehículo', pd.Series(['']*len(df_c_act))).astype(str).str.strip(),
+                            'Pieza': df_c_act['Descripción Pieza'].astype(str).str.strip(),
+                            'Proveedor': df_c_act['Proveedor'].astype(str).str.strip(),
+                            'Costo Compra ($)': pd.to_numeric(df_c_act['Costo Compra'].astype(str).str.replace('$', '').str.replace(',', '').str.strip(), errors='coerce').fillna(0.0),
+                            'Fecha Compra': df_c_act['Fecha Compra'].astype(str).str.strip(),
+                            'Llegada Estimada': (f_dt + pd.to_timedelta(eta_n, unit='d')).dt.strftime('%d/%m/%Y').fillna('-'),
+                            'Condición Pago': df_c_act.get('Condición Pago', pd.Series(['']*len(df_c_act))).astype(str).str.strip(),
+                            'Estatus Pago': df_c_act.get('Estatus Pago', pd.Series(['']*len(df_c_act))).astype(str).str.strip(),
+                            'Observaciones': df_c_act['_k_rc'].map(dict_obs_u).fillna("")
+                        })
+
+                kc1, kc2, kc3, kc4 = st.columns(4)
+                kc1.metric("🚨 1. Pendientes de Compra", f"{len(df_pend_out)} pzas")
+                kc2.metric("💰 Presupuesto Autorizado", f"${df_pend_out['Precio Autorizado ($)'].sum():,.2f}")
+                kc3.metric("📦 2. Compras por Llegar", f"{len(df_lleg_out)} pzas")
+                kc4.metric("💵 Total Costo Compras", f"${df_lleg_out['Costo Compra ($)'].sum():,.2f}")
+
+                st.markdown("#### 🚨 1. Piezas Pendientes de Compra (Urgente)")
+                st.dataframe(df_pend_out, use_container_width=True, hide_index=True)
+                st.markdown("#### 📦 2. Compras por Llegar y Estatus de Pago")
+                st.dataframe(df_lleg_out, use_container_width=True, hide_index=True)
+
+                b_pdf_c = crear_pdf_tablas_apiladas(
+                    "REPORTE CONSOLIDADO DE COMPRAS",
+                    f"Fecha: {hoy_cal_date.strftime('%d/%m/%Y')} | Pendientes: {len(df_pend_out)} (${df_pend_out['Precio Autorizado ($)'].sum():,.2f}) | Por Llegar: {len(df_lleg_out)} (${df_lleg_out['Costo Compra ($)'].sum():,.2f})",
+                    [
+                        ("1. PIEZAS PENDIENTES DE COMPRA (URGENTE)", df_pend_out, [('Compañía', 16), ('Siniestro', 25), ('Taller (CDR)', 48), ('Vehículo', 40), ('Año', 14), ('VIN / Serie', 36), ('Pieza', 62), ('Precio Autorizado ($)', 28)]),
+                        ("2. COMPRAS POR LLEGAR Y ESTATUS DE PAGO", df_lleg_out, [('Siniestro', 25), ('Taller (CDR)', 45), ('Pieza', 58), ('Proveedor', 44), ('Costo Compra ($)', 25), ('Llegada Estimada', 25), ('Condición Pago', 26), ('Estatus Pago', 22)])
+                    ]
+                )
+                b_xlsx_c = generar_excel_corporativo_pmr(
+                    {"Reporte_Compras": [("1. PIEZAS PENDIENTES DE COMPRA (URGENTE)", df_pend_out), ("2. COMPRAS POR LLEGAR Y ESTATUS DE PAGO", df_lleg_out)]},
+                    "Reporte Consolidado de Compras"
+                )
+                dc1, dc2 = st.columns(2)
+                dc1.download_button("🖨️ Descargar Reporte de Compras (PDF - 1 Vista)", data=b_pdf_c, file_name=f"Reporte_Compras_PMR_{hoy_cal_date.strftime('%d%m%Y')}.pdf", mime="application/pdf", type="primary", use_container_width=True)
+                dc2.download_button("📊 Descargar Reporte de Compras (.XLSX - 1 Hoja Consolidada)", data=b_xlsx_c, file_name=f"Reporte_Compras_PMR_{hoy_cal_date.strftime('%d%m%Y')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
+        # ---------------------------------------------------------------------
+        # 3. REPORTE DE PRÉSTAMOS DEL PERSONAL (2 TABLAS EN 1 HOJA + HISTÓRICO OPCIONAL)
+        # ---------------------------------------------------------------------
+        elif st.session_state['reporte_activo_popup'] == "Reporte de Préstamos del Personal":
+            st.markdown("### 💸 Reporte Ejecutivo de Préstamos del Personal")
+            incluir_hist_pagados = st.checkbox("☑️ Incluir historial de préstamos ya liquidados en una 2da hoja de Excel", value=False, key="chk_hist_prest_pop")
+            df_gp = fetch_seguro_pop("GASTOS_EMPLEADOS")
+            if not df_gp.empty:
+                df_gp['Monto ($)'] = pd.to_numeric(df_gp.get('Monto', pd.Series([0]*len(df_gp))).astype(str).str.replace('$', '').str.replace(',', '').str.strip(), errors='coerce').fillna(0.0)
+                df_gp_pend = df_gp[df_gp.get('Estado', pd.Series(['']*len(df_gp))).astype(str).str.upper() == 'PENDIENTE REEMBOLSO'].copy()
+                df_gp_pag = df_gp[df_gp.get('Estado', pd.Series(['']*len(df_gp))).astype(str).str.upper() != 'PENDIENTE REEMBOLSO'].copy()
+
+                if not df_gp_pend.empty:
+                    df_res_emp = df_gp_pend.groupby('Empleado', as_index=False).agg(
+                        Gastos_Pendientes=('Monto ($)', 'count'),
+                        Total_Adeudado=('Monto ($)', 'sum')
+                    ).sort_values(by='Total_Adeudado', ascending=False).rename(columns={'Gastos_Pendientes': 'Gastos Pendientes (Cant.)', 'Total_Adeudado': 'Total Adeudado ($)'})
+                else:
+                    df_res_emp = pd.DataFrame(columns=['Empleado', 'Gastos Pendientes (Cant.)', 'Total Adeudado ($)'])
+
+                df_det_pend = pd.DataFrame({
+                    'Fecha': df_gp_pend.get('Fecha', pd.Series(dtype=str)),
+                    'Empleado': df_gp_pend.get('Empleado', pd.Series(dtype=str)),
+                    'Método de Pago': df_gp_pend.get('Método de Pago', pd.Series(dtype=str)),
+                    'Proveedor / Negocio': df_gp_pend.get('Proveedor', pd.Series(dtype=str)),
+                    'Siniestro': df_gp_pend.get('Siniestro', pd.Series(dtype=str)),
+                    'Refacción / Concepto': df_gp_pend.get('Refacción', pd.Series(dtype=str)),
+                    'Monto ($)': df_gp_pend.get('Monto ($)', pd.Series(dtype=float))
+                })
+
+                kp1, kp2, kp3 = st.columns(3)
+                kp1.metric("💰 Gran Total Adeudado PMR", f"${df_det_pend['Monto ($)'].sum():,.2f}" if not df_det_pend.empty else "$0.00")
+                kp2.metric("👤 Empleados con Saldo", f"{len(df_res_emp)}")
+                kp3.metric("🧾 Gastos por Reembolsar", f"{len(df_det_pend)}")
+
+                st.markdown("#### 👤 1. Resumen de Saldo Adeudado por Empleado")
+                st.dataframe(df_res_emp, use_container_width=True, hide_index=True)
+                st.markdown("#### 🧾 2. Desglose de Gastos Pendientes de Reembolso")
+                st.dataframe(df_det_pend, use_container_width=True, hide_index=True)
+
+                b_pdf_p = crear_pdf_tablas_apiladas(
+                    "ESTADO DE CUENTA PRÉSTAMOS DEL PERSONAL",
+                    f"Fecha de corte: {hoy_cal_date.strftime('%d/%m/%Y')} | Total Adeudado: ${df_det_pend['Monto ($)'].sum():,.2f}",
+                    [
+                        ("1. RESUMEN DE SALDO ADEUDADO POR EMPLEADO", df_res_emp, [('Empleado', 70), ('Gastos Pendientes (Cant.)', 50), ('Total Adeudado ($)', 55)]),
+                        ("2. DESGLOSE DE GASTOS PENDIENTES DE REEMBOLSO", df_det_pend, [('Fecha', 25), ('Empleado', 32), ('Método de Pago', 32), ('Proveedor / Negocio', 52), ('Siniestro', 28), ('Refacción / Concepto', 72), ('Monto ($)', 28)])
+                    ]
+                )
+                hojas_prest_xlsx = {
+                    "Prestamos_Pendientes": [
+                        ("1. RESUMEN DE SALDO ADEUDADO POR EMPLEADO", df_res_emp),
+                        ("2. DESGLOSE DE GASTOS PENDIENTES DE REEMBOLSO", df_det_pend)
+                    ]
+                }
+                if incluir_hist_pagados and not df_gp_pag.empty:
+                    hojas_prest_xlsx["Historial_Liquidados"] = [("HISTORIAL DE PRÉSTAMOS LIQUIDADOS", df_gp_pag[['Fecha', 'Empleado', 'Método de Pago', 'Proveedor', 'Siniestro', 'Refacción', 'Monto ($)', 'Estado']])]
+
+                b_xlsx_p = generar_excel_corporativo_pmr(hojas_prest_xlsx, "Estado de Cuenta Préstamos del Personal")
+                dp1, dp2 = st.columns(2)
+                dp1.download_button("🖨️ Descargar Préstamos (PDF - 1 Hoja)", data=b_pdf_p, file_name=f"Reporte_Prestamos_PMR_{hoy_cal_date.strftime('%d%m%Y')}.pdf", mime="application/pdf", type="primary", use_container_width=True)
+                dp2.download_button("📊 Descargar Préstamos (.XLSX - 1 Hoja Consolidada)", data=b_xlsx_p, file_name=f"Reporte_Prestamos_PMR_{hoy_cal_date.strftime('%d%m%Y')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            else:
+                st.info("No hay registros en GASTOS_EMPLEADOS.")
+
+        # ---------------------------------------------------------------------
+        # 4. INFORME DETALLADO DE TIEMPOS Y SLA POR PLAZA / TALLER / SINIESTRO
         # ---------------------------------------------------------------------
         else:
             rango_str_titulo = f"{fecha_ini_rep.strftime('%d/%m/%Y')} al {fecha_fin_rep.strftime('%d/%m/%Y')}"
             st.markdown(f"### ⏱️ Informe Detallado de Tiempos Logísticos ({rango_str_titulo})")
-            st.caption("Audita con exactitud qué siniestros y piezas están incluidos en el periodo seleccionado, sus fechas por etapa y cuáles cumplen o exceden el rango de 0 a 7 días.")
+            df_u_sla, df_h_sla = fetch_seguro_pop("BD_UNIFICADA"), fetch_seguro_pop("BD_HISTORICO")
+            df_t_sla, df_r_sla = fetch_seguro_pop("BD_TALLERES"), fetch_seguro_pop("BD_RUTAS")
+            if not df_h_sla.empty and 'Siniestro Relacionado' in df_h_sla.columns and 'Pedido / Siniestro' not in df_h_sla.columns:
+                df_h_sla.rename(columns={'Siniestro Relacionado': 'Pedido / Siniestro'}, inplace=True)
+            df_total_sla = pd.concat([df_u_sla, df_h_sla], ignore_index=True) if not df_h_sla.empty else df_u_sla.copy()
 
-            with st.spinner("Calculando tiempos entre etapas por Estado, Ciudad, Taller y Siniestro..."):
-                df_u_sla = fetch_seguro_pop("BD_UNIFICADA")
-                df_h_sla = fetch_seguro_pop("BD_HISTORICO")
-                df_t_sla = fetch_seguro_pop("BD_TALLERES")
-                df_r_sla = fetch_seguro_pop("BD_RUTAS")
+            if not df_total_sla.empty:
+                c_sin_s, c_tal_s = get_c_pop(df_total_sla, ["SINIESTRO", "PEDIDO"]), get_c_pop(df_total_sla, ["TALLER", "CDR"])
+                c_mar_s, c_mod_s = get_c_pop(df_total_sla, ["MARCA"]), get_c_pop(df_total_sla, ["MODELO", "VEH"])
+                c_pza_s, c_can_s = get_c_pop(df_total_sla, ["DESCRIPCI", "REFACCI"]), get_c_pop(df_total_sla, ["CANTIDAD", "CANT"])
+                c_est_s, c_ase_s = get_c_pop(df_total_sla, ["ESTATUS", "STATUS"], excluidos=["ENV", "PAGO"]), get_c_pop(df_total_sla, ["ASEGURADORA"])
+                c_f_asig, c_f_conf = get_c_pop(df_total_sla, ["ASIGNACI"]), get_c_pop(df_total_sla, ["FECHA CONFI", "CONFIRMACI"])
+                c_f_env, c_f_ent, c_f_rec = get_c_pop(df_total_sla, ["FECHA ENV"]), get_c_pop(df_total_sla, ["FECHA ENT", "LLEGADA"]), get_c_pop(df_total_sla, ["FECHA REC"])
 
-                if not df_h_sla.empty and 'Siniestro Relacionado' in df_h_sla.columns and 'Pedido / Siniestro' not in df_h_sla.columns:
-                    df_h_sla.rename(columns={'Siniestro Relacionado': 'Pedido / Siniestro'}, inplace=True)
+                if c_sin_s and c_pza_s:
+                    df_total_sla = df_total_sla.drop_duplicates(subset=[c_sin_s, c_pza_s], keep='first').copy()
+                df_total_sla['_Cant_Num'] = pd.to_numeric(df_total_sla[c_can_s], errors='coerce').fillna(1).clip(lower=1).astype(int) if (c_can_s and c_can_s in df_total_sla.columns) else 1
 
-                df_total_sla = pd.concat([df_u_sla, df_h_sla], ignore_index=True) if not df_h_sla.empty else df_u_sla.copy()
+                dict_ciudad_t, dict_estado_t = {}, {}
+                if not df_t_sla.empty:
+                    ct_nom, ct_ciu, ct_est = get_c_pop(df_t_sla, ["TALLER", "CDR"]), get_c_pop(df_t_sla, ["CIUDAD", "MUNICIPIO", "PLAZA"]), get_c_pop(df_t_sla, ["ESTADO"])
+                    if ct_nom:
+                        for _, rt in df_t_sla.iterrows():
+                            kt = str(rt.get(ct_nom, '')).strip().upper()
+                            if kt:
+                                if ct_ciu: dict_ciudad_t[kt] = str(rt.get(ct_ciu, '')).strip().upper()
+                                if ct_est: dict_estado_t[kt] = str(rt.get(ct_est, '')).strip().upper()
+
+                def inferir_plaza(taller_raw):
+                    t_up = str(taller_raw).strip().upper()
+                    ciu, edo = dict_ciudad_t.get(t_up, ""), dict_estado_t.get(t_up, "")
+                    if not ciu:
+                        if any(k in t_up for k in ["TORREON", "LAGUNA", "GOMEZ PALACIO"]): ciu, edo = "TORREON", "COAHUILA"
+                        elif "SALTILLO" in t_up: ciu, edo = "SALTILLO", "COAHUILA"
+                        elif any(k in t_up for k in ["TAMPICO", "MADERO", "ALTAMIRA"]): ciu, edo = "TAMPICO", "TAMAULIPAS"
+                        elif any(k in t_up for k in ["POTOSI", "SLP", "VALLES"]): ciu, edo = "SAN LUIS POTOSI", "SAN LUIS POTOSI"
+                        elif "MERIDA" in t_up: ciu, edo = "MERIDA", "YUCATAN"
+                        elif "AGUASCALIENTES" in t_up: ciu, edo = "AGUASCALIENTES", "AGUASCALIENTES"
+                        else: ciu = "MONTERREY"
+                    if not edo: edo = "NUEVO LEON" if "MONTERREY" in ciu else "S/D"
+                    return pd.Series([ciu, edo])
+
+                df_total_sla[['Plaza_Ciudad', 'Estado_Plaza']] = df_total_sla[c_tal_s].apply(inferir_plaza)
+                if c_ase_s and aseg_rep_sel != "TODAS":
+                    df_total_sla = df_total_sla[df_total_sla[c_ase_s].astype(str).str.upper().str.contains(aseg_rep_sel, na=False)].copy()
+
+                def safe_apply_dt_s(df_o, c_n):
+                    if c_n and c_n in df_o.columns:
+                        s = df_o[c_n].iloc[:, 0] if isinstance(df_o[c_n], pd.DataFrame) else df_o[c_n]
+                        return s.apply(parse_dt_rep_pop)
+                    return pd.Series(pd.NaT, index=df_o.index)
+
+                df_total_sla['DT_Asig'] = safe_apply_dt_s(df_total_sla, c_f_asig)
+                df_total_sla['DT_Conf'] = safe_apply_dt_s(df_total_sla, c_f_conf)
+                df_total_sla['DT_Env'] = safe_apply_dt_s(df_total_sla, c_f_env)
+                df_total_sla['DT_Rec'] = safe_apply_dt_s(df_total_sla, c_f_rec)
+                df_total_sla['DT_Ent'] = safe_apply_dt_s(df_total_sla, c_f_ent) if (c_f_ent and c_f_ent != c_f_rec) else df_total_sla['DT_Rec']
+
+                df_total_sla = df_total_sla[df_total_sla['DT_Asig'].notna()].copy()
+                dt_ini_f, dt_fin_f = pd.to_datetime(fecha_ini_rep), pd.to_datetime(fecha_fin_rep) + pd.Timedelta(hours=23, minutes=59, seconds=59)
+                df_total_sla = df_total_sla[(df_total_sla['DT_Asig'] >= dt_ini_f) & (df_total_sla['DT_Asig'] <= dt_fin_f)].copy()
+                if c_est_s:
+                    df_total_sla = df_total_sla[~df_total_sla[c_est_s].astype(str).str.upper().isin(["PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"])].copy()
 
                 if not df_total_sla.empty:
-                    c_sin_s = get_c_pop(df_total_sla, ["SINIESTRO", "PEDIDO"])
-                    c_tal_s = get_c_pop(df_total_sla, ["TALLER", "CDR"])
-                    c_mar_s = get_c_pop(df_total_sla, ["MARCA"])
-                    c_mod_s = get_c_pop(df_total_sla, ["MODELO", "VEH"])
-                    c_pza_s = get_c_pop(df_total_sla, ["DESCRIPCI", "REFACCI"])
-                    c_can_s = get_c_pop(df_total_sla, ["CANTIDAD", "CANT"])
-                    c_est_s = get_c_pop(df_total_sla, ["ESTATUS", "STATUS"], excluidos=["ENV", "PAGO"])
-                    c_ase_s = get_c_pop(df_total_sla, ["ASEGURADORA"])
+                    def limp_d(s): return s.where((s >= 0) & (s <= 90), pd.NA)
+                    df_total_sla['D_Asig_Conf'] = limp_d((df_total_sla['DT_Conf'] - df_total_sla['DT_Asig']).dt.days)
+                    df_total_sla['D_Conf_Env'] = limp_d((df_total_sla['DT_Env'] - df_total_sla['DT_Conf']).dt.days)
+                    df_total_sla['D_Env_Ent'] = limp_d((df_total_sla['DT_Ent'] - df_total_sla['DT_Env']).dt.days)
+                    df_total_sla['D_Ent_Rec'] = limp_d((df_total_sla['DT_Rec'] - df_total_sla['DT_Ent']).dt.days)
 
-                    c_f_asig = get_c_pop(df_total_sla, ["ASIGNACI"])
-                    c_f_conf = get_c_pop(df_total_sla, ["FECHA CONFI", "CONFIRMACI"])
-                    c_f_env = get_c_pop(df_total_sla, ["FECHA ENV"])
-                    c_f_ent = get_c_pop(df_total_sla, ["FECHA ENT", "LLEGADA"])
-                    c_f_rec = get_c_pop(df_total_sla, ["FECHA REC"])
-                    c_f_fac = get_c_pop(df_total_sla, ["FECHA FAC"])
+                    es_canc_m = df_total_sla[c_est_s].astype(str).str.upper().str.contains("CANCELAD|REEMBOLS", na=False) if c_est_s else pd.Series(False, index=df_total_sla.index)
+                    f_cierre = df_total_sla['DT_Rec'].combine_first(df_total_sla['DT_Ent']).combine_first(df_total_sla['DT_Env'])
+                    df_total_sla['D_Ciclo_Total'] = limp_d((f_cierre - df_total_sla['DT_Asig']).dt.days)
+                    df_total_sla.loc[es_canc_m, 'D_Ciclo_Total'] = pd.NA
 
-                    if c_sin_s and c_pza_s:
-                        df_total_sla = df_total_sla.drop_duplicates(subset=[c_sin_s, c_pza_s], keep='first').copy()
+                    df_total_sla['Auditoria_BBVA'] = df_total_sla.apply(lambda r: "🚫 Cancelada (No Surtida)" if ("CANCELAD" in str(r.get(c_est_s,'')).upper() or "REEMBOLS" in str(r.get(c_est_s,'')).upper()) else ("⏳ En Proceso / Sin Fecha Cierre" if pd.isna(r.get('D_Ciclo_Total', pd.NA)) else ("✅ Cumple (0 a 7 días)" if float(r.get('D_Ciclo_Total')) <= 7 else "❌ Excede (> 7 días)")), axis=1)
+                    df_total_sla['Cumple_0_7_Dias'] = df_total_sla['Auditoria_BBVA'].apply(lambda x: 1 if "Cumple" in x else (0 if "Excede" in x else pd.NA))
 
-                    # Cantidad numérica real (para cuadrar contra conteo de piezas de aseguradora)
-                    if c_can_s and c_can_s in df_total_sla.columns:
-                        df_total_sla['_Cant_Num'] = pd.to_numeric(df_total_sla[c_can_s], errors='coerce').fillna(1).clip(lower=1).astype(int)
-                    else:
-                        df_total_sla['_Cant_Num'] = 1
+                    cf_est, cf_ciu, cf_aud = st.columns(3)
+                    estados_sel = cf_est.multiselect("🗺️ Filtrar Estado:", options=sorted(df_total_sla['Estado_Plaza'].dropna().unique().tolist()), default=[], key="ms_estados_sla_pop")
+                    df_sla_view = df_total_sla[df_total_sla['Estado_Plaza'].isin(estados_sel)].copy() if estados_sel else df_total_sla.copy()
+                    ciudades_sel = cf_ciu.multiselect("🏙️ Filtrar Ciudad / Plaza:", options=sorted(df_sla_view['Plaza_Ciudad'].dropna().unique().tolist()), default=[], key="ms_ciudades_sla_pop")
+                    if ciudades_sel: df_sla_view = df_sla_view[df_sla_view['Plaza_Ciudad'].isin(ciudades_sel)].copy()
+                    aud_sel = cf_aud.multiselect("🔍 Filtrar Estatus Auditoría BBVA:", options=sorted(df_sla_view['Auditoria_BBVA'].dropna().unique().tolist()), default=[], key="ms_aud_sla_pop")
+                    if aud_sel: df_sla_view = df_sla_view[df_sla_view['Auditoria_BBVA'].isin(aud_sel)].copy()
 
-                    dict_ciudad_t = {}
-                    dict_estado_t = {}
-                    if not df_t_sla.empty:
-                        ct_nom = get_c_pop(df_t_sla, ["TALLER", "CDR"])
-                        ct_ciu = get_c_pop(df_t_sla, ["CIUDAD", "MUNICIPIO", "PLAZA"])
-                        ct_est = get_c_pop(df_t_sla, ["ESTADO"])
-                        if ct_nom:
-                            for _, rt in df_t_sla.iterrows():
-                                k_t = str(rt.get(ct_nom, '')).strip().upper()
-                                if k_t:
-                                    if ct_ciu: dict_ciudad_t[k_t] = str(rt.get(ct_ciu, '')).strip().upper()
-                                    if ct_est: dict_estado_t[k_t] = str(rt.get(ct_est, '')).strip().upper()
+                    def prom_s(s):
+                        sv = pd.to_numeric(s, errors='coerce').dropna()
+                        return round(sv.mean(), 1) if not sv.empty else 0.0
 
-                    def inferir_plaza(taller_raw):
-                        t_up = str(taller_raw).strip().upper()
-                        ciu = dict_ciudad_t.get(t_up, "")
-                        edo = dict_estado_t.get(t_up, "")
-                        if not ciu:
-                            if any(k in t_up for k in ["TORREON", "LAGUNA", "GOMEZ PALACIO"]): ciu, edo = "TORREON", "COAHUILA"
-                            elif "SALTILLO" in t_up: ciu, edo = "SALTILLO", "COAHUILA"
-                            elif any(k in t_up for k in ["TAMPICO", "MADERO", "ALTAMIRA"]): ciu, edo = "TAMPICO", "TAMAULIPAS"
-                            elif any(k in t_up for k in ["POTOSI", "SLP", "VALLES"]): ciu, edo = "SAN LUIS POTOSI", "SAN LUIS POTOSI"
-                            elif "MERIDA" in t_up: ciu, edo = "MERIDA", "YUCATAN"
-                            elif "AGUASCALIENTES" in t_up: ciu, edo = "AGUASCALIENTES", "AGUASCALIENTES"
-                            elif any(k in t_up for k in ["MONTERREY", "SAN NICOLAS", "GUADALUPE", "APODACA", "SANTA CATARINA", "SAN PEDRO", "CUMBRES", "MITRAS", "GONZALITOS"]): ciu, edo = "MONTERREY", "NUEVO LEON"
-                            else: ciu = "MONTERREY / LOCAL"
-                        if not edo:
-                            edo = "NUEVO LEON" if "MONTERREY" in ciu else "S/D"
-                        return pd.Series([ciu, edo])
+                    def resumen_grp_sla(df_in, cols_g):
+                        filas = []
+                        for keys, grp in df_in.groupby(cols_g, dropna=False):
+                            if not isinstance(keys, tuple): keys = (keys,)
+                            d_f = {cols_g[i]: keys[i] for i in range(len(cols_g))}
+                            tot_p = int(grp['_Cant_Num'].sum())
+                            canc_p = int(grp[grp['Auditoria_BBVA'] == "🚫 Cancelada (No Surtida)"]['_Cant_Num'].sum())
+                            surt_p = tot_p - canc_p
+                            s_7 = pd.to_numeric(grp['Cumple_0_7_Dias'], errors='coerce').dropna()
+                            ef_7 = round(s_7.mean() * 100, 1) if not s_7.empty else 0.0
+                            d_f.update({
+                                'Piezas': tot_p, 'Surtidas': surt_p, 'Canceladas': canc_p,
+                                '% Surtido': f"{round((surt_p/tot_p)*100, 1) if tot_p>0 else 0.0}%",
+                                '1. Asig ➔ Conf (días)': prom_s(grp['D_Asig_Conf']),
+                                '2. Conf ➔ Envío (días)': prom_s(grp['D_Conf_Env']),
+                                '3. Envío ➔ Entrega (días)': prom_s(grp['D_Env_Ent']),
+                                '4. Entrega ➔ Recibo (días)': prom_s(grp['D_Ent_Rec']),
+                                'Ciclo Total (días)': prom_s(grp['D_Ciclo_Total']),
+                                '% Ef. 0-7 Días': f"{ef_7}%", '_ef': ef_7
+                            })
+                            filas.append(d_f)
+                        df_o = pd.DataFrame(filas)
+                        return df_o.sort_values(by=['Piezas', '_ef'], ascending=[False, True]).drop(columns=['_ef']) if not df_o.empty else df_o
 
-                    df_total_sla[['Plaza_Ciudad', 'Estado_Plaza']] = df_total_sla[c_tal_s].apply(inferir_plaza)
+                    df_por_estado = resumen_grp_sla(df_sla_view, ['Estado_Plaza']).rename(columns={'Estado_Plaza': 'Estado'})
+                    df_por_ciudad = resumen_grp_sla(df_sla_view, ['Estado_Plaza', 'Plaza_Ciudad']).rename(columns={'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad / Plaza'})
+                    df_por_taller = resumen_grp_sla(df_sla_view, ['Estado_Plaza', 'Plaza_Ciudad', c_tal_s]).rename(columns={'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad', c_tal_s: 'Taller (CDR)'})
 
-                    if c_ase_s and aseg_rep_sel != "TODAS":
-                        df_total_sla = df_total_sla[df_total_sla[c_ase_s].astype(str).str.upper().str.contains(aseg_rep_sel, na=False)].copy()
+                    df_det_sin = df_sla_view.copy()
+                    for c_dt_f, nom_f in [('DT_Asig', 'F. Asignación'), ('DT_Conf', 'F. Confirmación'), ('DT_Env', 'F. Envío'), ('DT_Ent', 'F. Entrega'), ('DT_Rec', 'F. Recibo')]:
+                        df_det_sin[nom_f] = df_det_sin[c_dt_f].dt.strftime('%d/%m/%Y').fillna('-')
+                    df_det_sin['Vehículo'] = df_det_sin[c_mar_s].astype(str) + " " + df_det_sin[c_mod_s].astype(str)
+                    cols_n4 = [c for c in ['Estado_Plaza', 'Plaza_Ciudad', c_tal_s, c_sin_s, 'Vehículo', '_Cant_Num', c_pza_s, c_est_s, 'Auditoria_BBVA', 'F. Asignación', 'F. Confirmación', 'D_Asig_Conf', 'F. Envío', 'D_Conf_Env', 'F. Entrega', 'D_Env_Ent', 'F. Recibo', 'D_Ent_Rec', 'D_Ciclo_Total'] if c in df_det_sin.columns]
+                    df_por_siniestro = df_det_sin[cols_n4].rename(columns={'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad', c_tal_s: 'Taller (CDR)', c_sin_s: 'Siniestro', '_Cant_Num': 'Cant', c_pza_s: 'Pieza', c_est_s: 'Estatus Actual', 'Auditoria_BBVA': 'Evaluación 0-7d', 'D_Asig_Conf': 'Asig➔Conf (d)', 'D_Conf_Env': 'Conf➔Env (d)', 'D_Env_Ent': 'Env➔Ent (d)', 'D_Ent_Rec': 'Ent➔Rec (d)', 'D_Ciclo_Total': 'Total (d)'}).sort_values(by=['Estado', 'Ciudad', 'Taller (CDR)', 'Siniestro'])
 
-                    def parse_dt_safe_op(val):
-                        if pd.isna(val) or str(val).strip() == '': return pd.NaT
-                        val_str = str(val).lower().replace('-', '/')
-                        if val_str.replace('.', '', 1).isdigit():
-                            v_num = float(val_str)
-                            if v_num > 30000: return pd.to_datetime('1899-12-30') + pd.to_timedelta(v_num, unit='D')
-                        meses_map = {'ene':'01', 'feb':'02', 'mar':'03', 'abr':'04', 'may':'05', 'jun':'06', 'jul':'07', 'ago':'08', 'sep':'09', 'oct':'10', 'nov':'11', 'dic':'12'}
-                        for m_es, m_num in meses_map.items():
-                            if m_es in val_str: val_str = val_str.replace(m_es, m_num); break
-                        try: return pd.to_datetime(val_str, dayfirst=True, errors='coerce')
-                        except: return pd.NaT
+                    st1, st2, st3, st4 = st.tabs([f"🗺️ 1. Por Estado ({len(df_por_estado)})", f"🏙️ 2. Por Ciudad ({len(df_por_ciudad)})", f"🏢 3. Por Taller ({len(df_por_taller)})", f"🚗 4. Siniestros Incluidos ({df_por_siniestro['Siniestro'].nunique()} Sin. | {int(df_por_siniestro['Cant'].sum())} Pzas)"])
+                    with st1: st.dataframe(df_por_estado, use_container_width=True, hide_index=True)
+                    with st2: st.dataframe(df_por_ciudad, use_container_width=True, hide_index=True)
+                    with st3: st.dataframe(df_por_taller, use_container_width=True, hide_index=True)
+                    with st4: st.dataframe(df_por_siniestro, use_container_width=True, hide_index=True)
 
-                    def safe_apply_date(df_obj, col_name):
-                        if col_name and col_name in df_obj.columns:
-                            serie = df_obj[col_name].iloc[:, 0] if isinstance(df_obj[col_name], pd.DataFrame) else df_obj[col_name]
-                            return serie.apply(parse_dt_safe_op)
-                        return pd.Series(pd.NaT, index=df_obj.index)
-
-                    df_total_sla['DT_Asig'] = safe_apply_date(df_total_sla, c_f_asig)
-                    df_total_sla['DT_Conf'] = safe_apply_date(df_total_sla, c_f_conf)
-                    df_total_sla['DT_Env'] = safe_apply_date(df_total_sla, c_f_env)
-                    df_total_sla['DT_Rec'] = safe_apply_date(df_total_sla, c_f_rec)
-                    df_total_sla['DT_Fac'] = safe_apply_date(df_total_sla, c_f_fac)
-
-                    dict_entrega_rutas = {}
-                    if not df_r_sla.empty:
-                        cr_sin = get_c_pop(df_r_sla, ["SINIESTRO"])
-                        cr_pza = get_c_pop(df_r_sla, ["PIEZA"])
-                        cr_fec = get_c_pop(df_r_sla, ["FECHA"])
-                        cr_tip = get_c_pop(df_r_sla, ["TIPO"])
-                        cr_est = get_c_pop(df_r_sla, ["ESTATUS"])
-                        if cr_sin and cr_pza and cr_fec:
-                            for _, rr in df_r_sla.iterrows():
-                                if str(rr.get(cr_tip, '')).upper() == "ENTREGA" and str(rr.get(cr_est, '')).upper() == "COMPLETADO":
-                                    f_r_dt = parse_dt_safe_op(str(rr.get(cr_fec, '')).split()[0])
-                                    if pd.notna(f_r_dt):
-                                        dict_entrega_rutas[f"{str(rr.get(cr_sin,'')).strip().upper()}_{str(rr.get(cr_pza,'')).strip().upper()}"] = f_r_dt
-
-                    if c_f_ent and c_f_ent != c_f_rec:
-                        df_total_sla['DT_Ent'] = safe_apply_date(df_total_sla, c_f_ent)
-                    else:
-                        def resolver_dt_entrega(r):
-                            k_r = f"{str(r.get(c_sin_s,'')).strip().upper()}_{str(r.get(c_pza_s,'')).strip().upper()}"
-                            if k_r in dict_entrega_rutas:
-                                return dict_entrega_rutas[k_r]
-                            return r.get('DT_Rec', pd.NaT)
-                        df_total_sla['DT_Ent'] = df_total_sla.apply(resolver_dt_entrega, axis=1)
-
-                    # Filtrar exactamente por el rango de los dos calendarios (Fecha Inicio a Fecha Fin)
-                    df_total_sla = df_total_sla[df_total_sla['DT_Asig'].notna()].copy()
-                    dt_ini_filtro = pd.to_datetime(fecha_ini_rep)
-                    dt_fin_filtro = pd.to_datetime(fecha_fin_rep) + pd.Timedelta(hours=23, minutes=59, seconds=59)
-                    df_total_sla = df_total_sla[(df_total_sla['DT_Asig'] >= dt_ini_filtro) & (df_total_sla['DT_Asig'] <= dt_fin_filtro)].copy()
-
-                    # Excluir Pérdida Total y Pago de Daños (no cuentan como ganadas/surtibles)
-                    if c_est_s:
-                        df_total_sla = df_total_sla[~df_total_sla[c_est_s].astype(str).str.upper().isin(["PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"])].copy()
-
-                    if not df_total_sla.empty:
-                        def limpiar_rango_dias(serie):
-                            return serie.where((serie >= 0) & (serie <= 90), pd.NA)
-
-                        df_total_sla['D_Asig_Conf'] = limpiar_rango_dias((df_total_sla['DT_Conf'] - df_total_sla['DT_Asig']).dt.days)
-                        df_total_sla['D_Conf_Env'] = limpiar_rango_dias((df_total_sla['DT_Env'] - df_total_sla['DT_Conf']).dt.days)
-                        df_total_sla['D_Env_Ent'] = limpiar_rango_dias((df_total_sla['DT_Ent'] - df_total_sla['DT_Env']).dt.days)
-                        df_total_sla['D_Ent_Rec'] = limpiar_rango_dias((df_total_sla['DT_Rec'] - df_total_sla['DT_Ent']).dt.days)
-
-                        # Ciclo Total (Asignación -> Entrega/Recibo) solo sobre partidas NO canceladas
-                        es_cancelada_mask = df_total_sla[c_est_s].astype(str).str.upper().str.contains("CANCELAD|REEMBOLS", na=False) if c_est_s else pd.Series(False, index=df_total_sla.index)
-                        fecha_cierre_op = df_total_sla['DT_Rec'].combine_first(df_total_sla['DT_Ent']).combine_first(df_total_sla['DT_Env'])
-                        df_total_sla['D_Ciclo_Total'] = limpiar_rango_dias((fecha_cierre_op - df_total_sla['DT_Asig']).dt.days)
-                        df_total_sla.loc[es_cancelada_mask, 'D_Ciclo_Total'] = pd.NA
-
-                        def clasificar_auditoria_7d(r):
-                            est_r = str(r.get(c_est_s, '')).upper() if c_est_s else ''
-                            if "CANCELAD" in est_r or "REEMBOLS" in est_r:
-                                return "🚫 Cancelada (No Surtida)"
-                            d_tot = r.get('D_Ciclo_Total', pd.NA)
-                            if pd.isna(d_tot):
-                                return "⏳ En Proceso / Sin Fecha Cierre"
-                            return "✅ Cumple (0 a 7 días)" if float(d_tot) <= 7 else "❌ Excede (> 7 días)"
-
-                        df_total_sla['Auditoria_BBVA'] = df_total_sla.apply(clasificar_auditoria_7d, axis=1)
-                        df_total_sla['Cumple_0_7_Dias'] = df_total_sla['Auditoria_BBVA'].apply(
-                            lambda x: 1 if "Cumple" in x else (0 if "Excede" in x else pd.NA)
-                        )
-
-                        # Filtros interactivos de Estado y Ciudad para auditar sin perder ningún registro
-                        cf_est, cf_ciu, cf_aud = st.columns(3)
-                        with cf_est:
-                            estados_disp = sorted(df_total_sla['Estado_Plaza'].dropna().unique().tolist())
-                            estados_sel = st.multiselect("🗺️ Filtrar Estado:", options=estados_disp, default=[], key="ms_estados_sla_pop")
-                        df_sla_view = df_total_sla[df_total_sla['Estado_Plaza'].isin(estados_sel)].copy() if estados_sel else df_total_sla.copy()
-
-                        with cf_ciu:
-                            ciudades_disp = sorted(df_sla_view['Plaza_Ciudad'].dropna().unique().tolist())
-                            ciudades_sel = st.multiselect("🏙️ Filtrar Ciudad / Plaza:", options=ciudades_disp, default=[], key="ms_ciudades_sla_pop")
-                        if ciudades_sel:
-                            df_sla_view = df_sla_view[df_sla_view['Plaza_Ciudad'].isin(ciudades_sel)].copy()
-
-                        with cf_aud:
-                            aud_disp = sorted(df_sla_view['Auditoria_BBVA'].dropna().unique().tolist())
-                            aud_sel = st.multiselect("🔍 Filtrar por Estatus Auditoría BBVA:", options=aud_disp, default=[], key="ms_aud_sla_pop")
-                        if aud_sel:
-                            df_sla_view = df_sla_view[df_sla_view['Auditoria_BBVA'].isin(aud_sel)].copy()
-
-                        def prom_seguro(s):
-                            s_val = pd.to_numeric(s, errors='coerce').dropna()
-                            return round(s_val.mean(), 1) if not s_val.empty else 0.0
-
-                        total_ganadas_kpi = int(df_sla_view['_Cant_Num'].sum())
-                        canceladas_kpi = int(df_sla_view[df_sla_view['Auditoria_BBVA'] == "🚫 Cancelada (No Surtida)"]['_Cant_Num'].sum())
-                        surtidas_kpi = total_ganadas_kpi - canceladas_kpi
-                        pct_surtido_kpi = round((surtidas_kpi / total_ganadas_kpi) * 100, 2) if total_ganadas_kpi > 0 else 0.0
-
-                        k_asig_conf = prom_seguro(df_sla_view['D_Asig_Conf'])
-                        k_conf_env = prom_seguro(df_sla_view['D_Conf_Env'])
-                        k_env_ent = prom_seguro(df_sla_view['D_Env_Ent'])
-                        k_ent_rec = prom_seguro(df_sla_view['D_Ent_Rec'])
-                        k_ciclo = prom_seguro(df_sla_view['D_Ciclo_Total'])
-                        s_cumple = pd.to_numeric(df_sla_view['Cumple_0_7_Dias'], errors='coerce').dropna()
-                        pct_ef_7d = round(s_cumple.mean() * 100, 2) if not s_cumple.empty else 0.0
-
-                        st.info(
-                            f"📊 **Cuadre de Volumen ({rango_str_titulo}):** "
-                            f"**Piezas Ganadas:** `{total_ganadas_kpi}` ({len(df_sla_view)} partidas) | "
-                            f"**Piezas Surtidas:** `{surtidas_kpi}` (**{pct_surtido_kpi}%** Surtido vs Ganado) | "
-                            f"**Canceladas:** `{canceladas_kpi}` | "
-                            f"**Evaluadas con Fecha Cierre:** `{len(s_cumple)}` (**{pct_ef_7d}%** en 0-7 días)"
-                        )
-
-                        km1, km2, km3, km4, km5, km6 = st.columns(6)
-                        km1.metric("1️⃣ Asig ➔ Conf", f"{k_asig_conf} días")
-                        km2.metric("2️⃣ Conf ➔ Envío", f"{k_conf_env} días")
-                        km3.metric("3️⃣ Envío ➔ Entrega", f"{k_env_ent} días")
-                        km4.metric("4️⃣ Entrega ➔ Recibo", f"{k_ent_rec} días")
-                        km5.metric("⏱️ Ciclo Total", f"{k_ciclo} días")
-                        km6.metric("🎯 Ef. 0 a 7 Días", f"{pct_ef_7d}%", delta="Meta: 80%", delta_color="normal" if pct_ef_7d >= 80 else "inverse")
-
-                        def construir_resumen_agrupado(df_in, cols_grupo):
-                            filas_ag = []
-                            for keys, grp in df_in.groupby(cols_grupo, dropna=False):
-                                if not isinstance(keys, tuple): keys = (keys,)
-                                dic_f = {cols_grupo[i]: keys[i] for i in range(len(cols_grupo))}
-                                total_pzas = int(grp['_Cant_Num'].sum())
-                                canceladas = int(grp[grp['Auditoria_BBVA'] == "🚫 Cancelada (No Surtida)"]['_Cant_Num'].sum())
-                                surtidas = total_pzas - canceladas
-                                pct_surt = round((surtidas / total_pzas) * 100, 1) if total_pzas > 0 else 0.0
-                                sin_conf = int(grp[grp['DT_Conf'].isna() & (grp['Auditoria_BBVA'] != "🚫 Cancelada (No Surtida)")]['_Cant_Num'].sum())
-
-                                s_7d = pd.to_numeric(grp['Cumple_0_7_Dias'], errors='coerce').dropna()
-                                ef_7d = round(s_7d.mean() * 100, 1) if not s_7d.empty else 0.0
-
-                                dic_f.update({
-                                    'Piezas': total_pzas,
-                                    'Surtidas': surtidas,
-                                    'Canceladas': canceladas,
-                                    '% Surtido': f"{pct_surt}%",
-                                    '1. Asig ➔ Conf (días)': prom_seguro(grp['D_Asig_Conf']),
-                                    '2. Conf ➔ Envío (días)': prom_seguro(grp['D_Conf_Env']),
-                                    '3. Envío ➔ Entrega (días)': prom_seguro(grp['D_Env_Ent']),
-                                    '4. Entrega ➔ Recibo (días)': prom_seguro(grp['D_Ent_Rec']),
-                                    'Ciclo Total (días)': prom_seguro(grp['D_Ciclo_Total']),
-                                    '% Ef. 0-7 Días': f"{ef_7d}%",
-                                    '_ef_num': ef_7d
-                                })
-                                filas_ag.append(dic_f)
-                            df_out = pd.DataFrame(filas_ag)
-                            if not df_out.empty:
-                                df_out = df_out.sort_values(by=['Piezas', '_ef_num'], ascending=[False, True]).drop(columns=['_ef_num'])
-                            return df_out
-
-                        df_por_estado = construir_resumen_agrupado(df_sla_view, ['Estado_Plaza']).rename(columns={'Estado_Plaza': 'Estado'})
-                        df_por_ciudad = construir_resumen_agrupado(df_sla_view, ['Estado_Plaza', 'Plaza_Ciudad']).rename(columns={'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad / Plaza'})
-                        df_por_taller = construir_resumen_agrupado(df_sla_view, ['Estado_Plaza', 'Plaza_Ciudad', c_tal_s]).rename(columns={'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad', c_tal_s: 'Taller (CDR)'})
-
-                        df_det_sin = df_sla_view.copy()
-                        for c_dt_f, nom_f in [('DT_Asig', 'F. Asignación'), ('DT_Conf', 'F. Confirmación'), ('DT_Env', 'F. Envío'), ('DT_Ent', 'F. Entrega'), ('DT_Rec', 'F. Recibo')]:
-                            df_det_sin[nom_f] = df_det_sin[c_dt_f].dt.strftime('%d/%m/%Y').fillna('-')
-
-                        df_det_sin['Vehículo'] = df_det_sin[c_mar_s].astype(str) + " " + df_det_sin[c_mod_s].astype(str)
-                        cols_nivel4 = [
-                            'Estado_Plaza', 'Plaza_Ciudad', c_tal_s, c_sin_s, 'Vehículo', '_Cant_Num', c_pza_s, c_est_s, 'Auditoria_BBVA',
-                            'F. Asignación', 'F. Confirmación', 'D_Asig_Conf',
-                            'F. Envío', 'D_Conf_Env', 'F. Entrega', 'D_Env_Ent',
-                            'F. Recibo', 'D_Ent_Rec', 'D_Ciclo_Total'
+                    b_pdf_sla = crear_pdf_tablas_apiladas(
+                        "INFORME EJECUTIVO DE TIEMPOS Y DESEMPEÑO",
+                        f"Periodo: {rango_str_titulo} | Aseguradora: {aseg_rep_sel} | Emisión: {hoy_cal_date.strftime('%d/%m/%Y')}",
+                        [
+                            ("1. RESUMEN EJECUTIVO POR ESTADO", df_por_estado, [('Estado', 55), ('Piezas', 18), ('Surtidas', 20), ('% Surtido', 22), ('1. Asig ➔ Conf (días)', 26), ('2. Conf ➔ Envío (días)', 26), ('3. Envío ➔ Entrega (días)', 28), ('4. Entrega ➔ Recibo (días)', 28), ('Ciclo Total (días)', 24), ('% Ef. 0-7 Días', 24)]),
+                            ("2. RESUMEN EJECUTIVO POR CIUDAD", df_por_ciudad, [('Estado', 34), ('Ciudad / Plaza', 38), ('Piezas', 16), ('% Surtido', 20), ('1. Asig ➔ Conf (días)', 27), ('2. Conf ➔ Envío (días)', 27), ('3. Envío ➔ Entrega (días)', 29), ('4. Entrega ➔ Recibo (días)', 29), ('Ciclo Total (días)', 26), ('% Ef. 0-7 Días', 26)]),
+                            ("3. DESGLOSE POR TALLER (CDR)", df_por_taller, [('Estado', 28), ('Ciudad', 28), ('Taller (CDR)', 56), ('Piezas', 14), ('% Surtido', 18), ('1. Asig ➔ Conf (días)', 22), ('2. Conf ➔ Envío (días)', 22), ('3. Envío ➔ Entrega (días)', 22), ('4. Entrega ➔ Recibo (días)', 22), ('Ciclo Total (días)', 20), ('% Ef. 0-7 Días', 20)])
                         ]
-                        cols_nivel4 = [c for c in cols_nivel4 if c in df_det_sin.columns]
-                        df_por_siniestro = df_det_sin[cols_nivel4].rename(columns={
-                            'Estado_Plaza': 'Estado', 'Plaza_Ciudad': 'Ciudad', c_tal_s: 'Taller (CDR)', c_sin_s: 'Siniestro',
-                            '_Cant_Num': 'Cant', c_pza_s: 'Pieza', c_est_s: 'Estatus Actual', 'Auditoria_BBVA': 'Evaluación 0-7d',
-                            'D_Asig_Conf': 'Asig➔Conf (d)', 'D_Conf_Env': 'Conf➔Env (d)',
-                            'D_Env_Ent': 'Env➔Ent (d)', 'D_Ent_Rec': 'Ent➔Rec (d)',
-                            'D_Ciclo_Total': 'Total (d)'
-                        }).sort_values(by=['Estado', 'Ciudad', 'Taller (CDR)', 'Siniestro'])
-
-                        sub_t1, sub_t2, sub_t3, sub_t4 = st.tabs([
-                            f"🗺️ 1. Por Estado ({len(df_por_estado)})",
-                            f"🏙️ 2. Por Ciudad / Plaza ({len(df_por_ciudad)})",
-                            f"🏢 3. Por Taller CDR ({len(df_por_taller)})",
-                            f"🚗 4. Siniestros Incluidos en el Informe ({ df_por_siniestro['Siniestro'].nunique() } Sin. | { int(df_por_siniestro['Cant'].sum()) } Pzas)"
-                        ])
-
-                        with sub_t1:
-                            st.dataframe(df_por_estado, use_container_width=True, hide_index=True)
-                        with sub_t2:
-                            st.dataframe(df_por_ciudad, use_container_width=True, hide_index=True)
-                        with sub_t3:
-                            st.dataframe(df_por_taller, use_container_width=True, hide_index=True)
-                        with sub_t4:
-                            st.caption("Aquí puedes ver exactamente qué siniestros conforman los números de arriba, cuántas piezas tiene cada uno y cómo calificó en la meta de 0 a 7 días.")
-                            st.dataframe(df_por_siniestro, use_container_width=True, hide_index=True)
-
-                        fecha_emision_str = hoy_cal_date.strftime('%d/%m/%Y')
-
-                        pdf_sla = FPDF(orientation='L', unit='mm', format='A4')
-                        pdf_sla.set_auto_page_break(auto=True, margin=10)
-                        pdf_sla.add_page()
-                        pdf_sla.set_font("Arial", 'B', 12)
-                        pdf_sla.cell(0, 7, limpiar_txt_pdf("PMR SERVICIOS AUTOMOTRICES - INFORME EJECUTIVO DE TIEMPOS Y DESEMPEÑO"), ln=True, align='C')
-                        pdf_sla.set_font("Arial", '', 8)
-                        pdf_sla.cell(0, 5, limpiar_txt_pdf(f"Periodo: {rango_str_titulo} | Aseguradora: {aseg_rep_sel} | Fecha de emisión: {fecha_emision_str}"), ln=True, align='C')
-                        pdf_sla.ln(2)
-
-                        # 1. RESUMEN EJECUTIVO POR ESTADO
-                        pdf_sla.set_font("Arial", 'B', 9)
-                        pdf_sla.cell(0, 6, limpiar_txt_pdf("1. RESUMEN EJECUTIVO POR ESTADO"), ln=True)
-                        pdf_sla.set_fill_color(0, 51, 102); pdf_sla.set_text_color(255, 255, 255); pdf_sla.set_font("Arial", 'B', 7)
-                        cols_p_est = [
-                            ('Estado', 55), ('Piezas', 18), ('Surtidas', 20), ('% Surtido', 22),
-                            ('1. Asig ➔ Conf (días)', 26), ('2. Conf ➔ Envío (días)', 26),
-                            ('3. Envío ➔ Entrega (días)', 28), ('4. Entrega ➔ Recibo (días)', 28),
-                            ('Ciclo Total (días)', 24), ('% Ef. 0-7 Días', 24)
-                        ]
-                        headers_cortos_est = ['Estado', 'Ganadas', 'Surtidas', '% Surtido', 'Asig->Conf (d)', 'Conf->Env (d)', 'Env->Ent (d)', 'Ent->Rec (d)', 'Ciclo Total', '% Ef. 0-7d']
-                        for idx_h, (_, w_c) in enumerate(cols_p_est):
-                            pdf_sla.cell(w_c, 6, limpiar_txt_pdf(headers_cortos_est[idx_h]), border=1, fill=True, align='C')
-                        pdf_sla.ln()
-                        pdf_sla.set_text_color(0, 0, 0); pdf_sla.set_font("Arial", '', 7)
-                        for _, r_pe in df_por_estado.iterrows():
-                            for col_k, w_c in cols_p_est:
-                                pdf_sla.cell(w_c, 5, limpiar_txt_pdf(str(r_pe.get(col_k, ''))), border=1, align='C' if w_c < 35 else 'L')
-                            pdf_sla.ln()
-
-                        # 2. RESUMEN EJECUTIVO POR CIUDAD
-                        pdf_sla.ln(4)
-                        pdf_sla.set_font("Arial", 'B', 9)
-                        pdf_sla.cell(0, 6, limpiar_txt_pdf("2. RESUMEN EJECUTIVO POR CIUDAD"), ln=True)
-                        pdf_sla.set_fill_color(0, 51, 102); pdf_sla.set_text_color(255, 255, 255); pdf_sla.set_font("Arial", 'B', 7)
-                        cols_p_ciu = [
-                            ('Estado', 34), ('Ciudad / Plaza', 38), ('Piezas', 16), ('% Surtido', 20),
-                            ('1. Asig ➔ Conf (días)', 27), ('2. Conf ➔ Envío (días)', 27),
-                            ('3. Envío ➔ Entrega (días)', 29), ('4. Entrega ➔ Recibo (días)', 29),
-                            ('Ciclo Total (días)', 26), ('% Ef. 0-7 Días', 26)
-                        ]
-                        headers_cortos_ciu = ['Estado', 'Ciudad / Plaza', 'Piezas', '% Surtido', 'Asig->Conf (d)', 'Conf->Env (d)', 'Env->Ent (d)', 'Ent->Rec (d)', 'Ciclo Total', '% Ef. 0-7d']
-                        for idx_h, (_, w_c) in enumerate(cols_p_ciu):
-                            pdf_sla.cell(w_c, 6, limpiar_txt_pdf(headers_cortos_ciu[idx_h]), border=1, fill=True, align='C')
-                        pdf_sla.ln()
-                        pdf_sla.set_text_color(0, 0, 0); pdf_sla.set_font("Arial", '', 7)
-                        for _, r_pc in df_por_ciudad.iterrows():
-                            for col_k, w_c in cols_p_ciu:
-                                pdf_sla.cell(w_c, 5, limpiar_txt_pdf(str(r_pc.get(col_k, ''))), border=1, align='C' if w_c < 32 else 'L')
-                            pdf_sla.ln()
-
-                        # 3. DESGLOSE POR TALLER (CDR)
-                        pdf_sla.ln(4)
-                        pdf_sla.set_font("Arial", 'B', 9)
-                        pdf_sla.cell(0, 6, limpiar_txt_pdf("3. DESGLOSE POR TALLER (CDR)"), ln=True)
-                        pdf_sla.set_fill_color(0, 51, 102); pdf_sla.set_text_color(255, 255, 255); pdf_sla.set_font("Arial", 'B', 7)
-                        cols_p_tal = [
-                            ('Estado', 28), ('Ciudad', 28), ('Taller (CDR)', 56), ('Piezas', 14), ('% Surtido', 18),
-                            ('1. Asig ➔ Conf (días)', 22), ('2. Conf ➔ Envío (días)', 22),
-                            ('3. Envío ➔ Entrega (días)', 22), ('4. Entrega ➔ Recibo (días)', 22),
-                            ('Ciclo Total (días)', 20), ('% Ef. 0-7 Días', 20)
-                        ]
-                        headers_cortos_tal = ['Estado', 'Ciudad', 'Taller (CDR)', 'Pzas', '% Surt', 'Asig->Conf', 'Conf->Env', 'Env->Ent', 'Ent->Rec', 'Total (d)', '% Ef 0-7d']
-                        for idx_h, (_, w_c) in enumerate(cols_p_tal):
-                            pdf_sla.cell(w_c, 6, limpiar_txt_pdf(headers_cortos_tal[idx_h]), border=1, fill=True, align='C')
-                        pdf_sla.ln()
-                        pdf_sla.set_text_color(0, 0, 0); pdf_sla.set_font("Arial", '', 6.5)
-                        for _, r_pt in df_por_taller.iterrows():
-                            for col_k, w_c in cols_p_tal:
-                                pdf_sla.cell(w_c, 5, limpiar_txt_pdf(str(r_pt.get(col_k, ''))[:34]), border=1, align='C' if w_c < 26 else 'L')
-                            pdf_sla.ln()
-
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_sla:
-                            pdf_sla.output(tmp_sla.name)
-                            with open(tmp_sla.name, "rb") as f_sla: bytes_pdf_sla = f_sla.read()
-
-                        c_bs1, c_bs2 = st.columns(2)
-                        c_bs1.download_button(
-                            label="🖨️ Descargar Informe Ejecutivo (Estado / Ciudad / Taller) en PDF",
-                            data=bytes_pdf_sla,
-                            file_name=f"Informe_Tiempos_PMR_{hoy_cal_date.strftime('%d%m%Y')}.pdf",
-                            mime="application/pdf",
-                            type="primary",
-                            use_container_width=True
-                        )
-                        c_bs2.download_button(
-                            label="📥 Descargar Siniestros Auditados (CSV / Excel)",
-                            data=df_por_siniestro.to_csv(index=False).encode('utf-8-sig'),
-                            file_name=f"Detalle_Siniestros_Tiempos_PMR_{hoy_cal_date.strftime('%d%m%Y')}.csv",
-                            mime="text/csv",
-                            use_container_width=True
-                        )
-                    else:
-                        st.info("No se encontraron registros para el rango de fechas seleccionado.")
+                    )
+                    b_xlsx_sla = generar_excel_corporativo_pmr(
+                        {
+                            "Resumen_Ejecutivo": [("1. RESUMEN POR ESTADO", df_por_estado), ("2. RESUMEN POR CIUDAD", df_por_ciudad), ("3. DESGLOSE POR TALLER (CDR)", df_por_taller)],
+                            "Detalle_Siniestros": [("4. EXPEDIENTE DE SINIESTROS Y PIEZAS AUDITADAS", df_por_siniestro)]
+                        },
+                        f"Informe de Tiempos y SLA ({rango_str_titulo})"
+                    )
+                    cs1, cs2 = st.columns(2)
+                    cs1.download_button("🖨️ Descargar Informe Ejecutivo (PDF)", data=b_pdf_sla, file_name=f"Informe_Tiempos_PMR_{hoy_cal_date.strftime('%d%m%Y')}.pdf", mime="application/pdf", type="primary", use_container_width=True)
+                    cs2.download_button("📊 Descargar Informe Auditado (.XLSX)", data=b_xlsx_sla, file_name=f"Informe_Tiempos_SLA_PMR_{hoy_cal_date.strftime('%d%m%Y')}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
                 else:
-                    st.warning("No hay datos disponibles para calcular los tiempos.")
+                    st.info("No se encontraron registros para el rango de fechas seleccionado.")
+            else:
+                st.warning("No hay datos disponibles para calcular los tiempos.")
 
 # Encabezado estructurado en 2 niveles: Logo a la izquierda | Menú arriba y Controles abajo a la derecha
 col_logo, col_derecha = st.columns([1.15, 8.85], vertical_alignment="center")

@@ -559,4 +559,151 @@ def automatizar_inpart():
         except Exception as e: print(f"\n❌ Error al guardar en Base Maestra: {e}")
     else: print("\nNo se encontraron registros NUEVOS para agregar.")
 
-if __name__ == "__main__": automatizar_inpart()
+def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
+    import os
+    import sys
+    import base64
+
+    modo_oculto = False if "--visual" in sys.argv else True
+    os.makedirs(carpeta_destino, exist_ok=True)
+    num_pedido = str(num_pedido).strip()
+    hoy = datetime.datetime.now()
+
+    agente_falso = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=modo_oculto, args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
+        context = browser.new_context(viewport={"width": 1920, "height": 1080}, user_agent=agente_falso, locale="es-MX", timezone_id="America/Monterrey")
+        page = context.new_page()
+
+        try:
+            print(f"-> Conectando a Inpart para extraer fotos del pedido {num_pedido}...")
+            page.goto("https://inpart.audatex.com.mx/AudaPartsSite/", timeout=45000)
+            page.wait_for_load_state("networkidle")
+            page.fill("input[type='text'], input#username", "MX290679_1")
+            try: page.click("input[type='checkbox']", timeout=2000)
+            except Exception: pass
+            page.fill("input[type='password']", "inpart*79")
+            page.keyboard.press("Enter")
+            page.wait_for_load_state("networkidle")
+            time.sleep(3.5)
+
+            try:
+                if page.locator("#ctl00_cphBody_ucLogin_ucNeoMessageRemoveConcurrentLogin_btnYes").is_visible():
+                    page.click("#ctl00_cphBody_ucLogin_ucNeoMessageRemoveConcurrentLogin_btnYes")
+                    time.sleep(2.5)
+            except Exception:
+                pass
+
+            try:
+                page.wait_for_selector("text=PEDIDO", timeout=10000)
+                page.locator("text=PEDIDO").first.hover(timeout=5000)
+                time.sleep(1)
+                page.locator("a[href*='frmOrderSupplierSearch']").first.click(timeout=5000)
+            except Exception:
+                page.evaluate("window.location.href = 'frmOrderSupplierSearch.aspx'")
+
+            page.wait_for_load_state("networkidle")
+            time.sleep(2.5)
+
+            # Buscar primero en los últimos 45 días y, si es más antiguo, ampliar rango
+            rangos_busqueda = [
+                ((hoy - datetime.timedelta(days=45)).strftime("%d/%m/%Y"), hoy.strftime("%d/%m/%Y")),
+                ("", ""),
+                ((hoy - datetime.timedelta(days=120)).strftime("%d/%m/%Y"), (hoy - datetime.timedelta(days=44)).strftime("%d/%m/%Y"))
+            ]
+
+            fila_pedido = None
+            for f_ini, f_fin in rangos_busqueda:
+                page.wait_for_selector("input#cphBody_txtStartDate", timeout=10000)
+                page.fill("input#cphBody_txtStartDate", "")
+                if f_ini: page.type("input#cphBody_txtStartDate", f_ini)
+                page.fill("input#cphBody_txtEndDate", "")
+                if f_fin: page.type("input#cphBody_txtEndDate", f_fin)
+                page.fill("input[id*='OrderNumber'], input[id*='txtOrder']", "")
+                page.fill("input[id*='OrderNumber'], input[id*='txtOrder']", num_pedido)
+                page.click("input#cphBody_btnSearch")
+                page.wait_for_load_state("networkidle")
+                time.sleep(2.5)
+
+                loc_cand = page.locator(f"table#cphBody_gdvResult tr:has-text('{num_pedido}')")
+                if loc_cand.count() > 0:
+                    fila_pedido = loc_cand
+                    break
+
+            if not fila_pedido or fila_pedido.count() == 0:
+                print(f"⚠️ No se encontró el pedido {num_pedido} en el buscador de Inpart.")
+                return
+
+            enlace = fila_pedido.first.locator("a, input[type='image']")
+            if enlace.count() > 0:
+                enlace.first.click()
+            else:
+                fila_pedido.first.click()
+
+            page.wait_for_load_state("networkidle")
+            time.sleep(3)
+
+            try:
+                page.click("text=Items del Pedido", timeout=3000)
+                time.sleep(1.5)
+            except Exception:
+                pass
+
+            # Extraer todas las imágenes en base64 junto con su nombre original (hdnOriginalFile)
+            fotos_data = page.evaluate("""
+                () => {
+                    let resultados = [];
+                    let nodos = document.querySelectorAll("input[type='image'][src^='data:image'], img[src^='data:image']");
+                    nodos.forEach((el, idx) => {
+                        let contenedor = el.closest('div, span, td');
+                        let inpNombre = contenedor ? contenedor.querySelector("input[id*='hdnOriginalFile']") : null;
+                        let nombreOrig = inpNombre && inpNombre.value ? inpNombre.value.trim() : `foto_${idx + 1}.jpg`;
+                        let seccion = (el.id && el.id.includes('Quotation')) ? 'Cotizacion' : 'Pedido';
+                        resultados.push({
+                            nombre: nombreOrig,
+                            seccion: seccion,
+                            src: el.getAttribute('src') || ''
+                        });
+                    });
+                    return resultados;
+                }
+            """)
+
+            guardadas = 0
+            nombres_usados = set()
+            for idx_f, item in enumerate(fotos_data, start=1):
+                src_str = item.get('src', '')
+                if ',' not in src_str:
+                    continue
+                b64_puro = src_str.split(',', 1)[1].strip()
+                if len(b64_puro) < 100:
+                    continue
+
+                nom_limpio = re.sub(r'[^A-Za-z0-9._\-\(\) ]', '_', str(item.get('nombre', f'foto_{idx_f}.jpg')).strip())
+                if not nom_limpio.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    nom_limpio += '.jpg'
+                nombre_final = f"{idx_f:02d}_{item.get('seccion', 'GNP')}_{nom_limpio}"
+                if nombre_final in nombres_usados:
+                    nombre_final = f"{idx_f:02d}_{int(time.time())}_{nom_limpio}"
+                nombres_usados.add(nombre_final)
+
+                ruta_archivo = os.path.join(carpeta_destino, nombre_final)
+                with open(ruta_archivo, "wb") as f_img:
+                    f_img.write(base64.b64decode(b64_puro))
+                guardadas += 1
+
+            print(f"✅ Se descargaron {guardadas} fotografías del pedido {num_pedido}.")
+        finally:
+            browser.close()
+
+if __name__ == "__main__":
+    import sys
+    if "--fotos" in sys.argv:
+        idx_f = sys.argv.index("--fotos")
+        ped_arg = sys.argv[idx_f + 1] if len(sys.argv) > idx_f + 1 else ""
+        dir_arg = sys.argv[idx_f + 2] if len(sys.argv) > idx_f + 2 else "fotos_gnp"
+        if ped_arg:
+            extraer_fotos_pedido_inpart(ped_arg, dir_arg)
+    else:
+        automatizar_inpart()

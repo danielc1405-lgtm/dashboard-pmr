@@ -1012,8 +1012,8 @@ with col_logo:
 
 with col_derecha:
     vista_actual = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
-    col_espacio, col_aseg, col_btn_dir, col_btn_tar, col_btn_ref, col_btn_pop, col_btn_gua = st.columns(
-        [2.8, 1.5, 1.0, 1.0, 0.5, 0.5, 1.1], vertical_alignment="center"
+    col_espacio, col_aseg, col_btn_dir, col_btn_fot, col_btn_tar, col_btn_ref, col_btn_pop, col_btn_gua = st.columns(
+        [1.9, 1.4, 0.95, 0.95, 1.0, 0.45, 0.45, 1.0], vertical_alignment="center"
     )
 
 with col_aseg:
@@ -1636,10 +1636,159 @@ def abrir_directorio():
         if encontrados == 0:
             st.warning(f"No se encontraron coincidencias para '{busqueda_dir}'.")
 
+@st.dialog("📸 Visor y Descargador de Fotos (GNP Inpart)", width="large")
+def abrir_visor_fotos_inpart():
+    import io
+    import glob
+    import shutil
+    import zipfile
+    import subprocess
+    import sys
+
+    st.caption("Filtra un pedido activo de GNP o escribe cualquier Número de Pedido / Cotización manualmente para descargar su galería completa en alta resolución.")
+
+    # Cargar pedidos de GNP desde caché sin consumir cuota extra de Google Sheets
+    df_gnp_f = pd.DataFrame()
+    try:
+        df_base_f = cargar_base_viva().copy() if 'cargar_base_viva' in globals() else obtener_dataframe("BD_UNIFICADA", silent=True)
+        if not df_base_f.empty:
+            c_ase_f = next((c for c in df_base_f.columns if "ASEGURADORA" in str(c).upper()), None)
+            c_id_f = next((c for c in df_base_f.columns if "SINIESTRO" in str(c).upper() or "PEDIDO" in str(c).upper()), None)
+            c_tal_f = next((c for c in df_base_f.columns if "TALLER" in str(c).upper() or "CDR" in str(c).upper()), None)
+            c_mar_f = next((c for c in df_base_f.columns if "MARCA" in str(c).upper()), None)
+            c_mod_f = next((c for c in df_base_f.columns if "MODELO" in str(c).upper()), None)
+            c_ano_f = next((c for c in df_base_f.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
+
+            if c_ase_f:
+                df_gnp_f = df_base_f[df_base_f[c_ase_f].astype(str).str.upper().str.contains("GNP", na=False)].copy()
+            else:
+                df_gnp_f = df_base_f.copy()
+
+            if not df_gnp_f.empty and c_id_f:
+                df_gnp_f = df_gnp_f.drop_duplicates(subset=[c_id_f]).copy()
+                df_gnp_f['_ID_Limpio'] = df_gnp_f[c_id_f].astype(str).str.strip().str.removesuffix('.0')
+                df_gnp_f['_Taller_Limpio'] = df_gnp_f[c_tal_f].astype(str).str.strip() if c_tal_f else "S/D"
+                df_gnp_f['_Etiqueta'] = df_gnp_f.apply(
+                    lambda r: f"{r['_ID_Limpio']} | {str(r.get(c_mar_f,'')).strip()} {str(r.get(c_mod_f,'')).strip()} {str(r.get(c_ano_f,'')).strip().removesuffix('.0')} | {r['_Taller_Limpio']}",
+                    axis=1
+                )
+    except Exception:
+        df_gnp_f = pd.DataFrame()
+
+    # Filtros estilo Panel Operativo + Captura Manual
+    cf1, cf2, cf3 = st.columns([1.2, 1.8, 1.1], vertical_alignment="bottom")
+    with cf1:
+        talleres_gnp = sorted([t for t in df_gnp_f['_Taller_Limpio'].dropna().unique() if t]) if not df_gnp_f.empty else []
+        taller_f_sel = st.selectbox("🏢 1. Filtrar por Taller:", ["Todos..."] + talleres_gnp, key="sel_tal_fotos_gnp")
+
+    with cf2:
+        df_gnp_sub = df_gnp_f[df_gnp_f['_Taller_Limpio'] == taller_f_sel] if (not df_gnp_f.empty and taller_f_sel != "Todos...") else df_gnp_f
+        opciones_ped = sorted(df_gnp_sub['_Etiqueta'].dropna().unique().tolist()) if not df_gnp_sub.empty else []
+        pedido_f_sel = st.selectbox("🚗 2. Seleccionar Pedido - Vehículo:", ["Seleccionar..."] + opciones_ped, key="sel_ped_fotos_gnp")
+
+    with cf3:
+        pedido_manual_in = st.text_input("✍️ O escribir No. Pedido:", placeholder="Ej. 1160098", key="inp_ped_manual_gnp")
+
+    pedido_objetivo = pedido_manual_in.strip() if pedido_manual_in.strip() else (pedido_f_sel.split(" | ")[0].strip() if pedido_f_sel != "Seleccionar..." else "")
+
+    c_btn_ext, c_modo_f = st.columns([2.2, 1.2], vertical_alignment="center")
+    with c_modo_f:
+        modo_f_vis = st.radio("Modo:", ["Oculto (Rápido)", "Visual (PC Local)"], horizontal=True, key="rad_modo_fotos_gnp", label_visibility="collapsed")
+
+    if c_btn_ext.button(f"📸 Extraer Fotografías del Pedido {pedido_objetivo}" if pedido_objetivo else "📸 Extraer Fotografías de Inpart", type="primary", use_container_width=True, disabled=(not pedido_objetivo)):
+        carpeta_out = os.path.join(tempfile.gettempdir(), f"fotos_gnp_{pedido_objetivo}")
+        if os.path.exists(carpeta_out):
+            shutil.rmtree(carpeta_out, ignore_errors=True)
+        os.makedirs(carpeta_out, exist_ok=True)
+
+        arg_v = "--oculto" if "Oculto" in modo_f_vis else "--visual"
+        with st.spinner(f"Conectando a GNP Inpart y extrayendo galería del pedido {pedido_objetivo}..."):
+            try:
+                with open("credentials.json", "w", encoding="utf-8") as f:
+                    f.write(st.secrets["google_credentials"])
+                subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+                res_p = subprocess.run(
+                    [sys.executable, "-u", "gnp_inpart.py", "--fotos", str(pedido_objetivo), carpeta_out, arg_v],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120
+                )
+                st.session_state['fotos_gnp_carpeta'] = carpeta_out
+                st.session_state['fotos_gnp_pedido'] = pedido_objetivo
+                st.session_state['fotos_gnp_log'] = (res_p.stdout or "") + "\n" + (res_p.stderr or "")
+            except Exception as e_f:
+                st.error(f"Error al extraer fotos: {e_f}")
+            finally:
+                if os.path.exists("credentials.json"):
+                    os.remove("credentials.json")
+
+    carpeta_activa = st.session_state.get('fotos_gnp_carpeta', '')
+    ped_activo_f = st.session_state.get('fotos_gnp_pedido', '')
+    if carpeta_activa and os.path.exists(carpeta_activa):
+        archivos_img = sorted(glob.glob(os.path.join(carpeta_activa, "*.jpg")) + glob.glob(os.path.join(carpeta_activa, "*.jpeg")) + glob.glob(os.path.join(carpeta_activa, "*.png")))
+        if archivos_img:
+            st.success(f"✅ Se extrajeron **{len(archivos_img)} fotografías** del Pedido GNP **`{ped_activo_f}`**.")
+
+            # 1. Empaquetar en .ZIP
+            buf_zip = io.BytesIO()
+            with zipfile.ZipFile(buf_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+                for ruta_i in archivos_img:
+                    zf.write(ruta_i, arcname=os.path.basename(ruta_i))
+
+            # 2. Empaquetar en Álbum .PDF
+            pdf_f = FPDF(orientation='P', unit='mm', format='A4')
+            pdf_f.set_auto_page_break(auto=False)
+            for idx_i, ruta_i in enumerate(archivos_img):
+                if idx_i % 2 == 0:
+                    pdf_f.add_page()
+                    pdf_f.set_font("Arial", 'B', 11)
+                    pdf_f.cell(0, 8, f"PMR HUB AI - EXPEDIENTE FOTOGRAFICO GNP PEDIDO {ped_activo_f}", ln=True, align='C')
+                y_pos = 22 if (idx_i % 2 == 0) else 155
+                pdf_f.set_xy(15, y_pos)
+                pdf_f.set_font("Arial", 'B', 9)
+                pdf_f.cell(0, 6, f"Foto #{idx_i+1}: {os.path.basename(ruta_i)}", ln=True)
+                try:
+                    pdf_f.image(ruta_i, x=20, y=y_pos + 7, w=170, h=115)
+                except Exception:
+                    pass
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pf:
+                pdf_f.output(tmp_pf.name)
+                with open(tmp_pf.name, "rb") as f_rb: bytes_pdf_fotos = f_rb.read()
+
+            cd1, cd2 = st.columns(2)
+            cd1.download_button(
+                label=f"📦 Descargar Todas las Fotos en .ZIP ({len(archivos_img)} imgs)",
+                data=buf_zip.getvalue(),
+                file_name=f"Fotos_GNP_{ped_activo_f}.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True
+            )
+            cd2.download_button(
+                label="📄 Descargar Álbum Fotográfico en .PDF",
+                data=bytes_pdf_fotos,
+                file_name=f"Album_GNP_{ped_activo_f}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+
+            st.markdown("##### 🔍 Vista Previa en Grande")
+            cols_gal = st.columns(3)
+            for i_img, r_img in enumerate(archivos_img):
+                with cols_gal[i_img % 3]:
+                    st.image(r_img, caption=os.path.basename(r_img), use_container_width=True)
+        else:
+            st.warning(f"No se encontraron imágenes adjuntas en el pedido {ped_activo_f}.")
+            if st.session_state.get('fotos_gnp_log'):
+                with st.expander("Ver bitácora técnica"):
+                    st.code(st.session_state['fotos_gnp_log'])
+
 # Inyección de los botones directamente en las columnas declaradas arriba
 with col_btn_dir:
     if st.button("📖 Directorio", use_container_width=True):
         abrir_directorio()
+
+with col_btn_fot:
+    if st.button("📸 Fotos", help="Extraer y descargar fotografías de pedidos GNP Inpart", use_container_width=True):
+        abrir_visor_fotos_inpart()
 
 pendientes_badge = contar_tareas_pendientes(usuario_activo)
 label_btn_tareas = f"🔔 Tareas ({pendientes_badge})" if pendientes_badge > 0 else "🔔 Tareas"

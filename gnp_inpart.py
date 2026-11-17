@@ -569,6 +569,16 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
     num_pedido = str(num_pedido).strip()
     hoy = datetime.datetime.now()
 
+    # Mes actual primero (idéntico a automatizar_inpart) y mes anterior como respaldo
+    inicio_mes_actual = datetime.datetime(hoy.year, hoy.month, 1)
+    fin_mes_anterior = inicio_mes_actual - datetime.timedelta(days=1)
+    inicio_mes_anterior = datetime.datetime(fin_mes_anterior.year, fin_mes_anterior.month, 1)
+
+    rangos_busqueda = [
+        (inicio_mes_actual.strftime("%d/%m/%Y"), hoy.strftime("%d/%m/%Y")),
+        (inicio_mes_anterior.strftime("%d/%m/%Y"), fin_mes_anterior.strftime("%d/%m/%Y"))
+    ]
+
     agente_falso = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     with sync_playwright() as p:
@@ -586,12 +596,12 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
             page.fill("input[type='password']", "inpart*79")
             page.keyboard.press("Enter")
             page.wait_for_load_state("networkidle")
-            time.sleep(3.5)
+            time.sleep(4)
 
             try:
                 if page.locator("#ctl00_cphBody_ucLogin_ucNeoMessageRemoveConcurrentLogin_btnYes").is_visible():
                     page.click("#ctl00_cphBody_ucLogin_ucNeoMessageRemoveConcurrentLogin_btnYes")
-                    time.sleep(2.5)
+                    time.sleep(3)
             except Exception:
                 pass
 
@@ -604,45 +614,41 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
                 page.evaluate("window.location.href = 'frmOrderSupplierSearch.aspx'")
 
             page.wait_for_load_state("networkidle")
-            time.sleep(2.5)
-
-            # Buscar primero en los últimos 45 días y, si es más antiguo, ampliar rango
-            rangos_busqueda = [
-                ((hoy - datetime.timedelta(days=45)).strftime("%d/%m/%Y"), hoy.strftime("%d/%m/%Y")),
-                ("", ""),
-                ((hoy - datetime.timedelta(days=120)).strftime("%d/%m/%Y"), (hoy - datetime.timedelta(days=44)).strftime("%d/%m/%Y"))
-            ]
+            time.sleep(3)
 
             fila_pedido = None
             for f_ini, f_fin in rangos_busqueda:
+                print(f"-> Buscando pedido {num_pedido} en rango {f_ini} a {f_fin}...")
                 page.wait_for_selector("input#cphBody_txtStartDate", timeout=10000)
                 page.fill("input#cphBody_txtStartDate", "")
-                if f_ini: page.type("input#cphBody_txtStartDate", f_ini)
+                page.type("input#cphBody_txtStartDate", f_ini)
                 page.fill("input#cphBody_txtEndDate", "")
-                if f_fin: page.type("input#cphBody_txtEndDate", f_fin)
+                page.type("input#cphBody_txtEndDate", f_fin)
                 page.fill("input[id*='OrderNumber'], input[id*='txtOrder']", "")
                 page.fill("input[id*='OrderNumber'], input[id*='txtOrder']", num_pedido)
                 page.click("input#cphBody_btnSearch")
                 page.wait_for_load_state("networkidle")
-                time.sleep(2.5)
+                time.sleep(3)
 
                 loc_cand = page.locator(f"table#cphBody_gdvResult tr:has-text('{num_pedido}')")
                 if loc_cand.count() > 0:
                     fila_pedido = loc_cand
+                    print(f"-> Pedido {num_pedido} encontrado en la tabla.")
                     break
 
             if not fila_pedido or fila_pedido.count() == 0:
                 print(f"⚠️ No se encontró el pedido {num_pedido} en el buscador de Inpart.")
                 return
 
-            enlace = fila_pedido.first.locator("a, input[type='image']")
+            # Abrir el pedido exactamente igual que en automatizar_inpart (línea 260)
+            enlace = fila_pedido.first.locator("a")
             if enlace.count() > 0:
                 enlace.first.click()
             else:
                 fila_pedido.first.click()
 
             page.wait_for_load_state("networkidle")
-            time.sleep(3)
+            time.sleep(3.5)
 
             try:
                 page.click("text=Items del Pedido", timeout=3000)
@@ -650,12 +656,27 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
             except Exception:
                 pass
 
+            # Hacer scroll al fondo para activar los UpdatePanels de imágenes sin cerrar el panel que ya viene abierto
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(2.5)
+
+            # Esperar hasta 8 segundos a que estén presentes los inputs de imagen en el DOM
+            for _ in range(8):
+                cnt_imgs = page.evaluate("""
+                    () => document.querySelectorAll("input[id*='inputFile'], input[src*='data:image'], img[src*='data:image']").length
+                """)
+                if cnt_imgs > 0:
+                    break
+                time.sleep(1.0)
+
             # Extraer todas las imágenes en base64 junto con su nombre original (hdnOriginalFile)
             fotos_data = page.evaluate("""
                 () => {
                     let resultados = [];
-                    let nodos = document.querySelectorAll("input[type='image'][src^='data:image'], img[src^='data:image']");
+                    let nodos = document.querySelectorAll("input[id*='inputFile'], input[type='image'][src*='data:image'], img[src*='data:image']");
                     nodos.forEach((el, idx) => {
+                        let srcVal = el.getAttribute('src') || el.src || '';
+                        if (!srcVal.includes('data:image')) return;
                         let contenedor = el.closest('div, span, td');
                         let inpNombre = contenedor ? contenedor.querySelector("input[id*='hdnOriginalFile']") : null;
                         let nombreOrig = inpNombre && inpNombre.value ? inpNombre.value.trim() : `foto_${idx + 1}.jpg`;
@@ -663,12 +684,14 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
                         resultados.push({
                             nombre: nombreOrig,
                             seccion: seccion,
-                            src: el.getAttribute('src') || ''
+                            src: srcVal
                         });
                     });
                     return resultados;
                 }
             """)
+
+            print(f"-> Nodos de imagen detectados en el DOM: {len(fotos_data)}")
 
             guardadas = 0
             nombres_usados = set()

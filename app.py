@@ -1187,15 +1187,103 @@ def actualizar_tarea_en_sheet(ws_tareas, headers, row_data, nuevo_status, nuevo_
     celdas = [gspread.Cell(row=gs_row, col=col_i + 1, value=val) for col_i, val in enumerate(nueva_fila)]
     ws_tareas.update_cells(celdas, value_input_option='USER_ENTERED')
 
+@st.cache_data(ttl=300)
+def cargar_fotos_chat_sheets():
+    """Lee las imágenes de BD_CHAT_IMAGENES y reconstruye el base64 completo."""
+    mapa_fotos = {}
+    try:
+        doc = init_connection()
+        ws_img = doc.worksheet("BD_CHAT_IMAGENES")
+        filas = ws_img.get_all_values()
+        if len(filas) > 1:
+            for r in filas[1:]:
+                if len(r) >= 4 and str(r[0]).strip():
+                    id_f = str(r[0]).strip().upper()
+                    b64_full = "".join([str(c).strip() for c in r[3:] if str(c).strip()])
+                    if b64_full:
+                        if not b64_full.startswith("data:image"):
+                            b64_full = f"data:image/jpeg;base64,{b64_full}"
+                        mapa_fotos[id_f] = b64_full
+    except Exception:
+        pass
+    return mapa_fotos
+
+def guardar_foto_chat_en_sheet(archivo_bytes, autor):
+    """Comprime la imagen con Pillow, la divide en bloques seguros (<42,000 chars) y la guarda en BD_CHAT_IMAGENES."""
+    import io
+    import uuid
+    import base64
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(archivo_bytes))
+    if img.mode in ("RGBA", "P"):
+        fondo = Image.new("RGB", img.size, (11, 20, 26))
+        if img.mode == "P":
+            img = img.convert("RGBA")
+        fondo.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
+        img = fondo
+    else:
+        img = img.convert("RGB")
+
+    img.thumbnail((950, 950), Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=74, optimize=True)
+    b64_str = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    partes = [b64_str[i:i+42000] for i in range(0, len(b64_str), 42000)]
+    while len(partes) < 3:
+        partes.append("")
+
+    id_foto = str(uuid.uuid4().hex)[:6].upper()
+    tz_mx_f = datetime.timezone(datetime.timedelta(hours=-6))
+    fecha_f = datetime.datetime.now(tz_mx_f).strftime("%d/%m/%Y %H:%M")
+
+    doc = init_connection()
+    try:
+        ws_img = doc.worksheet("BD_CHAT_IMAGENES")
+    except Exception:
+        ws_img = doc.add_worksheet(title="BD_CHAT_IMAGENES", rows=1000, cols=8)
+
+    primera_fila = ws_img.row_values(1)
+    if not primera_fila:
+        ws_img.append_row(["ID_FOTO", "FECHA", "AUTOR", "PARTE_1", "PARTE_2", "PARTE_3"], value_input_option="USER_ENTERED")
+
+    nueva_fila_img = [id_foto, fecha_f, str(autor).strip()] + partes[:4]
+    ws_img.append_row(nueva_fila_img, value_input_option="RAW")
+
+    st.session_state.setdefault("cache_fotos_chat_local", {})[id_foto] = f"data:image/jpeg;base64,{b64_str}"
+    cargar_fotos_chat_sheets.clear()
+    return id_foto
+
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja una ventana estilo WhatsApp dentro de un iframe aislado con scroll 100% blindado."""
+    """Dibuja una ventana estilo WhatsApp con soporte de imágenes y zoom dentro de un iframe aislado."""
     import html
     import re
     import streamlit.components.v1 as components
 
+    texto_completo_chat = f"{row.get('Instruccion', '')} {row.get('Respuesta', '')}"
+    mapa_fotos_chat = {}
+    if "[FOTO:" in texto_completo_chat:
+        mapa_fotos_chat.update(cargar_fotos_chat_sheets())
+        mapa_fotos_chat.update(st.session_state.get("cache_fotos_chat_local", {}))
+
+    def formatear_texto_con_fotos(txt_crudo):
+        txt_esc = html.escape(str(txt_crudo).strip()).replace('\n', '<br>')
+        def _reemplazar_tag(m):
+            id_f = m.group(1).strip().upper()
+            src_f = mapa_fotos_chat.get(id_f, "")
+            if src_f:
+                return (
+                    f'<div class="img-wrap">'
+                    f'<img src="{src_f}" class="chat-img" onclick="abrirZoom(this.src)" title="Clic para ampliar imagen" />'
+                    f'</div>'
+                )
+            return f'<span style="color:#8696A0; font-style:italic;">[📷 Imagen {id_f} no disponible]</span>'
+        return re.sub(r'\[FOTO:([A-Za-z0-9]+)\]', _reemplazar_tag, txt_esc)
+
     emisor_orig = str(row.get('Emisor', 'Usuario')).strip()
     fecha_orig = str(row.get('Fecha_Creacion', '')).strip()
-    instruccion_orig = html.escape(str(row.get('Instruccion', '')).strip()).replace('\n', '<br>')
+    instruccion_orig = formatear_texto_con_fotos(row.get('Instruccion', ''))
     es_mio_orig = es_mismo_usuario(usuario_activo_real, emisor_orig, grupos_identidad)
 
     burbujas = []
@@ -1240,7 +1328,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 f'<div class="msg-row" style="justify-content:{align_m};">'
                 f'<div class="bubble" style="background-color:{bg_m}; border-radius:{radius_m};">'
                 f'{header_html}'
-                f'<div class="txt">{html.escape(txt_msg)}</div>'
+                f'<div class="txt">{formatear_texto_con_fotos(txt_msg)}</div>'
                 f'</div></div>'
             )
 
@@ -1267,6 +1355,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 border: 1px solid #222E35;
                 border-radius: 10px;
                 padding: 14px;
+                position: relative;
             }}
             #chat-viewport::-webkit-scrollbar {{ width: 7px; }}
             #chat-viewport::-webkit-scrollbar-track {{ background: #0B141A; border-radius: 10px; }}
@@ -1282,17 +1371,115 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
             .author {{ font-size: 0.75rem; font-weight: 700; margin-bottom: 3px; }}
             .time {{ color: #8696A0; font-weight: normal; font-size: 0.7rem; }}
             .txt {{ font-size: 0.9rem; line-height: 1.4; }}
+            .img-wrap {{ margin-top: 6px; margin-bottom: 3px; }}
+            .chat-img {{
+                max-width: 240px;
+                max-height: 190px;
+                border-radius: 8px;
+                border: 1px solid rgba(255,255,255,0.18);
+                cursor: zoom-in;
+                display: block;
+                transition: transform 0.15s ease;
+            }}
+            .chat-img:hover {{ transform: scale(1.02); border-color: #00A884; }}
+            #zoom-overlay {{
+                display: none;
+                position: fixed;
+                top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.92);
+                z-index: 9999;
+                align-items: center;
+                justify-content: center;
+                flex-direction: column;
+                cursor: zoom-out;
+            }}
+            #zoom-overlay img {{
+                max-width: 94%;
+                max-height: 82%;
+                border-radius: 8px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+            }}
+            #zoom-bar {{
+                margin-top: 8px;
+                display: flex;
+                gap: 12px;
+            }}
+            .zoom-btn {{
+                background: #00A884;
+                color: #fff;
+                text-decoration: none;
+                padding: 5px 14px;
+                border-radius: 6px;
+                font-size: 0.8rem;
+                font-weight: 600;
+            }}
         </style>
     </head>
     <body>
         <div id="chat-viewport">
             {''.join(burbujas)}
         </div>
+        <div id="zoom-overlay" onclick="cerrarZoom()">
+            <img id="zoom-img" src="" />
+            <div id="zoom-bar">
+                <a id="zoom-dl" class="zoom-btn" href="" download="foto_chat_pmr.jpg" onclick="event.stopPropagation();">⬇️ Descargar Imagen</a>
+                <span class="zoom-btn" style="background:#374045;">✖ Cerrar</span>
+            </div>
+        </div>
         <script>
             const vp = document.getElementById('chat-viewport');
-            if (vp) {{
-                vp.scrollTop = vp.scrollHeight;
+            if (vp) {{ vp.scrollTop = vp.scrollHeight; }}
+
+            function abrirZoom(src) {{
+                const ov = document.getElementById('zoom-overlay');
+                document.getElementById('zoom-img').src = src;
+                document.getElementById('zoom-dl').href = src;
+                ov.style.display = 'flex';
             }}
+            function cerrarZoom() {{
+                document.getElementById('zoom-overlay').style.display = 'none';
+            }}
+
+            // Interceptor de Ctrl+V para pegar capturas de pantalla directo al cargador 📎 del chat
+            try {{
+                const parentDoc = window.parent.document;
+                if (!parentDoc._pmrPasteBound) {{
+                    parentDoc._pmrPasteBound = true;
+                    parentDoc.addEventListener('paste', function(e) {{
+                        const dialogEl = parentDoc.querySelector('div[role="dialog"]');
+                        if (!dialogEl) return;
+                        const items = (e.clipboardData || e.originalEvent.clipboardData || {{}}).items || [];
+                        for (let i = 0; i < items.length; i++) {{
+                            if (items[i].type && items[i].type.indexOf('image') !== -1) {{
+                                const blob = items[i].getAsFile();
+                                if (!blob) continue;
+                                const file = new File([blob], "captura_" + Date.now() + ".png", {{ type: blob.type }});
+                                const asignarArchivo = (inp) => {{
+                                    const dt = new DataTransfer();
+                                    dt.items.add(file);
+                                    inp.files = dt.files;
+                                    inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                }};
+                                let fileInputs = parentDoc.querySelectorAll('input[type="file"]');
+                                if (fileInputs.length > 0) {{
+                                    asignarArchivo(fileInputs[0]);
+                                }} else {{
+                                    const btns = Array.from(dialogEl.querySelectorAll('button'));
+                                    const btnClip = btns.find(b => (b.innerText || '').includes('📎'));
+                                    if (btnClip) {{
+                                        btnClip.click();
+                                        setTimeout(() => {{
+                                            const newInputs = parentDoc.querySelectorAll('input[type="file"]');
+                                            if (newInputs.length > 0) asignarArchivo(newInputs[0]);
+                                        }}, 200);
+                                    }}
+                                }}
+                                break;
+                            }}
+                        }}
+                    }});
+                }}
+            }} catch (err) {{}}
         </script>
     </body>
     </html>
@@ -1344,7 +1531,6 @@ def abrir_centro_tareas():
         col_desc_loc = next((c for c in df_uni_local.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
         col_est_loc = next((c for c in df_uni_local.columns if "ESTATUS" in str(c).upper() and "ENV" not in str(c).upper() and "PAGO" not in str(c).upper()), None)
 
-        # Guardar el mapa Siniestro -> Taller antes de filtrar inactivos para cubrir todos los chats
         if not df_uni_local.empty and col_sin_loc and col_tall_loc:
             for _, r_t in df_uni_local.drop_duplicates(subset=[col_sin_loc]).iterrows():
                 s_k = str(r_t.get(col_sin_loc, '')).strip().upper()
@@ -1372,7 +1558,6 @@ def abrir_centro_tareas():
         df_uni_local = pd.DataFrame()
         lista_siniestros = []
 
-    # Filtrar chats donde participa el usuario actual
     chats_activos = pd.DataFrame()
     chats_finalizados = pd.DataFrame()
     n_atencion = 0
@@ -1408,12 +1593,12 @@ def abrir_centro_tareas():
         if not chats_activos.empty:
             col_lista, col_ventana = st.columns([1.35, 2.65], gap="medium")
 
-            # Callbacks para cambiar de chat o refrescar SIN usar st.rerun() (evita que el dialog se cierre)
             def seleccionar_chat_cb(gs_id):
                 st.session_state['chat_activo_gs_row'] = gs_id
 
             def refrescar_lista_cb():
                 leer_tareas_normalizadas.clear()
+                cargar_fotos_chat_sheets.clear()
 
             with col_lista:
                 c_tit, c_ref_btn = st.columns([3, 1], vertical_alignment="center")
@@ -1451,7 +1636,6 @@ def abrir_centro_tareas():
                 elif busqueda_chat and opciones_ids and st.session_state['chat_activo_gs_row'] not in opciones_ids:
                     st.session_state['chat_activo_gs_row'] = opciones_ids[0]
 
-                # Lista vertical de botones con scroll activo garantizado
                 with st.container(height=340, border=True):
                     if not opciones_ids:
                         st.caption("Sin coincidencias para tu búsqueda.")
@@ -1497,38 +1681,68 @@ def abrir_centro_tareas():
                     unsafe_allow_html=True
                 )
 
-                # Ventana de mensajes aislada en iframe con scroll garantizado
+                # Ventana de mensajes aislada en iframe con scroll garantizado e imágenes
                 renderizar_hilo_chat(row_activa, usuario_activo_real, grupos_identidad)
 
-                # Callbacks para Enviar, Finalizar y Eliminar Líneas manteniendo abierta la ventana
                 key_input_actual = f"wa_msg_input_{chat_sel_row}"
+                ver_up_key = f"ver_up_chat_{chat_sel_row}"
+                if ver_up_key not in st.session_state:
+                    st.session_state[ver_up_key] = 0
+                key_uploader_actual = f"wa_img_up_{chat_sel_row}_{st.session_state[ver_up_key]}"
 
-                def enviar_msg_cb(row_act, soy_emi, k_inp):
+                def enviar_msg_cb(row_act, soy_emi, k_inp, k_up, v_key):
                     texto = st.session_state.get(k_inp, "").strip()
-                    if texto:
+                    arch_up = st.session_state.get(k_up, None)
+                    if not texto and arch_up is None:
+                        return
+
+                    tag_foto = ""
+                    if arch_up is not None:
+                        try:
+                            id_f = guardar_foto_chat_en_sheet(arch_up.getvalue(), usuario_activo_real)
+                            tag_foto = f"[FOTO:{id_f}]"
+                        except Exception as e_img:
+                            st.toast(f"Error al subir imagen: {e_img}", icon="⚠️")
+
+                    cuerpo_msg = f"{tag_foto} {texto}".strip() if (tag_foto and texto) else (tag_foto or texto)
+                    if cuerpo_msg:
                         tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
                         ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
                         hist_prev = str(row_act.get('Respuesta', '')).strip()
-                        linea_nueva = f"[{ahora_str}] {usuario_activo_real}: {texto}"
+                        linea_nueva = f"[{ahora_str}] {usuario_activo_real}: {cuerpo_msg}"
                         hist_final = f"{hist_prev}\n{linea_nueva}".strip() if hist_prev else linea_nueva
                         prox_status = "Pendiente" if soy_emi else "Resuelto"
                         ws_t = doc.worksheet("Gestor_Tareas")
                         actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, prox_status, hist_final)
                         leer_tareas_normalizadas.clear()
                         st.session_state[k_inp] = ""
+                        st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
 
                 def finalizar_chat_cb(row_act):
                     ws_t = doc.worksheet("Gestor_Tareas")
                     actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, "Finalizado", str(row_act.get('Respuesta', '')).strip())
                     leer_tareas_normalizadas.clear()
 
-                # Barra inferior para escribir y responder
-                c_inp, c_send, c_fin = st.columns([2.8, 1.1, 1.1], vertical_alignment="bottom")
+                # Barra inferior con botón 📎 (Adjuntar / Pegar Ctrl+V), Texto, Enviar y Finalizar
+                c_clip, c_inp, c_send, c_fin = st.columns([0.55, 2.35, 1.05, 1.05], vertical_alignment="bottom")
+                with c_clip:
+                    tiene_img_lista = st.session_state.get(key_uploader_actual) is not None
+                    lbl_clip = "📎✅" if tiene_img_lista else "📎"
+                    with st.popover(lbl_clip, help="Adjuntar imagen o pegar captura con Ctrl + V", use_container_width=True):
+                        st.caption("📸 **Adjuntar o Pegar Captura (`Ctrl + V`)**")
+                        archivo_chat_sel = st.file_uploader(
+                            "Subir foto al chat:",
+                            type=["png", "jpg", "jpeg", "webp"],
+                            key=key_uploader_actual,
+                            label_visibility="collapsed"
+                        )
+                        if archivo_chat_sel is not None:
+                            st.image(archivo_chat_sel, caption="Lista para enviar al presionar 📤 Enviar", width=210)
                 with c_inp:
                     st.text_input(
                         "Mensaje:",
                         key=key_input_actual,
-                        placeholder="Escribe un mensaje en este hilo...",
+                        placeholder="Escribe un mensaje o pega captura (Ctrl+V)...",
                         label_visibility="collapsed"
                     )
                 with c_send:
@@ -1538,7 +1752,7 @@ def abrir_centro_tareas():
                         type="primary",
                         use_container_width=True,
                         on_click=enviar_msg_cb,
-                        args=(row_activa, soy_emisor_chat, key_input_actual)
+                        args=(row_activa, soy_emisor_chat, key_input_actual, key_uploader_actual, ver_up_key)
                     )
                 with c_fin:
                     st.button(
@@ -1627,9 +1841,10 @@ def abrir_centro_tareas():
             piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro)
 
         instruccion_nueva = st.text_area("Mensaje inicial:")
+        foto_inicial_up = st.file_uploader("📎 Adjuntar imagen al mensaje inicial (Opcional):", type=["png", "jpg", "jpeg", "webp"], key="up_foto_nuevo_chat")
         
         if st.button("📤 Iniciar Conversación", type="primary"):
-            if usuario_destino != "Seleccionar..." and siniestro_seleccionado != "Seleccionar..." and instruccion_nueva.strip():
+            if usuario_destino != "Seleccionar..." and siniestro_seleccionado != "Seleccionar..." and (instruccion_nueva.strip() or foto_inicial_up is not None):
                 import uuid
                 tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
                 id_tarea = str(uuid.uuid4().hex)[:6].upper()
@@ -1643,6 +1858,13 @@ def abrir_centro_tareas():
                         ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
 
                 try:
+                    tag_foto_ini = ""
+                    if foto_inicial_up is not None:
+                        id_f_ini = guardar_foto_chat_en_sheet(foto_inicial_up.getvalue(), usuario_activo_real)
+                        tag_foto_ini = f"[FOTO:{id_f_ini}]"
+
+                    msg_ini_guardar = f"{tag_foto_ini} {instruccion_nueva.strip()}".strip() if (tag_foto_ini and instruccion_nueva.strip()) else (tag_foto_ini or instruccion_nueva.strip())
+
                     ws_tareas = doc.worksheet("Gestor_Tareas")
                     if not headers_tareas:
                         headers_tareas = [str(h).strip() for h in ws_tareas.row_values(1)]
@@ -1671,7 +1893,7 @@ def abrir_centro_tareas():
                     if i_em >= 0: nueva_fila[i_em] = usuario_activo_real
                     if i_re >= 0: nueva_fila[i_re] = usuario_destino
                     if i_rf >= 0: nueva_fila[i_rf] = ref_final
-                    if i_in >= 0: nueva_fila[i_in] = instruccion_nueva.strip()
+                    if i_in >= 0: nueva_fila[i_in] = msg_ini_guardar
                     if i_st >= 0: nueva_fila[i_st] = "Pendiente"
                     if i_rp >= 0: nueva_fila[i_rp] = ""
 
@@ -1683,7 +1905,7 @@ def abrir_centro_tareas():
                 except Exception as e:
                     st.error(f"❌ Error al guardar: {e}")
             else:
-                st.warning("⚠️ Selecciona el participante, el tema/siniestro y escribe el mensaje inicial.")
+                st.warning("⚠️ Selecciona el participante, el tema/siniestro y escribe un mensaje o adjunta una foto.")
 
     # --- TAB 3: HISTORIAL DE FINALIZADOS ---
     with tabs_tareas[2]:

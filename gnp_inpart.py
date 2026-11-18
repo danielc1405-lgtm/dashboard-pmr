@@ -569,7 +569,6 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
     num_pedido = str(num_pedido).strip()
     hoy = datetime.datetime.now()
 
-    # Cambiar el año inicial al año anterior (2025), igual que en la búsqueda manual
     f_ini = f"01/01/{hoy.year - 1}"
     f_fin = hoy.strftime("%d/%m/%Y")
 
@@ -629,7 +628,6 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
             page.wait_for_load_state("networkidle")
             time.sleep(3)
 
-            # Ubicar la fila exacta del pedido y hacer clic en el ícono de la Lupa (input type=image)
             span_ped = page.locator(f"table#cphBody_gdvResult span[id*='lblOrder']:has-text('{num_pedido}')")
             if span_ped.count() > 0:
                 fila_exacta = span_ped.first.locator("xpath=ancestor::tr[1]")
@@ -651,84 +649,104 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
             time.sleep(3.5)
             print(f"-> Dentro del pedido. URL actual: {page.url}")
 
-            # Bajar al final de la página donde están los paneles de imágenes [+]
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             time.sleep(1.5)
 
-            def contar_imgs_dom():
-                return page.evaluate("""
-                    () => document.querySelectorAll("input[id*='inputFile'], input[src*='data:image'], img[src*='data:image']").length
-                """)
+            fotos_acumuladas = {}
 
-            cnt_inicial = contar_imgs_dom()
-            print(f"-> Imágenes cargadas antes de abrir paneles [+]: {cnt_inicial}")
-
-            if cnt_inicial == 0:
-                # 1. Hacer clic en los botones [+] de los paneles ucAttachedImagesQuotation y ucAttachedImagesOrder
-                botones_mas = page.locator("input[id*='ucAttachedImages'], img[id*='ucAttachedImages'], a[id*='ucAttachedImages']")
-                n_botones = botones_mas.count()
-                print(f"-> Controles de panel [+] encontrados: {n_botones}")
-                for i_b in range(n_botones):
-                    try:
-                        el_id = botones_mas.nth(i_b).get_attribute("id") or ""
-                        if "inputFile" not in el_id:
-                            print(f"   Abriendo control [+]: {el_id}")
-                            botones_mas.nth(i_b).click(timeout=4000)
-                            page.wait_for_load_state("networkidle")
-                            time.sleep(3.0)
-                    except Exception:
-                        pass
-
-                # 2. Respaldo: si siguen cerrados, buscar el botón [+] junto al texto 'Panel de Imágenes'
-                if contar_imgs_dom() == 0:
-                    for txt_p in ["Panel de Imágenes - Cotización", "Panel de Imagenes - Cotizacion", "Panel de Imágenes - Pedido"]:
-                        try:
-                            loc_bar = page.locator(f"text={txt_p}")
-                            if loc_bar.count() > 0:
-                                print(f"-> Clic en barra '{txt_p}'...")
-                                contenedor_bar = loc_bar.first.locator("xpath=ancestor::div[1] | ancestor::tr[1]")
-                                btn_mas = contenedor_bar.locator("input[type='image'], img, a")
-                                if btn_mas.count() > 0:
-                                    btn_mas.first.click(timeout=4000)
-                                else:
-                                    loc_bar.first.click(timeout=4000)
-                                page.wait_for_load_state("networkidle")
-                                time.sleep(3.0)
-                        except Exception:
-                            pass
-
-            # Esperar hasta 8 segundos a que terminen de renderizarse las miniaturas base64
-            for _ in range(8):
-                if contar_imgs_dom() > 0:
-                    break
-                time.sleep(1.0)
-
-            fotos_data = page.evaluate("""
-                () => {
-                    let resultados = [];
-                    let nodos = document.querySelectorAll("input[id*='inputFile'], input[type='image'][src*='data:image'], img[src*='data:image']");
-                    nodos.forEach((el, idx) => {
-                        let srcVal = el.getAttribute('src') || el.src || '';
-                        if (!srcVal.includes('data:image')) return;
-                        let contenedor = el.closest('div, span, td');
-                        let inpNombre = contenedor ? contenedor.querySelector("input[id*='hdnOriginalFile']") : null;
-                        let nombreOrig = inpNombre && inpNombre.value ? inpNombre.value.trim() : `foto_${idx + 1}.jpg`;
-                        let seccion = (el.id && el.id.includes('Quotation')) ? 'Cotizacion' : 'Pedido';
-                        resultados.push({
-                            nombre: nombreOrig,
-                            seccion: seccion,
-                            src: srcVal
+            def recolectar_fotos_visibles():
+                nuevas_f = page.evaluate("""
+                    () => {
+                        let resultados = [];
+                        let nodos = document.querySelectorAll("input[id*='inputFile'], input[type='image'][src*='data:image'], img[src*='data:image']");
+                        nodos.forEach((el, idx) => {
+                            let srcVal = el.getAttribute('src') || el.src || '';
+                            if (!srcVal.includes('data:image')) return;
+                            let contenedor = el.closest('div, span, td');
+                            let inpNombre = contenedor ? contenedor.querySelector("input[id*='hdnOriginalFile']") : null;
+                            let nombreOrig = inpNombre && inpNombre.value ? inpNombre.value.trim() : `foto_${idx + 1}.jpg`;
+                            let seccion = (el.id && el.id.includes('Quotation')) ? 'Cotizacion' : 'Pedido';
+                            resultados.push({
+                                id: el.id || `img_${idx}`,
+                                nombre: nombreOrig,
+                                seccion: seccion,
+                                src: srcVal
+                            });
                         });
-                    });
-                    return resultados;
-                }
-            """)
+                        return resultados;
+                    }
+                """)
+                for f_obj in nuevas_f:
+                    llave_f = f"{f_obj['seccion']}_{f_obj['nombre']}_{len(f_obj['src'])}"
+                    if llave_f not in fotos_acumuladas:
+                        fotos_acumuladas[llave_f] = f_obj
+                return len(nuevas_f)
 
-            print(f"-> Nodos de imagen detectados en el DOM: {len(fotos_data)}")
+            recolectar_fotos_visibles()
+
+            # Abrir los paneles [+] sin importar si llevan tilde o no ("Panel de Imagenes - Cotización" y "Pedido")
+            for sub_panel in ["Cotizaci", "Pedido"]:
+                loc_barra = page.locator(f"text=/Panel de Im[aá]genes.*{sub_panel}/i")
+                if loc_barra.count() > 0:
+                    print(f"-> Panel '{sub_panel}' localizado. Expandiendo [+]...")
+                    antes_cnt = len(fotos_acumuladas)
+
+                    # 1. Buscar el botón [+] exacto dentro de la barra gris en el DOM
+                    clic_js = page.evaluate("""
+                        (palabra) => {
+                            const norm = (s) => (s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
+                            const target = norm(palabra);
+                            const todos = Array.from(document.querySelectorAll('span, div, td, th, a, label'));
+                            let nodoTexto = todos.find(el => {
+                                let t = norm(el.innerText || el.textContent || '');
+                                return t.includes('panel de imagenes') && t.includes(target) && el.children.length <= 3;
+                            });
+                            if (!nodoTexto) return 'no_encontrado';
+
+                            let barra = nodoTexto;
+                            while (barra.parentElement && barra.parentElement.getBoundingClientRect().height < 65 && barra.parentElement.tagName !== 'BODY') {
+                                barra = barra.parentElement;
+                            }
+
+                            let icono = barra.querySelector("input[type='image'], img, a, input[type='button']");
+                            if (icono) {
+                                icono.click();
+                                return 'icono_clicado:' + (icono.id || icono.tagName);
+                            }
+                            nodoTexto.click();
+                            return 'texto_clicado:' + (nodoTexto.id || nodoTexto.tagName);
+                        }
+                    """, sub_panel)
+                    print(f"   Acción JS sobre '{sub_panel}': {clic_js}")
+                    page.wait_for_load_state("networkidle")
+                    time.sleep(2.5)
+                    recolectar_fotos_visibles()
+
+                    # 2. Respaldo: clic físico con mouse en el extremo izquierdo [+] de la barra si aún no abre
+                    if len(fotos_acumuladas) == antes_cnt:
+                        try:
+                            el_bar = loc_barra.first
+                            el_bar.scroll_into_view_if_needed()
+                            box = el_bar.bounding_box()
+                            if box:
+                                print(f"   Clic físico en [+] de '{sub_panel}' (x={box['x']}, y={box['y']})...")
+                                page.mouse.click(max(5, box['x'] - 10), box['y'] + box['height'] / 2)
+                                page.wait_for_load_state("networkidle")
+                                time.sleep(2.5)
+                                recolectar_fotos_visibles()
+                            if len(fotos_acumuladas) == antes_cnt:
+                                el_bar.click(position={"x": 8, "y": 8}, timeout=4000)
+                                page.wait_for_load_state("networkidle")
+                                time.sleep(2.5)
+                                recolectar_fotos_visibles()
+                        except Exception as e_c:
+                            print(f"   Nota clic físico: {e_c}")
+
+            print(f"-> Total de fotografías capturadas en el pedido: {len(fotos_acumuladas)}")
 
             guardadas = 0
             nombres_usados = set()
-            for idx_f, item in enumerate(fotos_data, start=1):
+            for idx_f, item in enumerate(fotos_acumuladas.values(), start=1):
                 src_str = item.get('src', '')
                 if ',' not in src_str:
                     continue

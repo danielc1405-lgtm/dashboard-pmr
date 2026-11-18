@@ -569,15 +569,9 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
     num_pedido = str(num_pedido).strip()
     hoy = datetime.datetime.now()
 
-    # Mes actual primero (idéntico a automatizar_inpart) y mes anterior como respaldo
-    inicio_mes_actual = datetime.datetime(hoy.year, hoy.month, 1)
-    fin_mes_anterior = inicio_mes_actual - datetime.timedelta(days=1)
-    inicio_mes_anterior = datetime.datetime(fin_mes_anterior.year, fin_mes_anterior.month, 1)
-
-    rangos_busqueda = [
-        (inicio_mes_actual.strftime("%d/%m/%Y"), hoy.strftime("%d/%m/%Y")),
-        (inicio_mes_anterior.strftime("%d/%m/%Y"), fin_mes_anterior.strftime("%d/%m/%Y"))
-    ]
+    # Cambiar el año inicial al año anterior (2025), igual que en la búsqueda manual
+    f_ini = f"01/01/{hoy.year - 1}"
+    f_fin = hoy.strftime("%d/%m/%Y")
 
     agente_falso = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
@@ -616,60 +610,99 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
             page.wait_for_load_state("networkidle")
             time.sleep(3)
 
-            fila_pedido = None
-            for f_ini, f_fin in rangos_busqueda:
-                print(f"-> Buscando pedido {num_pedido} en rango {f_ini} a {f_fin}...")
-                page.wait_for_selector("input#cphBody_txtStartDate", timeout=10000)
-                page.fill("input#cphBody_txtStartDate", "")
-                page.type("input#cphBody_txtStartDate", f_ini)
-                page.fill("input#cphBody_txtEndDate", "")
-                page.type("input#cphBody_txtEndDate", f_fin)
-                page.fill("input[id*='OrderNumber'], input[id*='txtOrder']", "")
-                page.fill("input[id*='OrderNumber'], input[id*='txtOrder']", num_pedido)
-                page.click("input#cphBody_btnSearch")
-                page.wait_for_load_state("networkidle")
-                time.sleep(3)
+            print(f"-> Buscando pedido {num_pedido} en rango {f_ini} a {f_fin}...")
+            page.wait_for_selector("input#cphBody_txtStartDate", timeout=10000)
+            page.click("input#cphBody_txtStartDate")
+            page.fill("input#cphBody_txtStartDate", "")
+            page.type("input#cphBody_txtStartDate", f_ini)
 
-                loc_cand = page.locator(f"table#cphBody_gdvResult tr:has-text('{num_pedido}')")
-                if loc_cand.count() > 0:
-                    fila_pedido = loc_cand
-                    print(f"-> Pedido {num_pedido} encontrado en la tabla.")
-                    break
+            page.click("input#cphBody_txtEndDate")
+            page.fill("input#cphBody_txtEndDate", "")
+            page.type("input#cphBody_txtEndDate", f_fin)
 
-            if not fila_pedido or fila_pedido.count() == 0:
-                print(f"⚠️ No se encontró el pedido {num_pedido} en el buscador de Inpart.")
+            campo_ped = page.locator("input#cphBody_txtOrder, input[id*='OrderNumber'], input[id*='txtOrder']").first
+            campo_ped.click()
+            campo_ped.fill("")
+            campo_ped.type(num_pedido)
+
+            page.click("input#cphBody_btnSearch")
+            page.wait_for_load_state("networkidle")
+            time.sleep(3)
+
+            # Ubicar la fila exacta del pedido y hacer clic en el ícono de la Lupa (input type=image)
+            span_ped = page.locator(f"table#cphBody_gdvResult span[id*='lblOrder']:has-text('{num_pedido}')")
+            if span_ped.count() > 0:
+                fila_exacta = span_ped.first.locator("xpath=ancestor::tr[1]")
+            else:
+                fila_exacta = page.locator(f"table#cphBody_gdvResult tr:has-text('{num_pedido}')").last
+
+            if fila_exacta.count() == 0:
+                print(f"⚠️ No se encontró el pedido {num_pedido} en la tabla de resultados.")
                 return
 
-            # Abrir el pedido exactamente igual que en automatizar_inpart (línea 260)
-            enlace = fila_pedido.first.locator("a")
-            if enlace.count() > 0:
-                enlace.first.click()
+            print(f"-> Pedido {num_pedido} encontrado. Haciendo clic en el ícono de la lupa...")
+            btn_lupa = fila_exacta.locator("input[type='image'], a, img[onclick]")
+            if btn_lupa.count() > 0:
+                btn_lupa.first.click()
             else:
-                fila_pedido.first.click()
+                fila_exacta.click()
 
             page.wait_for_load_state("networkidle")
             time.sleep(3.5)
+            print(f"-> Dentro del pedido. URL actual: {page.url}")
 
-            try:
-                page.click("text=Items del Pedido", timeout=3000)
-                time.sleep(1.5)
-            except Exception:
-                pass
-
-            # Hacer scroll al fondo para activar los UpdatePanels de imágenes sin cerrar el panel que ya viene abierto
+            # Bajar al final de la página donde están los paneles de imágenes [+]
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(2.5)
+            time.sleep(1.5)
 
-            # Esperar hasta 8 segundos a que estén presentes los inputs de imagen en el DOM
-            for _ in range(8):
-                cnt_imgs = page.evaluate("""
+            def contar_imgs_dom():
+                return page.evaluate("""
                     () => document.querySelectorAll("input[id*='inputFile'], input[src*='data:image'], img[src*='data:image']").length
                 """)
-                if cnt_imgs > 0:
+
+            cnt_inicial = contar_imgs_dom()
+            print(f"-> Imágenes cargadas antes de abrir paneles [+]: {cnt_inicial}")
+
+            if cnt_inicial == 0:
+                # 1. Hacer clic en los botones [+] de los paneles ucAttachedImagesQuotation y ucAttachedImagesOrder
+                botones_mas = page.locator("input[id*='ucAttachedImages'], img[id*='ucAttachedImages'], a[id*='ucAttachedImages']")
+                n_botones = botones_mas.count()
+                print(f"-> Controles de panel [+] encontrados: {n_botones}")
+                for i_b in range(n_botones):
+                    try:
+                        el_id = botones_mas.nth(i_b).get_attribute("id") or ""
+                        if "inputFile" not in el_id:
+                            print(f"   Abriendo control [+]: {el_id}")
+                            botones_mas.nth(i_b).click(timeout=4000)
+                            page.wait_for_load_state("networkidle")
+                            time.sleep(3.0)
+                    except Exception:
+                        pass
+
+                # 2. Respaldo: si siguen cerrados, buscar el botón [+] junto al texto 'Panel de Imágenes'
+                if contar_imgs_dom() == 0:
+                    for txt_p in ["Panel de Imágenes - Cotización", "Panel de Imagenes - Cotizacion", "Panel de Imágenes - Pedido"]:
+                        try:
+                            loc_bar = page.locator(f"text={txt_p}")
+                            if loc_bar.count() > 0:
+                                print(f"-> Clic en barra '{txt_p}'...")
+                                contenedor_bar = loc_bar.first.locator("xpath=ancestor::div[1] | ancestor::tr[1]")
+                                btn_mas = contenedor_bar.locator("input[type='image'], img, a")
+                                if btn_mas.count() > 0:
+                                    btn_mas.first.click(timeout=4000)
+                                else:
+                                    loc_bar.first.click(timeout=4000)
+                                page.wait_for_load_state("networkidle")
+                                time.sleep(3.0)
+                        except Exception:
+                            pass
+
+            # Esperar hasta 8 segundos a que terminen de renderizarse las miniaturas base64
+            for _ in range(8):
+                if contar_imgs_dom() > 0:
                     break
                 time.sleep(1.0)
 
-            # Extraer todas las imágenes en base64 junto con su nombre original (hdnOriginalFile)
             fotos_data = page.evaluate("""
                 () => {
                     let resultados = [];

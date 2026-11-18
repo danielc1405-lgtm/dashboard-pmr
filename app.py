@@ -1256,7 +1256,7 @@ def guardar_foto_chat_en_sheet(archivo_bytes, autor):
     return id_foto
 
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja una ventana estilo WhatsApp limpia con soporte de imágenes, zoom y pegado directo con Ctrl+V."""
+    """Dibuja una ventana estilo WhatsApp con soporte de imágenes, zoom y pegado directo con Ctrl+V."""
     import html
     import re
     import streamlit.components.v1 as components
@@ -1492,6 +1492,8 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
     </html>
     """
     components.html(iframe_html, height=325, scrolling=False)
+
+def contar_tareas_pendientes(usuario):
     try:
         _, grupos_id = obtener_mapa_usuarios()
         df_t, _ = leer_tareas_normalizadas()

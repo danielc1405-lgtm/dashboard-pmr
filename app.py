@@ -1698,9 +1698,18 @@ def abrir_visor_fotos_inpart():
 
     pedido_objetivo = pedido_manual_in.strip() if pedido_manual_in.strip() else (pedido_f_sel.split(" | ")[0].strip() if pedido_f_sel != "Seleccionar..." else "")
 
-    c_btn_ext, c_modo_f = st.columns([2.2, 1.2], vertical_alignment="center")
+    c_btn_ext, c_btn_limp, c_modo_f = st.columns([1.8, 0.8, 1.1], vertical_alignment="center")
     with c_modo_f:
         modo_f_vis = st.radio("Modo:", ["Oculto (Rápido)", "Visual (PC Local)"], horizontal=True, key="rad_modo_fotos_gnp", label_visibility="collapsed")
+
+    def limpiar_galeria_gnp_cb():
+        carp_old = st.session_state.pop('fotos_gnp_carpeta', '')
+        if carp_old and os.path.exists(carp_old):
+            shutil.rmtree(carp_old, ignore_errors=True)
+        st.session_state.pop('fotos_gnp_pedido', None)
+        st.session_state.pop('fotos_gnp_log', None)
+
+    c_btn_limp.button("🧹 Limpiar Pantalla", use_container_width=True, key="btn_limp_fotos_gnp", on_click=limpiar_galeria_gnp_cb)
 
     if c_btn_ext.button(f"📸 Extraer Fotografías del Pedido {pedido_objetivo}" if pedido_objetivo else "📸 Extraer Fotografías de Inpart", type="primary", use_container_width=True, disabled=(not pedido_objetivo)):
         carpeta_out = os.path.join(tempfile.gettempdir(), f"fotos_gnp_{pedido_objetivo}")
@@ -1709,14 +1718,14 @@ def abrir_visor_fotos_inpart():
         os.makedirs(carpeta_out, exist_ok=True)
 
         arg_v = "--oculto" if "Oculto" in modo_f_vis else "--visual"
-        with st.spinner(f"Conectando a GNP Inpart y extrayendo galería del pedido {pedido_objetivo}..."):
+        with st.spinner(f"Conectando a GNP Inpart y descargando galería en Alta Resolución del pedido {pedido_objetivo}..."):
             try:
                 with open("credentials.json", "w", encoding="utf-8") as f:
                     f.write(st.secrets["google_credentials"])
                 subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
                 res_p = subprocess.run(
                     [sys.executable, "-u", "gnp_inpart.py", "--fotos", str(pedido_objetivo), carpeta_out, arg_v],
-                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300
                 )
                 st.session_state['fotos_gnp_carpeta'] = carpeta_out
                 st.session_state['fotos_gnp_pedido'] = pedido_objetivo
@@ -1795,6 +1804,9 @@ with col_btn_dir:
 
 with col_btn_fot:
     if st.button("📸 Fotos", help="Extraer y descargar fotografías de pedidos GNP Inpart", use_container_width=True):
+        st.session_state.pop('fotos_gnp_carpeta', None)
+        st.session_state.pop('fotos_gnp_pedido', None)
+        st.session_state.pop('fotos_gnp_log', None)
         abrir_visor_fotos_inpart()
 
 pendientes_badge = contar_tareas_pendientes(usuario_activo)

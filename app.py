@@ -3115,7 +3115,7 @@ elif vista_actual == "⚙️ Panel Operativo":
         lbl_po("🚨", "Vencen Hoy", df_vencimientos),
         lbl_po("❌", "Atrasados", df_atrasadas),
         lbl_po("📥", "Por Recibir", df_por_recibir),
-        lbl_po("📋", "Asignados", df_asignados),
+        lbl_po("📋", "Confirmados", df_asignados),
         lbl_po("💸", "Reembolsos", df_reembolsos),
         lbl_po("↩️", "Recolección", df_recoleccion)
     ])
@@ -3280,7 +3280,7 @@ elif vista_actual == "⚙️ Panel Operativo":
                             st.dataframe(df_grupo[cols_visibles], column_config=base_config, hide_index=True, use_container_width=True)
             if dfs_editados: df_editado = pd.concat(dfs_editados, ignore_index=True)
         else:
-            st.info("No hay pedidos asignados en proceso con los filtros actuales.")
+            st.info("No hay pedidos confirmados en proceso con los filtros actuales.")
 
     # 6. PESTAÑA: REEMBOLSOS
     with tab_po_reemb:

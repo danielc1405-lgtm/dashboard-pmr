@@ -1256,7 +1256,7 @@ def guardar_foto_chat_en_sheet(archivo_bytes, autor):
     return id_foto
 
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja una ventana estilo WhatsApp con soporte de imágenes y zoom dentro de un iframe aislado."""
+    """Dibuja una ventana estilo WhatsApp con soporte de imágenes, zoom y pegado directo (Ctrl+V y Clic Derecho -> Pegar)."""
     import html
     import re
     import streamlit.components.v1 as components
@@ -1345,7 +1345,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 overflow: hidden;
             }}
             #chat-viewport {{
-                height: 315px;
+                height: 278px;
                 width: 100%;
                 overflow-y: auto;
                 overflow-x: hidden;
@@ -1353,13 +1353,58 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 background-image: radial-gradient(#1F2C34 1px, transparent 1px);
                 background-size: 20px 20px;
                 border: 1px solid #222E35;
-                border-radius: 10px;
+                border-radius: 10px 10px 0 0;
                 padding: 14px;
                 position: relative;
             }}
             #chat-viewport::-webkit-scrollbar {{ width: 7px; }}
-            #chat-viewport::-webkit-scrollbar-track {{ background: #0B141A; border-radius: 10px; }}
+            #chat-viewport::-webkit-scrollbar-track {{ background: #0B141A; }}
             #chat-viewport::-webkit-scrollbar-thumb {{ background: #374045; border-radius: 10px; }}
+            #paste-bar {{
+                height: 36px;
+                width: 100%;
+                background-color: #141E24;
+                border: 1px solid #222E35;
+                border-top: 1px dashed #2A3942;
+                border-radius: 0 0 10px 10px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0 10px;
+                gap: 8px;
+            }}
+            #paste-zone {{
+                flex: 1;
+                height: 24px;
+                line-height: 22px;
+                background-color: #0B141A;
+                border: 1px dashed #00A884;
+                border-radius: 5px;
+                color: #8696A0;
+                font-size: 0.76rem;
+                padding: 0 10px;
+                outline: none;
+                overflow: hidden;
+                white-space: nowrap;
+                cursor: text;
+            }}
+            #paste-zone:focus {{
+                border-color: #53BDEB;
+                color: #E9EDEF;
+                background-color: #111B21;
+            }}
+            #btn-clip-read {{
+                background-color: #005C4B;
+                color: #E9EDEF;
+                border: 1px solid #00A884;
+                border-radius: 5px;
+                padding: 3px 10px;
+                font-size: 0.75rem;
+                font-weight: 600;
+                cursor: pointer;
+                white-space: nowrap;
+            }}
+            #btn-clip-read:hover {{ background-color: #00A884; color: #000; }}
             .msg-row {{ display: flex; margin-bottom: 10px; width: 100%; }}
             .bubble {{
                 color: #E9EDEF;
@@ -1399,11 +1444,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 border-radius: 8px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.8);
             }}
-            #zoom-bar {{
-                margin-top: 8px;
-                display: flex;
-                gap: 12px;
-            }}
+            #zoom-bar {{ margin-top: 8px; display: flex; gap: 12px; }}
             .zoom-btn {{
                 background: #00A884;
                 color: #fff;
@@ -1419,6 +1460,12 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
         <div id="chat-viewport">
             {''.join(burbujas)}
         </div>
+        <div id="paste-bar">
+            <div id="paste-zone" contenteditable="true" spellcheck="false" title="Haz clic derecho -> Pegar o presiona Ctrl + V aquí">
+                📋 Para pegar recorte: Haz Clic Derecho ➔ Pegar aquí (o presiona Ctrl + V)
+            </div>
+            <button id="btn-clip-read" type="button" onclick="leerPortapapelesDirecto()">📋 Pegar Captura</button>
+        </div>
         <div id="zoom-overlay" onclick="cerrarZoom()">
             <img id="zoom-img" src="" />
             <div id="zoom-bar">
@@ -1430,6 +1477,11 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
             const vp = document.getElementById('chat-viewport');
             if (vp) {{ vp.scrollTop = vp.scrollHeight; }}
 
+            const pz = document.getElementById('paste-zone');
+            const textoDefaultPz = "📋 Para pegar recorte: Haz Clic Derecho ➔ Pegar aquí (o presiona Ctrl + V)";
+            pz.addEventListener('focus', () => {{ if (pz.innerText.includes("Para pegar recorte")) pz.innerText = ""; }});
+            pz.addEventListener('blur', () => {{ if (!pz.innerText.trim()) pz.innerText = textoDefaultPz; }});
+
             function abrirZoom(src) {{
                 const ov = document.getElementById('zoom-overlay');
                 document.getElementById('zoom-img').src = src;
@@ -1440,45 +1492,86 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 document.getElementById('zoom-overlay').style.display = 'none';
             }}
 
-            // Interceptor de Ctrl+V para pegar capturas de pantalla directo al cargador 📎 del chat
+            function enviarBlobAlUploader(blob) {{
+                try {{
+                    const pWin = window.parent;
+                    const parentDoc = pWin.document;
+                    const file = new pWin.File([blob], "captura_" + Date.now() + ".png", {{ type: blob.type || "image/png" }});
+                    const dialogEl = parentDoc.querySelector('div[role="dialog"]') || parentDoc;
+                    const activePanel = dialogEl.querySelector('div[role="tabpanel"]:not([hidden])') || dialogEl;
+                    let targetInput = activePanel.querySelector('input[type="file"]');
+                    if (!targetInput) {{
+                        const allInputs = dialogEl.querySelectorAll('input[type="file"]');
+                        if (allInputs.length > 0) targetInput = allInputs[0];
+                    }}
+                    if (targetInput) {{
+                        const dt = new pWin.DataTransfer();
+                        dt.items.add(file);
+                        const setter = Object.getOwnPropertyDescriptor(pWin.HTMLInputElement.prototype, 'files').set;
+                        if (setter) {{
+                            setter.call(targetInput, dt.files);
+                        }} else {{
+                            targetInput.files = dt.files;
+                        }}
+                        targetInput.dispatchEvent(new pWin.Event('input', {{ bubbles: true }}));
+                        targetInput.dispatchEvent(new pWin.Event('change', {{ bubbles: true }}));
+                        pz.innerText = "✅ ¡Captura cargada abajo! Presiona 📤 Enviar.";
+                        pz.style.color = "#00FF41";
+                        setTimeout(() => {{ pz.innerText = textoDefaultPz; pz.style.color = "#8696A0"; }}, 4000);
+                    }}
+                }} catch (err) {{
+                    pz.innerText = "⚠️ Error al cargar captura: " + err.message;
+                }}
+            }}
+
+            function manejarEventoPaste(e) {{
+                const cd = e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData);
+                if (!cd || !cd.items) return;
+                for (let i = 0; i < cd.items.length; i++) {{
+                    if (cd.items[i].type && cd.items[i].type.indexOf('image') !== -1) {{
+                        const blob = cd.items[i].getAsFile();
+                        if (blob) {{
+                            e.preventDefault();
+                            pz.innerHTML = "";
+                            enviarBlobAlUploader(blob);
+                            break;
+                        }}
+                    }}
+                }}
+            }}
+
+            async function leerPortapapelesDirecto() {{
+                try {{
+                    if (!navigator.clipboard || !navigator.clipboard.read) {{
+                        pz.focus();
+                        pz.innerText = "👉 Haz Clic Derecho aquí y selecciona Pegar (o presiona Ctrl+V)";
+                        return;
+                    }}
+                    const items = await navigator.clipboard.read();
+                    for (const item of items) {{
+                        const imgType = item.types.find(t => t.startsWith('image/'));
+                        if (imgType) {{
+                            const blob = await item.getType(imgType);
+                            enviarBlobAlUploader(blob);
+                            return;
+                        }}
+                    }}
+                    pz.innerText = "⚠️ No hay ninguna imagen copiada en el portapapeles.";
+                    setTimeout(() => {{ pz.innerText = textoDefaultPz; }}, 3000);
+                }} catch (err) {{
+                    pz.focus();
+                    pz.innerText = "👉 Haz Clic Derecho aquí y selecciona Pegar (o Ctrl+V)";
+                }}
+            }}
+
+            document.addEventListener('paste', manejarEventoPaste, true);
             try {{
                 const parentDoc = window.parent.document;
-                if (!parentDoc._pmrPasteBound) {{
-                    parentDoc._pmrPasteBound = true;
-                    parentDoc.addEventListener('paste', function(e) {{
-                        const dialogEl = parentDoc.querySelector('div[role="dialog"]');
-                        if (!dialogEl) return;
-                        const items = (e.clipboardData || e.originalEvent.clipboardData || {{}}).items || [];
-                        for (let i = 0; i < items.length; i++) {{
-                            if (items[i].type && items[i].type.indexOf('image') !== -1) {{
-                                const blob = items[i].getAsFile();
-                                if (!blob) continue;
-                                const file = new File([blob], "captura_" + Date.now() + ".png", {{ type: blob.type }});
-                                const asignarArchivo = (inp) => {{
-                                    const dt = new DataTransfer();
-                                    dt.items.add(file);
-                                    inp.files = dt.files;
-                                    inp.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                                }};
-                                let fileInputs = parentDoc.querySelectorAll('input[type="file"]');
-                                if (fileInputs.length > 0) {{
-                                    asignarArchivo(fileInputs[0]);
-                                }} else {{
-                                    const btns = Array.from(dialogEl.querySelectorAll('button'));
-                                    const btnClip = btns.find(b => (b.innerText || '').includes('📎'));
-                                    if (btnClip) {{
-                                        btnClip.click();
-                                        setTimeout(() => {{
-                                            const newInputs = parentDoc.querySelectorAll('input[type="file"]');
-                                            if (newInputs.length > 0) asignarArchivo(newInputs[0]);
-                                        }}, 200);
-                                    }}
-                                }}
-                                break;
-                            }}
-                        }}
-                    }});
+                if (parentDoc._pmrPasteHandler) {{
+                    parentDoc.removeEventListener('paste', parentDoc._pmrPasteHandler, true);
                 }}
+                parentDoc._pmrPasteHandler = manejarEventoPaste;
+                parentDoc.addEventListener('paste', parentDoc._pmrPasteHandler, true);
             }} catch (err) {{}}
         </script>
     </body>
@@ -1723,26 +1816,13 @@ def abrir_centro_tareas():
                     actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, "Finalizado", str(row_act.get('Respuesta', '')).strip())
                     leer_tareas_normalizadas.clear()
 
-                # Barra inferior con botón 📎 (Adjuntar / Pegar Ctrl+V), Texto, Enviar y Finalizar
-                c_clip, c_inp, c_send, c_fin = st.columns([0.55, 2.35, 1.05, 1.05], vertical_alignment="bottom")
-                with c_clip:
-                    tiene_img_lista = st.session_state.get(key_uploader_actual) is not None
-                    lbl_clip = "📎✅" if tiene_img_lista else "📎"
-                    with st.popover(lbl_clip, help="Adjuntar imagen o pegar captura con Ctrl + V", use_container_width=True):
-                        st.caption("📸 **Adjuntar o Pegar Captura (`Ctrl + V`)**")
-                        archivo_chat_sel = st.file_uploader(
-                            "Subir foto al chat:",
-                            type=["png", "jpg", "jpeg", "webp"],
-                            key=key_uploader_actual,
-                            label_visibility="collapsed"
-                        )
-                        if archivo_chat_sel is not None:
-                            st.image(archivo_chat_sel, caption="Lista para enviar al presionar 📤 Enviar", width=210)
+                # Barra inferior para escribir, Enviar y Finalizar
+                c_inp, c_send, c_fin = st.columns([2.8, 1.1, 1.1], vertical_alignment="bottom")
                 with c_inp:
                     st.text_input(
                         "Mensaje:",
                         key=key_input_actual,
-                        placeholder="Escribe un mensaje o pega captura (Ctrl+V)...",
+                        placeholder="Escribe un mensaje (y presiona Ctrl+V para pegar captura)...",
                         label_visibility="collapsed"
                     )
                 with c_send:
@@ -1763,6 +1843,27 @@ def abrir_centro_tareas():
                         on_click=finalizar_chat_cb,
                         args=(row_activa,)
                     )
+
+                # Cargador compacto siempre montado en el DOM para recibir archivos o recortes pegados (Ctrl+V / Clic Derecho)
+                st.markdown("""
+                    <style>
+                    div[role="dialog"] [data-testid="stFileUploaderDropzone"] {
+                        min-height: 38px !important;
+                        padding: 4px 10px !important;
+                    }
+                    </style>
+                """, unsafe_allow_html=True)
+                c_up_box, c_prev_box = st.columns([3.3, 1.7], vertical_alignment="center")
+                with c_up_box:
+                    archivo_chat_sel = st.file_uploader(
+                        "📎 Adjuntar imagen o pegar captura (Ctrl+V):",
+                        type=["png", "jpg", "jpeg", "webp"],
+                        key=key_uploader_actual,
+                        label_visibility="collapsed"
+                    )
+                with c_prev_box:
+                    if archivo_chat_sel is not None:
+                        st.image(archivo_chat_sel, caption="✅ Lista (Pulsa 📤 Enviar)", width=120)
 
                 # --- HERRAMIENTA PARA ELIMINAR MENSAJES ENVIADOS POR ERROR ---
                 hist_raw_del = str(row_activa.get('Respuesta', '')).strip()

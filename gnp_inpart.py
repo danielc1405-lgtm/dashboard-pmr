@@ -576,11 +576,17 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=modo_oculto, args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
-        context = browser.new_context(viewport={"width": 1920, "height": 1080}, user_agent=agente_falso, locale="es-MX", timezone_id="America/Monterrey")
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent=agente_falso,
+            locale="es-MX",
+            timezone_id="America/Monterrey",
+            accept_downloads=True
+        )
         page = context.new_page()
 
         try:
-            print(f"-> Conectando a Inpart para extraer fotos del pedido {num_pedido}...")
+            print(f"-> Conectando a Inpart para extraer fotos HD del pedido {num_pedido}...")
             page.goto("https://inpart.audatex.com.mx/AudaPartsSite/", timeout=45000)
             page.wait_for_load_state("networkidle")
             page.fill("input[type='text'], input#username", "MX290679_1")
@@ -652,22 +658,20 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             time.sleep(1.5)
 
-            fotos_acumuladas = {}
-
-            def recolectar_fotos_visibles():
-                nuevas_f = page.evaluate("""
+            def listar_nodos_dom():
+                return page.evaluate("""
                     () => {
                         let resultados = [];
-                        let nodos = document.querySelectorAll("input[id*='inputFile'], input[type='image'][src*='data:image'], img[src*='data:image']");
+                        let nodos = document.querySelectorAll("input[id*='inputFile'], input[type='image'][src*='data:image']");
                         nodos.forEach((el, idx) => {
                             let srcVal = el.getAttribute('src') || el.src || '';
-                            if (!srcVal.includes('data:image')) return;
+                            if (!srcVal.includes('data:image') && !(el.id && el.id.includes('inputFile'))) return;
                             let contenedor = el.closest('div, span, td');
                             let inpNombre = contenedor ? contenedor.querySelector("input[id*='hdnOriginalFile']") : null;
                             let nombreOrig = inpNombre && inpNombre.value ? inpNombre.value.trim() : `foto_${idx + 1}.jpg`;
                             let seccion = (el.id && el.id.includes('Quotation')) ? 'Cotizacion' : 'Pedido';
                             resultados.push({
-                                id: el.id || `img_${idx}`,
+                                id: el.id || '',
                                 nombre: nombreOrig,
                                 seccion: seccion,
                                 src: srcVal
@@ -676,22 +680,14 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
                         return resultados;
                     }
                 """)
-                for f_obj in nuevas_f:
-                    llave_f = f"{f_obj['seccion']}_{f_obj['nombre']}_{len(f_obj['src'])}"
-                    if llave_f not in fotos_acumuladas:
-                        fotos_acumuladas[llave_f] = f_obj
-                return len(nuevas_f)
 
-            recolectar_fotos_visibles()
-
-            # Abrir los paneles [+] sin importar si llevan tilde o no ("Panel de Imagenes - Cotización" y "Pedido")
+            # Expandir ambos paneles [+] ("Panel de Imagenes - Cotización" y "Pedido")
             for sub_panel in ["Cotizaci", "Pedido"]:
                 loc_barra = page.locator(f"text=/Panel de Im[aá]genes.*{sub_panel}/i")
                 if loc_barra.count() > 0:
+                    antes_cnt = len(listar_nodos_dom())
                     print(f"-> Panel '{sub_panel}' localizado. Expandiendo [+]...")
-                    antes_cnt = len(fotos_acumuladas)
 
-                    # 1. Buscar el botón [+] exacto dentro de la barra gris en el DOM
                     clic_js = page.evaluate("""
                         (palabra) => {
                             const norm = (s) => (s || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
@@ -720,40 +716,29 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
                     print(f"   Acción JS sobre '{sub_panel}': {clic_js}")
                     page.wait_for_load_state("networkidle")
                     time.sleep(2.5)
-                    recolectar_fotos_visibles()
 
-                    # 2. Respaldo: clic físico con mouse en el extremo izquierdo [+] de la barra si aún no abre
-                    if len(fotos_acumuladas) == antes_cnt:
+                    if len(listar_nodos_dom()) == antes_cnt:
                         try:
                             el_bar = loc_barra.first
                             el_bar.scroll_into_view_if_needed()
                             box = el_bar.bounding_box()
                             if box:
-                                print(f"   Clic físico en [+] de '{sub_panel}' (x={box['x']}, y={box['y']})...")
                                 page.mouse.click(max(5, box['x'] - 10), box['y'] + box['height'] / 2)
                                 page.wait_for_load_state("networkidle")
                                 time.sleep(2.5)
-                                recolectar_fotos_visibles()
-                            if len(fotos_acumuladas) == antes_cnt:
+                            if len(listar_nodos_dom()) == antes_cnt:
                                 el_bar.click(position={"x": 8, "y": 8}, timeout=4000)
                                 page.wait_for_load_state("networkidle")
                                 time.sleep(2.5)
-                                recolectar_fotos_visibles()
-                        except Exception as e_c:
-                            print(f"   Nota clic físico: {e_c}")
+                        except Exception:
+                            pass
 
-            print(f"-> Total de fotografías capturadas en el pedido: {len(fotos_acumuladas)}")
+            nodos_finales = listar_nodos_dom()
+            print(f"-> Total de fotografías detectadas para descarga directa HD: {len(nodos_finales)}")
 
             guardadas = 0
             nombres_usados = set()
-            for idx_f, item in enumerate(fotos_acumuladas.values(), start=1):
-                src_str = item.get('src', '')
-                if ',' not in src_str:
-                    continue
-                b64_puro = src_str.split(',', 1)[1].strip()
-                if len(b64_puro) < 100:
-                    continue
-
+            for idx_f, item in enumerate(nodos_finales, start=1):
                 nom_limpio = re.sub(r'[^A-Za-z0-9._\-\(\) ]', '_', str(item.get('nombre', f'foto_{idx_f}.jpg')).strip())
                 if not nom_limpio.lower().endswith(('.jpg', '.jpeg', '.png')):
                     nom_limpio += '.jpg'
@@ -761,13 +746,36 @@ def extraer_fotos_pedido_inpart(num_pedido, carpeta_destino):
                 if nombre_final in nombres_usados:
                     nombre_final = f"{idx_f:02d}_{int(time.time())}_{nom_limpio}"
                 nombres_usados.add(nombre_final)
-
                 ruta_archivo = os.path.join(carpeta_destino, nombre_final)
-                with open(ruta_archivo, "wb") as f_img:
-                    f_img.write(base64.b64decode(b64_puro))
-                guardadas += 1
 
-            print(f"✅ Se descargaron {guardadas} fotografías del pedido {num_pedido}.")
+                # 1. Descarga directa en Alta Resolución haciendo clic sobre la imagen (como en el video)
+                descargada_hd = False
+                el_id = item.get('id', '')
+                if el_id:
+                    try:
+                        btn_thumb = page.locator(f"input[id='{el_id}']").first
+                        btn_thumb.scroll_into_view_if_needed(timeout=3000)
+                        with page.expect_download(timeout=15000) as dl_info:
+                            btn_thumb.click(no_wait_after=True, timeout=5000)
+                        dl_obj = dl_info.value
+                        dl_obj.save_as(ruta_archivo)
+                        if os.path.exists(ruta_archivo) and os.path.getsize(ruta_archivo) > 0:
+                            descargada_hd = True
+                            guardadas += 1
+                    except Exception as e_hd:
+                        print(f"   [Aviso] Descarga HD falló en foto #{idx_f} ({e_hd}), usando respaldo...")
+
+                # 2. Respaldo en caso de que alguna imagen no dispare descarga
+                if not descargada_hd:
+                    src_str = item.get('src', '')
+                    if ',' in src_str:
+                        b64_puro = src_str.split(',', 1)[1].strip()
+                        if len(b64_puro) >= 100:
+                            with open(ruta_archivo, "wb") as f_img:
+                                f_img.write(base64.b64decode(b64_puro))
+                            guardadas += 1
+
+            print(f"✅ Se descargaron {guardadas} fotografías en Alta Resolución del pedido {num_pedido}.")
         finally:
             browser.close()
 

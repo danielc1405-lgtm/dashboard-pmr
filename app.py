@@ -40,7 +40,15 @@ st.markdown("""
             max-width: 100% !important; 
             overflow: visible !important; 
         }
-        div[data-testid="stVerticalBlock"] { overflow: visible !important; }
+        /* Permitir barra de desplazamiento (scroll) visible en contenedores con altura fija (ej. Lista de Tareas) */
+        div[data-testid="stVerticalBlock"][style*="height"],
+        div[data-testid="stVerticalBlockBorderWrapper"][style*="height"],
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(> div > div[data-testid="stVerticalBlock"][style*="height"]) {
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+            scrollbar-width: thin !important;
+            scrollbar-color: #E50914 #141720 !important;
+        }
         
         /* 2. Fondo negro puro global y eliminar parpadeo gris en tablas */
         [data-testid="stDataGrid"] { opacity: 1 !important; }
@@ -1400,10 +1408,6 @@ def abrir_centro_tareas():
         if not chats_activos.empty:
             col_lista, col_ventana = st.columns([1.35, 2.65], gap="medium")
 
-            opciones_ids = chats_activos['GS_Row'].tolist()
-            if 'chat_activo_gs_row' not in st.session_state or st.session_state['chat_activo_gs_row'] not in opciones_ids:
-                st.session_state['chat_activo_gs_row'] = opciones_ids[0]
-
             # Callbacks para cambiar de chat o refrescar SIN usar st.rerun() (evita que el dialog se cierre)
             def seleccionar_chat_cb(gs_id):
                 st.session_state['chat_activo_gs_row'] = gs_id
@@ -1413,11 +1417,44 @@ def abrir_centro_tareas():
 
             with col_lista:
                 c_tit, c_ref_btn = st.columns([3, 1], vertical_alignment="center")
-                c_tit.markdown(f"##### 📋 Temas ({len(opciones_ids)})")
+                c_tit.markdown(f"##### 📋 Temas ({len(chats_activos)})")
                 c_ref_btn.button("🔄", key="btn_ref_wa_list", help="Actualizar mensajes", on_click=refrescar_lista_cb)
 
-                # Lista vertical de botones hacia abajo con cambio instantáneo sin cerrar el modal
-                with st.container(height=360, border=True):
+                busqueda_chat = st.text_input(
+                    "🔍 Buscar chat en proceso:",
+                    placeholder="🔍 Siniestro, auto, taller, pieza o persona...",
+                    label_visibility="collapsed",
+                    key="inp_buscar_chat_wa"
+                ).strip().lower()
+
+                chats_filtrados = chats_activos.copy()
+                if busqueda_chat:
+                    def coincide_busqueda_chat(r):
+                        ref_txt = str(r.get('Siniestro / Taller / Piezas', '')).lower()
+                        id_s = ref_txt.split('|')[0].strip().upper()
+                        if id_s.endswith('.0'): id_s = id_s[:-2]
+                        taller_txt = str(mapa_taller_sin.get(id_s, '')).lower()
+                        emi_txt = str(r.get('Emisor', '')).lower()
+                        rec_txt = str(r.get('Receptor', '')).lower()
+                        ins_txt = str(r.get('Instruccion', '')).lower()
+                        res_txt = str(r.get('Respuesta', '')).lower()
+                        todo = f"{ref_txt} {taller_txt} {emi_txt} {rec_txt} {ins_txt} {res_txt}"
+                        return all(palabra in todo for palabra in busqueda_chat.split())
+
+                    chats_filtrados = chats_activos[chats_activos.apply(coincide_busqueda_chat, axis=1)].copy()
+
+                opciones_ids_todas = chats_activos['GS_Row'].tolist()
+                opciones_ids = chats_filtrados['GS_Row'].tolist()
+
+                if 'chat_activo_gs_row' not in st.session_state or st.session_state['chat_activo_gs_row'] not in opciones_ids_todas:
+                    st.session_state['chat_activo_gs_row'] = opciones_ids[0] if opciones_ids else opciones_ids_todas[0]
+                elif busqueda_chat and opciones_ids and st.session_state['chat_activo_gs_row'] not in opciones_ids:
+                    st.session_state['chat_activo_gs_row'] = opciones_ids[0]
+
+                # Lista vertical de botones con scroll activo garantizado
+                with st.container(height=340, border=True):
+                    if not opciones_ids:
+                        st.caption("Sin coincidencias para tu búsqueda.")
                     for gs_r in opciones_ids:
                         fila_c = chats_activos[chats_activos['GS_Row'] == gs_r].iloc[0]
                         ref_c = str(fila_c.get('Siniestro / Taller / Piezas', 'General')).strip()
@@ -1463,7 +1500,7 @@ def abrir_centro_tareas():
                 # Ventana de mensajes aislada en iframe con scroll garantizado
                 renderizar_hilo_chat(row_activa, usuario_activo_real, grupos_identidad)
 
-                # Callbacks para Enviar y Finalizar manteniendo abierta la ventana
+                # Callbacks para Enviar, Finalizar y Eliminar Líneas manteniendo abierta la ventana
                 key_input_actual = f"wa_msg_input_{chat_sel_row}"
 
                 def enviar_msg_cb(row_act, soy_emi, k_inp):
@@ -1512,6 +1549,62 @@ def abrir_centro_tareas():
                         on_click=finalizar_chat_cb,
                         args=(row_activa,)
                     )
+
+                # --- HERRAMIENTA PARA ELIMINAR MENSAJES ENVIADOS POR ERROR ---
+                hist_raw_del = str(row_activa.get('Respuesta', '')).strip()
+                lineas_hist_del = [
+                    l.strip() for l in hist_raw_del.replace('\\n', '\n').split('\n')
+                    if l.strip() and l.strip().lower() not in ["none", "nan"]
+                ]
+                msg_ini_del = str(row_activa.get('Instruccion', '')).strip()
+
+                opciones_lineas_del = [f"0. [Mensaje Inicial] {row_activa.get('Emisor', '')}: {msg_ini_del}"]
+                for idx_l, l_txt in enumerate(lineas_hist_del, start=1):
+                    opciones_lineas_del.append(f"{idx_l}. {l_txt}")
+
+                key_sel_del = f"sel_del_msg_{chat_sel_row}"
+
+                def eliminar_linea_chat_cb(row_act, lineas_actuales, k_sel):
+                    sel_val = st.session_state.get(k_sel, "")
+                    if not sel_val:
+                        return
+                    idx_borrar = int(sel_val.split(".")[0].strip())
+                    ws_t = doc.worksheet("Gestor_Tareas")
+                    row_mod = row_act.to_dict() if hasattr(row_act, "to_dict") else dict(row_act)
+                    if idx_borrar == 0:
+                        if lineas_actuales:
+                            primera_resp = lineas_actuales[0]
+                            m_p = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', primera_resp)
+                            row_mod['Instruccion'] = m_p.group(3).strip() if m_p else primera_resp
+                            nuevo_hist = "\n".join(lineas_actuales[1:])
+                            actualizar_tarea_en_sheet(ws_t, headers_tareas, row_mod, row_mod.get('Status', 'Pendiente'), nuevo_hist)
+                        else:
+                            actualizar_tarea_en_sheet(ws_t, headers_tareas, row_mod, "Eliminado", "")
+                    else:
+                        pos_lista = idx_borrar - 1
+                        if 0 <= pos_lista < len(lineas_actuales):
+                            nuevas_lineas = [l for i, l in enumerate(lineas_actuales) if i != pos_lista]
+                            nuevo_hist = "\n".join(nuevas_lineas)
+                            actualizar_tarea_en_sheet(ws_t, headers_tareas, row_mod, row_mod.get('Status', 'Pendiente'), nuevo_hist)
+                    leer_tareas_normalizadas.clear()
+
+                with st.expander("🗑️ Borrar un mensaje enviado por error en este chat", expanded=False):
+                    c_del_sel, c_del_btn = st.columns([3.4, 1.4], vertical_alignment="bottom")
+                    with c_del_sel:
+                        st.selectbox(
+                            "Selecciona la línea que deseas eliminar:",
+                            options=opciones_lineas_del,
+                            index=len(opciones_lineas_del) - 1,
+                            key=key_sel_del
+                        )
+                    with c_del_btn:
+                        st.button(
+                            "🗑️ Eliminar Línea",
+                            key=f"btn_del_msg_{chat_sel_row}",
+                            use_container_width=True,
+                            on_click=eliminar_linea_chat_cb,
+                            args=(row_activa, lineas_hist_del, key_sel_del)
+                        )
         else:
             st.info("🎉 No tienes conversaciones ni tareas activas por el momento.")
 

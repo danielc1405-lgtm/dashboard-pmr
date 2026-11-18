@@ -1256,7 +1256,7 @@ def guardar_foto_chat_en_sheet(archivo_bytes, autor):
     return id_foto
 
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja una ventana estilo WhatsApp con soporte de imágenes, zoom y pegado directo (Ctrl+V y Clic Derecho -> Pegar)."""
+    """Dibuja una ventana estilo WhatsApp limpia con soporte de imágenes, zoom y pegado directo con Ctrl+V."""
     import html
     import re
     import streamlit.components.v1 as components
@@ -1345,7 +1345,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 overflow: hidden;
             }}
             #chat-viewport {{
-                height: 278px;
+                height: 315px;
                 width: 100%;
                 overflow-y: auto;
                 overflow-x: hidden;
@@ -1353,58 +1353,13 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 background-image: radial-gradient(#1F2C34 1px, transparent 1px);
                 background-size: 20px 20px;
                 border: 1px solid #222E35;
-                border-radius: 10px 10px 0 0;
+                border-radius: 10px;
                 padding: 14px;
                 position: relative;
             }}
             #chat-viewport::-webkit-scrollbar {{ width: 7px; }}
-            #chat-viewport::-webkit-scrollbar-track {{ background: #0B141A; }}
+            #chat-viewport::-webkit-scrollbar-track {{ background: #0B141A; border-radius: 10px; }}
             #chat-viewport::-webkit-scrollbar-thumb {{ background: #374045; border-radius: 10px; }}
-            #paste-bar {{
-                height: 36px;
-                width: 100%;
-                background-color: #141E24;
-                border: 1px solid #222E35;
-                border-top: 1px dashed #2A3942;
-                border-radius: 0 0 10px 10px;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                padding: 0 10px;
-                gap: 8px;
-            }}
-            #paste-zone {{
-                flex: 1;
-                height: 24px;
-                line-height: 22px;
-                background-color: #0B141A;
-                border: 1px dashed #00A884;
-                border-radius: 5px;
-                color: #8696A0;
-                font-size: 0.76rem;
-                padding: 0 10px;
-                outline: none;
-                overflow: hidden;
-                white-space: nowrap;
-                cursor: text;
-            }}
-            #paste-zone:focus {{
-                border-color: #53BDEB;
-                color: #E9EDEF;
-                background-color: #111B21;
-            }}
-            #btn-clip-read {{
-                background-color: #005C4B;
-                color: #E9EDEF;
-                border: 1px solid #00A884;
-                border-radius: 5px;
-                padding: 3px 10px;
-                font-size: 0.75rem;
-                font-weight: 600;
-                cursor: pointer;
-                white-space: nowrap;
-            }}
-            #btn-clip-read:hover {{ background-color: #00A884; color: #000; }}
             .msg-row {{ display: flex; margin-bottom: 10px; width: 100%; }}
             .bubble {{
                 color: #E9EDEF;
@@ -1460,12 +1415,6 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
         <div id="chat-viewport">
             {''.join(burbujas)}
         </div>
-        <div id="paste-bar">
-            <div id="paste-zone" contenteditable="true" spellcheck="false" title="Haz clic derecho -> Pegar o presiona Ctrl + V aquí">
-                📋 Para pegar recorte: Haz Clic Derecho ➔ Pegar aquí (o presiona Ctrl + V)
-            </div>
-            <button id="btn-clip-read" type="button" onclick="leerPortapapelesDirecto()">📋 Pegar Captura</button>
-        </div>
         <div id="zoom-overlay" onclick="cerrarZoom()">
             <img id="zoom-img" src="" />
             <div id="zoom-bar">
@@ -1476,11 +1425,6 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
         <script>
             const vp = document.getElementById('chat-viewport');
             if (vp) {{ vp.scrollTop = vp.scrollHeight; }}
-
-            const pz = document.getElementById('paste-zone');
-            const textoDefaultPz = "📋 Para pegar recorte: Haz Clic Derecho ➔ Pegar aquí (o presiona Ctrl + V)";
-            pz.addEventListener('focus', () => {{ if (pz.innerText.includes("Para pegar recorte")) pz.innerText = ""; }});
-            pz.addEventListener('blur', () => {{ if (!pz.innerText.trim()) pz.innerText = textoDefaultPz; }});
 
             function abrirZoom(src) {{
                 const ov = document.getElementById('zoom-overlay');
@@ -1515,13 +1459,8 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                         }}
                         targetInput.dispatchEvent(new pWin.Event('input', {{ bubbles: true }}));
                         targetInput.dispatchEvent(new pWin.Event('change', {{ bubbles: true }}));
-                        pz.innerText = "✅ ¡Captura cargada abajo! Presiona 📤 Enviar.";
-                        pz.style.color = "#00FF41";
-                        setTimeout(() => {{ pz.innerText = textoDefaultPz; pz.style.color = "#8696A0"; }}, 4000);
                     }}
-                }} catch (err) {{
-                    pz.innerText = "⚠️ Error al cargar captura: " + err.message;
-                }}
+                }} catch (err) {{}}
             }}
 
             function manejarEventoPaste(e) {{
@@ -1532,35 +1471,10 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                         const blob = cd.items[i].getAsFile();
                         if (blob) {{
                             e.preventDefault();
-                            pz.innerHTML = "";
                             enviarBlobAlUploader(blob);
                             break;
                         }}
                     }}
-                }}
-            }}
-
-            async function leerPortapapelesDirecto() {{
-                try {{
-                    if (!navigator.clipboard || !navigator.clipboard.read) {{
-                        pz.focus();
-                        pz.innerText = "👉 Haz Clic Derecho aquí y selecciona Pegar (o presiona Ctrl+V)";
-                        return;
-                    }}
-                    const items = await navigator.clipboard.read();
-                    for (const item of items) {{
-                        const imgType = item.types.find(t => t.startsWith('image/'));
-                        if (imgType) {{
-                            const blob = await item.getType(imgType);
-                            enviarBlobAlUploader(blob);
-                            return;
-                        }}
-                    }}
-                    pz.innerText = "⚠️ No hay ninguna imagen copiada en el portapapeles.";
-                    setTimeout(() => {{ pz.innerText = textoDefaultPz; }}, 3000);
-                }} catch (err) {{
-                    pz.focus();
-                    pz.innerText = "👉 Haz Clic Derecho aquí y selecciona Pegar (o Ctrl+V)";
                 }}
             }}
 
@@ -1578,8 +1492,6 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
     </html>
     """
     components.html(iframe_html, height=325, scrolling=False)
-
-def contar_tareas_pendientes(usuario):
     try:
         _, grupos_id = obtener_mapa_usuarios()
         df_t, _ = leer_tareas_normalizadas()
@@ -1816,13 +1728,47 @@ def abrir_centro_tareas():
                     actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, "Finalizado", str(row_act.get('Respuesta', '')).strip())
                     leer_tareas_normalizadas.clear()
 
-                # Barra inferior para escribir, Enviar y Finalizar
-                c_inp, c_send, c_fin = st.columns([2.8, 1.1, 1.1], vertical_alignment="bottom")
+                # Barra inferior unificada en 1 sola línea: [↑ Upload] [Escribe un mensaje o presiona Ctrl+V...] [📤 Enviar] [🏁 Finalizar]
+                st.markdown("""
+                    <style>
+                    div[role="dialog"] [data-testid="stFileUploaderDropzoneInstructions"],
+                    div[role="dialog"] [data-testid="stFileUploaderFile"],
+                    div[role="dialog"] [data-testid="stFileUploader"] small {
+                        display: none !important;
+                    }
+                    div[role="dialog"] [data-testid="stFileUploaderDropzone"] {
+                        padding: 0px !important;
+                        min-height: 2.4rem !important;
+                        height: 2.4rem !important;
+                        border: none !important;
+                        background: transparent !important;
+                        display: flex !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                    }
+                    div[role="dialog"] [data-testid="stFileUploaderDropzone"] button {
+                        width: 100% !important;
+                        min-height: 2.4rem !important;
+                        height: 2.4rem !important;
+                        margin: 0px !important;
+                        padding: 0.2rem 0.5rem !important;
+                    }
+                    </style>
+                """, unsafe_allow_html=True)
+
+                c_up_btn, c_inp, c_send, c_fin = st.columns([0.85, 2.35, 0.9, 0.9], vertical_alignment="bottom")
+                with c_up_btn:
+                    archivo_chat_sel = st.file_uploader(
+                        "Adjuntar:",
+                        type=["png", "jpg", "jpeg", "webp"],
+                        key=key_uploader_actual,
+                        label_visibility="collapsed"
+                    )
                 with c_inp:
                     st.text_input(
                         "Mensaje:",
                         key=key_input_actual,
-                        placeholder="Escribe un mensaje (y presiona Ctrl+V para pegar captura)...",
+                        placeholder="Escribe un mensaje o presiona Ctrl+V para pegar imagen...",
                         label_visibility="collapsed"
                     )
                 with c_send:
@@ -1844,26 +1790,8 @@ def abrir_centro_tareas():
                         args=(row_activa,)
                     )
 
-                # Cargador compacto siempre montado en el DOM para recibir archivos o recortes pegados (Ctrl+V / Clic Derecho)
-                st.markdown("""
-                    <style>
-                    div[role="dialog"] [data-testid="stFileUploaderDropzone"] {
-                        min-height: 38px !important;
-                        padding: 4px 10px !important;
-                    }
-                    </style>
-                """, unsafe_allow_html=True)
-                c_up_box, c_prev_box = st.columns([3.3, 1.7], vertical_alignment="center")
-                with c_up_box:
-                    archivo_chat_sel = st.file_uploader(
-                        "📎 Adjuntar imagen o pegar captura (Ctrl+V):",
-                        type=["png", "jpg", "jpeg", "webp"],
-                        key=key_uploader_actual,
-                        label_visibility="collapsed"
-                    )
-                with c_prev_box:
-                    if archivo_chat_sel is not None:
-                        st.image(archivo_chat_sel, caption="✅ Lista (Pulsa 📤 Enviar)", width=120)
+                if archivo_chat_sel is not None:
+                    st.image(archivo_chat_sel, caption="✅ Imagen lista — Escribe un comentario (opcional) y pulsa 📤 Enviar", width=150)
 
                 # --- HERRAMIENTA PARA ELIMINAR MENSAJES ENVIADOS POR ERROR ---
                 hist_raw_del = str(row_activa.get('Respuesta', '')).strip()

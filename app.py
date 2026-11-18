@@ -1647,26 +1647,33 @@ def abrir_visor_fotos_inpart():
 
     st.caption("Filtra un pedido activo de GNP o escribe cualquier Número de Pedido / Cotización manualmente para descargar su galería completa en alta resolución.")
 
-    # Cargar pedidos de GNP desde caché sin consumir cuota extra de Google Sheets
+    # Cargar pedidos de GNP activos (vivos en el Dashboard) directo desde BD_UNIFICADA
     df_gnp_f = pd.DataFrame()
     try:
-        df_base_f = cargar_base_viva().copy() if 'cargar_base_viva' in globals() else obtener_dataframe("BD_UNIFICADA", silent=True)
-        if not df_base_f.empty:
+        doc_f = init_connection()
+        datos_f = doc_f.worksheet("BD_UNIFICADA").get_all_values()
+        if len(datos_f) > 1:
+            df_base_f = pd.DataFrame(datos_f[1:], columns=[str(h).strip() for h in datos_f[0]])
             c_ase_f = next((c for c in df_base_f.columns if "ASEGURADORA" in str(c).upper()), None)
             c_id_f = next((c for c in df_base_f.columns if "SINIESTRO" in str(c).upper() or "PEDIDO" in str(c).upper()), None)
             c_tal_f = next((c for c in df_base_f.columns if "TALLER" in str(c).upper() or "CDR" in str(c).upper()), None)
             c_mar_f = next((c for c in df_base_f.columns if "MARCA" in str(c).upper()), None)
             c_mod_f = next((c for c in df_base_f.columns if "MODELO" in str(c).upper()), None)
             c_ano_f = next((c for c in df_base_f.columns if "AÑO" in str(c).upper() or "ANO" in str(c).upper()), None)
+            c_est_f = next((c for c in df_base_f.columns if "ESTATUS" in str(c).upper() and "ENV" not in str(c).upper() and "PAGO" not in str(c).upper()), None)
 
             if c_ase_f:
                 df_gnp_f = df_base_f[df_base_f[c_ase_f].astype(str).str.upper().str.contains("GNP", na=False)].copy()
             else:
                 df_gnp_f = df_base_f.copy()
 
+            estatus_inactivos_f = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"]
+            if not df_gnp_f.empty and c_est_f:
+                df_gnp_f = df_gnp_f[~df_gnp_f[c_est_f].astype(str).str.strip().str.upper().isin(estatus_inactivos_f)].copy()
+
             if not df_gnp_f.empty and c_id_f:
-                df_gnp_f = df_gnp_f.drop_duplicates(subset=[c_id_f]).copy()
                 df_gnp_f['_ID_Limpio'] = df_gnp_f[c_id_f].astype(str).str.strip().str.removesuffix('.0')
+                df_gnp_f = df_gnp_f[df_gnp_f['_ID_Limpio'] != ''].drop_duplicates(subset=['_ID_Limpio']).copy()
                 df_gnp_f['_Taller_Limpio'] = df_gnp_f[c_tal_f].astype(str).str.strip() if c_tal_f else "S/D"
                 df_gnp_f['_Etiqueta'] = df_gnp_f.apply(
                     lambda r: f"{r['_ID_Limpio']} | {str(r.get(c_mar_f,'')).strip()} {str(r.get(c_mod_f,'')).strip()} {str(r.get(c_ano_f,'')).strip().removesuffix('.0')} | {r['_Taller_Limpio']}",

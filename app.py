@@ -1537,7 +1537,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                     const pWin = window.parent;
                     const parentDoc = pWin.document;
                     const file = new pWin.File([blob], "captura_" + Date.now() + ".png", {{ type: blob.type || "image/png" }});
-                    const floatWin = parentDoc.querySelector('div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open)') || parentDoc;
+                    const floatWin = parentDoc.querySelector('.st-key-pmr_chat_float_open') || parentDoc.querySelector('div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open)') || parentDoc;
                     const activePanel = floatWin.querySelector('div[role="tabpanel"]:not([hidden])') || floatWin;
                     let targetInput = activePanel.querySelector('input[type="file"]');
                     if (!targetInput) {{
@@ -1581,7 +1581,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 parentDoc.addEventListener('paste', parentDoc._pmrPasteHandler, true);
 
                 // Activar arrastre (Drag & Drop) en la barra de título de la ventana flotante
-                const floatBox = parentDoc.querySelector('div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open)');
+                const floatBox = parentDoc.querySelector('.st-key-pmr_chat_float_open') || parentDoc.querySelector('div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open)');
                 const handle = parentDoc.querySelector('.pmr-drag-handle');
                 if (floatBox && handle && !handle._dragBound) {{
                     handle._dragBound = true;
@@ -1636,13 +1636,14 @@ def renderizar_widget_tareas_flotante():
 
     st.markdown("""
         <style>
+        .st-key-pmr_chat_float_open,
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) {
             position: fixed !important;
             bottom: 14px !important;
             right: 16px !important;
-            width: 880px !important;
+            width: 860px !important;
             max-width: 94vw !important;
-            max-height: 85vh !important;
+            max-height: 82vh !important;
             overflow-y: auto !important;
             z-index: 999995 !important;
             background-color: #05070A !important;
@@ -1651,11 +1652,12 @@ def renderizar_widget_tareas_flotante():
             box-shadow: 0px 16px 45px rgba(0, 0, 0, 0.95) !important;
             padding: 10px 14px !important;
         }
+        .st-key-pmr_chat_float_min,
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-min) {
             position: fixed !important;
             bottom: 14px !important;
             right: 16px !important;
-            width: 270px !important;
+            width: 280px !important;
             z-index: 999995 !important;
             background-color: #0B141A !important;
             border: 1.5px solid #00A884 !important;
@@ -1663,12 +1665,12 @@ def renderizar_widget_tareas_flotante():
             box-shadow: 0px 8px 25px rgba(0, 0, 0, 0.9) !important;
             padding: 4px 10px !important;
         }
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploaderDropzoneInstructions"],
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploaderFile"],
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploader"] small {
+        .st-key-pmr_chat_float_open [data-testid="stFileUploaderDropzoneInstructions"],
+        .st-key-pmr_chat_float_open [data-testid="stFileUploaderFile"],
+        .st-key-pmr_chat_float_open [data-testid="stFileUploader"] small {
             display: none !important;
         }
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploaderDropzone"] {
+        .st-key-pmr_chat_float_open [data-testid="stFileUploaderDropzone"] {
             padding: 0px !important;
             min-height: 2.4rem !important;
             height: 2.4rem !important;
@@ -1678,7 +1680,7 @@ def renderizar_widget_tareas_flotante():
             align-items: center !important;
             justify-content: center !important;
         }
-        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploaderDropzone"] button {
+        .st-key-pmr_chat_float_open [data-testid="stFileUploaderDropzone"] button {
             width: 100% !important;
             min-height: 2.4rem !important;
             height: 2.4rem !important;
@@ -1690,7 +1692,7 @@ def renderizar_widget_tareas_flotante():
 
     # --- ESTADO MINIMIZADO (PASTILLA FLOTANTE EN ESQUINA INFERIOR DERECHA) ---
     if estado_chat == 'minimizado':
-        with st.container(border=True):
+        with st.container(border=True, key="pmr_chat_float_min"):
             st.markdown('<span class="pmr-chat-float-min" style="display:none;"></span>', unsafe_allow_html=True)
             n_pend_min = contar_tareas_pendientes(usuario_activo)
             lbl_min = f"💬 Tareas ({n_pend_min} nuevos)" if n_pend_min > 0 else "💬 Tareas (Abierto)"
@@ -1704,10 +1706,9 @@ def renderizar_widget_tareas_flotante():
         return
 
     # --- ESTADO ABIERTO (VENTANA FLOTANTE ARRASTRABLE Y MINIMIZABLE) ---
-    with st.container(border=True):
+    with st.container(border=True, key="pmr_chat_float_open"):
         st.markdown('<span class="pmr-chat-float-open" style="display:none;"></span>', unsafe_allow_html=True)
         ch_tit, ch_min, ch_cls = st.columns([6.4, 0.8, 0.8], vertical_alignment="center")
-        with ch_tit:
             st.markdown(
                 '<div class="pmr-drag-handle" style="font-size:1.05rem; font-weight:700; color:#E9EDEF; padding:4px 6px; user-select:none;" title="Arrastra desde aquí para mover la ventana">'
                 '🔔 Centro de Tareas y Mensajería <span style="font-size:0.75rem; color:#8696A0; font-weight:normal;">(⠿ Arrastra para mover)</span>'

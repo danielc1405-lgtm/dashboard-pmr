@@ -1189,8 +1189,8 @@ def actualizar_tarea_en_sheet(ws_tareas, headers, row_data, nuevo_status, nuevo_
 
 @st.cache_data(ttl=300)
 def cargar_fotos_chat_sheets():
-    """Lee las imágenes de BD_CHAT_IMAGENES y reconstruye el base64 completo."""
-    mapa_fotos = {}
+    """Lee imágenes y documentos de BD_CHAT_IMAGENES y reconstruye el base64 completo."""
+    mapa_adjuntos = {}
     try:
         doc = init_connection()
         ws_img = doc.worksheet("BD_CHAT_IMAGENES")
@@ -1201,40 +1201,91 @@ def cargar_fotos_chat_sheets():
                     id_f = str(r[0]).strip().upper()
                     b64_full = "".join([str(c).strip() for c in r[3:] if str(c).strip()])
                     if b64_full:
-                        if not b64_full.startswith("data:image"):
+                        if not b64_full.startswith("data:"):
                             b64_full = f"data:image/jpeg;base64,{b64_full}"
-                        mapa_fotos[id_f] = b64_full
+                        mapa_adjuntos[id_f] = b64_full
     except Exception:
         pass
-    return mapa_fotos
+    return mapa_adjuntos
 
-def guardar_foto_chat_en_sheet(archivo_bytes, autor):
-    """Comprime la imagen con Pillow, la divide en bloques seguros (<42,000 chars) y la guarda en BD_CHAT_IMAGENES."""
+def depurar_adjuntos_antiguos_chat(ws_img, dias_vigencia=5):
+    """Elimina automáticamente de BD_CHAT_IMAGENES cualquier archivo con 5 o más días de antigüedad."""
+    try:
+        filas = ws_img.get_all_values()
+        if len(filas) <= 1:
+            return
+        tz_mx_d = datetime.timezone(datetime.timedelta(hours=-6))
+        ahora_d = datetime.datetime.now(tz_mx_d).replace(tzinfo=None)
+        encabezado = filas[0]
+        vigentes = [encabezado]
+        hubo_borrados = False
+
+        for r in filas[1:]:
+            if not any(str(x).strip() for x in r):
+                continue
+            f_str = str(r[1]).strip() if len(r) > 1 else ""
+            conservar = True
+            if f_str:
+                try:
+                    dt_f = datetime.datetime.strptime(f_str[:16], "%d/%m/%Y %H:%M")
+                    if (ahora_d - dt_f).days >= dias_vigencia:
+                        conservar = False
+                        hubo_borrados = True
+                except Exception:
+                    pass
+            if conservar:
+                vigentes.append(r)
+
+        if hubo_borrados:
+            ws_img.clear()
+            ws_img.update(range_name="A1", values=vigentes, value_input_option="RAW")
+    except Exception:
+        pass
+
+def guardar_adjunto_chat_en_sheet(archivo_bytes, nombre_archivo, autor):
+    """Guarda imagen (comprimida) o documento (PDF/Excel/Word/CSV <=450KB) en BD_CHAT_IMAGENES y depura >5 días."""
     import io
     import uuid
     import base64
     from PIL import Image
 
-    img = Image.open(io.BytesIO(archivo_bytes))
-    if img.mode in ("RGBA", "P"):
-        fondo = Image.new("RGB", img.size, (11, 20, 26))
-        if img.mode == "P":
-            img = img.convert("RGBA")
-        fondo.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
-        img = fondo
+    ext = os.path.splitext(str(nombre_archivo or "").lower())[1]
+    es_imagen = ext in [".png", ".jpg", ".jpeg", ".webp"]
+
+    if es_imagen:
+        img = Image.open(io.BytesIO(archivo_bytes))
+        if img.mode in ("RGBA", "P"):
+            fondo = Image.new("RGB", img.size, (11, 20, 26))
+            if img.mode == "P":
+                img = img.convert("RGBA")
+            fondo.paste(img, mask=img.split()[3] if len(img.split()) > 3 else None)
+            img = fondo
+        else:
+            img = img.convert("RGB")
+
+        img.thumbnail((950, 950), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=74, optimize=True)
+        data_uri = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
     else:
-        img = img.convert("RGB")
+        if len(archivo_bytes) > 460 * 1024:
+            raise ValueError("El documento supera el límite de 450 KB para Google Sheets.")
+        mimes = {
+            ".pdf": "application/pdf",
+            ".csv": "text/csv",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls": "application/vnd.ms-excel",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".doc": "application/msword"
+        }
+        mime_type = mimes.get(ext, "application/octet-stream")
+        data_uri = f"data:{mime_type};base64," + base64.b64encode(archivo_bytes).decode("utf-8")
 
-    img.thumbnail((950, 950), Image.Resampling.LANCZOS)
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=74, optimize=True)
-    b64_str = base64.b64encode(buf.getvalue()).decode("utf-8")
-
-    partes = [b64_str[i:i+42000] for i in range(0, len(b64_str), 42000)]
+    partes = [data_uri[i:i+42000] for i in range(0, len(data_uri), 42000)]
     while len(partes) < 3:
         partes.append("")
 
-    id_foto = str(uuid.uuid4().hex)[:6].upper()
+    id_adj = str(uuid.uuid4().hex)[:6].upper()
     tz_mx_f = datetime.timezone(datetime.timedelta(hours=-6))
     fecha_f = datetime.datetime.now(tz_mx_f).strftime("%d/%m/%Y %H:%M")
 
@@ -1242,34 +1293,45 @@ def guardar_foto_chat_en_sheet(archivo_bytes, autor):
     try:
         ws_img = doc.worksheet("BD_CHAT_IMAGENES")
     except Exception:
-        ws_img = doc.add_worksheet(title="BD_CHAT_IMAGENES", rows=1000, cols=8)
+        ws_img = doc.add_worksheet(title="BD_CHAT_IMAGENES", rows=1000, cols=20)
+
+    # Depuración automática de archivos con 5+ días de antigüedad (1 vez por subida)
+    depurar_adjuntos_antiguos_chat(ws_img, dias_vigencia=5)
 
     primera_fila = ws_img.row_values(1)
     if not primera_fila:
         ws_img.append_row(["ID_FOTO", "FECHA", "AUTOR", "PARTE_1", "PARTE_2", "PARTE_3"], value_input_option="USER_ENTERED")
 
-    nueva_fila_img = [id_foto, fecha_f, str(autor).strip()] + partes[:4]
-    ws_img.append_row(nueva_fila_img, value_input_option="RAW")
+    # Asegurar columnas suficientes si el documento requiere más bloques de 42,000 caracteres
+    cols_necesarias = 3 + len(partes)
+    if ws_img.col_count < cols_necesarias:
+        ws_img.resize(cols=cols_necesarias)
 
-    st.session_state.setdefault("cache_fotos_chat_local", {})[id_foto] = f"data:image/jpeg;base64,{b64_str}"
+    nueva_fila_adj = [id_adj, fecha_f, str(autor).strip()] + partes
+    ws_img.append_row(nueva_fila_adj, value_input_option="RAW")
+
+    st.session_state.setdefault("cache_fotos_chat_local", {})[id_adj] = data_uri
     cargar_fotos_chat_sheets.clear()
-    return id_foto
+
+    nom_seguro = re.sub(r'[\[\]\|]', '', str(nombre_archivo or f"archivo{ext}")).strip()
+    return (f"[FOTO:{id_adj}]" if es_imagen else f"[DOC:{id_adj}|{nom_seguro}]")
 
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja una ventana estilo WhatsApp con soporte de imágenes, zoom y pegado directo con Ctrl+V."""
+    """Dibuja una ventana estilo WhatsApp con soporte de imágenes, documentos (PDF/Excel/Word/CSV), zoom, Ctrl+V y arrastre."""
     import html
     import re
     import streamlit.components.v1 as components
 
     texto_completo_chat = f"{row.get('Instruccion', '')} {row.get('Respuesta', '')}"
     mapa_fotos_chat = {}
-    if "[FOTO:" in texto_completo_chat:
+    if "[FOTO:" in texto_completo_chat or "[DOC:" in texto_completo_chat:
         mapa_fotos_chat.update(cargar_fotos_chat_sheets())
         mapa_fotos_chat.update(st.session_state.get("cache_fotos_chat_local", {}))
 
-    def formatear_texto_con_fotos(txt_crudo):
+    def formatear_texto_con_adjuntos(txt_crudo):
         txt_esc = html.escape(str(txt_crudo).strip()).replace('\n', '<br>')
-        def _reemplazar_tag(m):
+
+        def _reemplazar_foto(m):
             id_f = m.group(1).strip().upper()
             src_f = mapa_fotos_chat.get(id_f, "")
             if src_f:
@@ -1278,12 +1340,29 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                     f'<img src="{src_f}" class="chat-img" onclick="abrirZoom(this.src)" title="Clic para ampliar imagen" />'
                     f'</div>'
                 )
-            return f'<span style="color:#8696A0; font-style:italic;">[📷 Imagen {id_f} no disponible]</span>'
-        return re.sub(r'\[FOTO:([A-Za-z0-9]+)\]', _reemplazar_tag, txt_esc)
+            return f'<span style="color:#8696A0; font-style:italic;">[📷 Imagen {id_f} expirada (>5 días)]</span>'
+
+        def _reemplazar_doc(m):
+            id_d = m.group(1).strip().upper()
+            nom_d = m.group(2).strip()
+            src_d = mapa_fotos_chat.get(id_d, "")
+            icono_d = "📊" if any(x in nom_d.lower() for x in [".xls", ".csv"]) else ("📝" if ".doc" in nom_d.lower() else "📄")
+            if src_d:
+                return (
+                    f'<div class="doc-card">'
+                    f'<a href="{src_d}" download="{nom_d}" class="doc-link" title="Descargar {nom_d}">'
+                    f'{icono_d} <span>{nom_d}</span> <b>⬇️</b>'
+                    f'</a></div>'
+                )
+            return f'<span style="color:#8696A0; font-style:italic;">[{icono_d} {nom_d} expirado (>5 días)]</span>'
+
+        txt_out = re.sub(r'\[FOTO:([A-Za-z0-9]+)\]', _reemplazar_foto, txt_esc)
+        txt_out = re.sub(r'\[DOC:([A-Za-z0-9]+)\|([^\]]+)\]', _reemplazar_doc, txt_out)
+        return txt_out
 
     emisor_orig = str(row.get('Emisor', 'Usuario')).strip()
     fecha_orig = str(row.get('Fecha_Creacion', '')).strip()
-    instruccion_orig = formatear_texto_con_fotos(row.get('Instruccion', ''))
+    instruccion_orig = formatear_texto_con_adjuntos(row.get('Instruccion', ''))
     es_mio_orig = es_mismo_usuario(usuario_activo_real, emisor_orig, grupos_identidad)
 
     burbujas = []
@@ -1328,7 +1407,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 f'<div class="msg-row" style="justify-content:{align_m};">'
                 f'<div class="bubble" style="background-color:{bg_m}; border-radius:{radius_m};">'
                 f'{header_html}'
-                f'<div class="txt">{formatear_texto_con_fotos(txt_msg)}</div>'
+                f'<div class="txt">{formatear_texto_con_adjuntos(txt_msg)}</div>'
                 f'</div></div>'
             )
 
@@ -1345,7 +1424,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 overflow: hidden;
             }}
             #chat-viewport {{
-                height: 315px;
+                height: 290px;
                 width: 100%;
                 overflow-y: auto;
                 overflow-x: hidden;
@@ -1354,27 +1433,27 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 background-size: 20px 20px;
                 border: 1px solid #222E35;
                 border-radius: 10px;
-                padding: 14px;
+                padding: 12px;
                 position: relative;
             }}
             #chat-viewport::-webkit-scrollbar {{ width: 7px; }}
             #chat-viewport::-webkit-scrollbar-track {{ background: #0B141A; border-radius: 10px; }}
             #chat-viewport::-webkit-scrollbar-thumb {{ background: #374045; border-radius: 10px; }}
-            .msg-row {{ display: flex; margin-bottom: 10px; width: 100%; }}
+            .msg-row {{ display: flex; margin-bottom: 9px; width: 100%; }}
             .bubble {{
                 color: #E9EDEF;
-                padding: 8px 12px;
-                max-width: 78%;
+                padding: 7px 11px;
+                max-width: 80%;
                 box-shadow: 0 1px 2px rgba(0,0,0,0.5);
                 word-wrap: break-word;
             }}
-            .author {{ font-size: 0.75rem; font-weight: 700; margin-bottom: 3px; }}
-            .time {{ color: #8696A0; font-weight: normal; font-size: 0.7rem; }}
-            .txt {{ font-size: 0.9rem; line-height: 1.4; }}
-            .img-wrap {{ margin-top: 6px; margin-bottom: 3px; }}
+            .author {{ font-size: 0.74rem; font-weight: 700; margin-bottom: 3px; }}
+            .time {{ color: #8696A0; font-weight: normal; font-size: 0.68rem; }}
+            .txt {{ font-size: 0.88rem; line-height: 1.38; }}
+            .img-wrap {{ margin-top: 5px; margin-bottom: 3px; }}
             .chat-img {{
-                max-width: 240px;
-                max-height: 190px;
+                max-width: 230px;
+                max-height: 180px;
                 border-radius: 8px;
                 border: 1px solid rgba(255,255,255,0.18);
                 cursor: zoom-in;
@@ -1382,6 +1461,23 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 transition: transform 0.15s ease;
             }}
             .chat-img:hover {{ transform: scale(1.02); border-color: #00A884; }}
+            .doc-card {{
+                margin-top: 5px;
+                margin-bottom: 3px;
+                background: rgba(0,0,0,0.28);
+                border: 1px solid rgba(255,255,255,0.18);
+                border-radius: 7px;
+                padding: 6px 10px;
+            }}
+            .doc-link {{
+                color: #E9EDEF;
+                text-decoration: none;
+                font-size: 0.82rem;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }}
+            .doc-link:hover {{ color: #53BDEB; }}
             #zoom-overlay {{
                 display: none;
                 position: fixed;
@@ -1441,22 +1537,18 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                     const pWin = window.parent;
                     const parentDoc = pWin.document;
                     const file = new pWin.File([blob], "captura_" + Date.now() + ".png", {{ type: blob.type || "image/png" }});
-                    const dialogEl = parentDoc.querySelector('div[role="dialog"]') || parentDoc;
-                    const activePanel = dialogEl.querySelector('div[role="tabpanel"]:not([hidden])') || dialogEl;
+                    const floatWin = parentDoc.querySelector('div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open)') || parentDoc;
+                    const activePanel = floatWin.querySelector('div[role="tabpanel"]:not([hidden])') || floatWin;
                     let targetInput = activePanel.querySelector('input[type="file"]');
                     if (!targetInput) {{
-                        const allInputs = dialogEl.querySelectorAll('input[type="file"]');
+                        const allInputs = floatWin.querySelectorAll('input[type="file"]');
                         if (allInputs.length > 0) targetInput = allInputs[0];
                     }}
                     if (targetInput) {{
                         const dt = new pWin.DataTransfer();
                         dt.items.add(file);
                         const setter = Object.getOwnPropertyDescriptor(pWin.HTMLInputElement.prototype, 'files').set;
-                        if (setter) {{
-                            setter.call(targetInput, dt.files);
-                        }} else {{
-                            targetInput.files = dt.files;
-                        }}
+                        if (setter) {{ setter.call(targetInput, dt.files); }} else {{ targetInput.files = dt.files; }}
                         targetInput.dispatchEvent(new pWin.Event('input', {{ bubbles: true }}));
                         targetInput.dispatchEvent(new pWin.Event('change', {{ bubbles: true }}));
                     }}
@@ -1480,18 +1572,45 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
 
             document.addEventListener('paste', manejarEventoPaste, true);
             try {{
-                const parentDoc = window.parent.document;
+                const pWin = window.parent;
+                const parentDoc = pWin.document;
                 if (parentDoc._pmrPasteHandler) {{
                     parentDoc.removeEventListener('paste', parentDoc._pmrPasteHandler, true);
                 }}
                 parentDoc._pmrPasteHandler = manejarEventoPaste;
                 parentDoc.addEventListener('paste', parentDoc._pmrPasteHandler, true);
+
+                // Activar arrastre (Drag & Drop) en la barra de título de la ventana flotante
+                const floatBox = parentDoc.querySelector('div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open)');
+                const handle = parentDoc.querySelector('.pmr-drag-handle');
+                if (floatBox && handle && !handle._dragBound) {{
+                    handle._dragBound = true;
+                    handle.style.cursor = 'move';
+                    let isDragging = false, offX = 0, offY = 0;
+                    handle.addEventListener('mousedown', (ev) => {{
+                        isDragging = true;
+                        const rect = floatBox.getBoundingClientRect();
+                        offX = ev.clientX - rect.left;
+                        offY = ev.clientY - rect.top;
+                        floatBox.style.right = 'auto';
+                        floatBox.style.bottom = 'auto';
+                        floatBox.style.left = rect.left + 'px';
+                        floatBox.style.top = rect.top + 'px';
+                        ev.preventDefault();
+                    }});
+                    parentDoc.addEventListener('mousemove', (ev) => {{
+                        if (!isDragging) return;
+                        floatBox.style.left = Math.max(0, Math.min(pWin.innerWidth - 180, ev.clientX - offX)) + 'px';
+                        floatBox.style.top = Math.max(0, Math.min(pWin.innerHeight - 80, ev.clientY - offY)) + 'px';
+                    }});
+                    parentDoc.addEventListener('mouseup', () => {{ isDragging = false; }});
+                }}
             }} catch (err) {{}}
         </script>
     </body>
     </html>
     """
-    components.html(iframe_html, height=325, scrolling=False)
+    components.html(iframe_html, height=300, scrolling=False)
 
 def contar_tareas_pendientes(usuario):
     try:
@@ -1510,441 +1629,500 @@ def contar_tareas_pendientes(usuario):
     except Exception:
         return 0
 
-@st.dialog("🔔 Centro de Tareas y Mensajería (Estilo WhatsApp por Siniestro)", width="large")
-def abrir_centro_tareas():
-    doc = init_connection()
-    usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
+def renderizar_widget_tareas_flotante():
+    estado_chat = st.session_state.get('chat_flotante_estado', 'cerrado')
+    if estado_chat == 'cerrado':
+        return
 
-    # 1. Extraer Usuarios desde caché (Cero consumo extra de cuota API)
-    usuarios_reales, grupos_identidad = obtener_mapa_usuarios()
+    st.markdown("""
+        <style>
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) {
+            position: fixed !important;
+            bottom: 14px !important;
+            right: 16px !important;
+            width: 880px !important;
+            max-width: 94vw !important;
+            max-height: 85vh !important;
+            overflow-y: auto !important;
+            z-index: 999995 !important;
+            background-color: #05070A !important;
+            border: 1.5px solid #00A884 !important;
+            border-radius: 12px !important;
+            box-shadow: 0px 16px 45px rgba(0, 0, 0, 0.95) !important;
+            padding: 10px 14px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-min) {
+            position: fixed !important;
+            bottom: 14px !important;
+            right: 16px !important;
+            width: 270px !important;
+            z-index: 999995 !important;
+            background-color: #0B141A !important;
+            border: 1.5px solid #00A884 !important;
+            border-radius: 30px !important;
+            box-shadow: 0px 8px 25px rgba(0, 0, 0, 0.9) !important;
+            padding: 4px 10px !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploaderDropzoneInstructions"],
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploaderFile"],
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploader"] small {
+            display: none !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploaderDropzone"] {
+            padding: 0px !important;
+            min-height: 2.4rem !important;
+            height: 2.4rem !important;
+            border: none !important;
+            background: transparent !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) [data-testid="stFileUploaderDropzone"] button {
+            width: 100% !important;
+            min-height: 2.4rem !important;
+            height: 2.4rem !important;
+            margin: 0px !important;
+            padding: 0.2rem 0.4rem !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
-    # 2. Extraer Tareas desde caché rápida
-    df_tareas, headers_tareas = leer_tareas_normalizadas()
+    # --- ESTADO MINIMIZADO (PASTILLA FLOTANTE EN ESQUINA INFERIOR DERECHA) ---
+    if estado_chat == 'minimizado':
+        with st.container(border=True):
+            st.markdown('<span class="pmr-chat-float-min" style="display:none;"></span>', unsafe_allow_html=True)
+            n_pend_min = contar_tareas_pendientes(usuario_activo)
+            lbl_min = f"💬 Tareas ({n_pend_min} nuevos)" if n_pend_min > 0 else "💬 Tareas (Abierto)"
+            c_m1, c_m2 = st.columns([3.5, 1.0], vertical_alignment="center")
+            if c_m1.button(lbl_min, key="btn_restaurar_chat_float", type="primary" if n_pend_min > 0 else "secondary", use_container_width=True):
+                st.session_state['chat_flotante_estado'] = 'abierto'
+                st.rerun()
+            if c_m2.button("✖", key="btn_cerrar_min_float", help="Cerrar chat", use_container_width=True):
+                st.session_state['chat_flotante_estado'] = 'cerrado'
+                st.rerun()
+        return
 
-    # 3. Extraer Siniestros y Refacciones ACTIVOS reusando la caché de BD_UNIFICADA
-    mapa_taller_sin = {}
-    try:
-        if 'cargar_base_viva' in globals():
-            df_uni_local = cargar_base_viva().copy()
-        else:
-            ws_uni = doc.worksheet("BD_UNIFICADA")
-            datos_uni = ws_uni.get_all_values()
-            df_uni_local = pd.DataFrame(datos_uni[1:], columns=[str(h).strip() for h in datos_uni[0]]) if len(datos_uni) > 1 else pd.DataFrame()
-        
-        col_sin_loc = next((c for c in df_uni_local.columns if "SINIESTRO" in str(c).upper() or "PEDIDO" in str(c).upper()), None)
-        col_tall_loc = next((c for c in df_uni_local.columns if "TALLER" in str(c).upper() or "CDR" in str(c).upper()), None)
-        col_marca_loc = next((c for c in df_uni_local.columns if "MARCA" in str(c).upper()), None)
-        col_mod_loc = next((c for c in df_uni_local.columns if "MODELO" in str(c).upper() or "VEH" in str(c).upper()), None)
-        col_desc_loc = next((c for c in df_uni_local.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
-        col_est_loc = next((c for c in df_uni_local.columns if "ESTATUS" in str(c).upper() and "ENV" not in str(c).upper() and "PAGO" not in str(c).upper()), None)
+    # --- ESTADO ABIERTO (VENTANA FLOTANTE ARRASTRABLE Y MINIMIZABLE) ---
+    with st.container(border=True):
+        st.markdown('<span class="pmr-chat-float-open" style="display:none;"></span>', unsafe_allow_html=True)
+        ch_tit, ch_min, ch_cls = st.columns([6.4, 0.8, 0.8], vertical_alignment="center")
+        with ch_tit:
+            st.markdown(
+                '<div class="pmr-drag-handle" style="font-size:1.05rem; font-weight:700; color:#E9EDEF; padding:4px 6px; user-select:none;" title="Arrastra desde aquí para mover la ventana">'
+                '🔔 Centro de Tareas y Mensajería <span style="font-size:0.75rem; color:#8696A0; font-weight:normal;">(⠿ Arrastra para mover)</span>'
+                '</div>',
+                unsafe_allow_html=True
+            )
+        with ch_min:
+            if st.button("➖", key="btn_min_chat_float", help="Minimizar para trabajar en el Dashboard", use_container_width=True):
+                st.session_state['chat_flotante_estado'] = 'minimizado'
+                st.rerun()
+        with ch_cls:
+            if st.button("✖", key="btn_cls_chat_float", help="Cerrar ventana", use_container_width=True):
+                st.session_state['chat_flotante_estado'] = 'cerrado'
+                st.rerun()
 
-        if not df_uni_local.empty and col_sin_loc and col_tall_loc:
-            for _, r_t in df_uni_local.drop_duplicates(subset=[col_sin_loc]).iterrows():
-                s_k = str(r_t.get(col_sin_loc, '')).strip().upper()
-                if s_k.endswith('.0'): s_k = s_k[:-2]
-                t_v = str(r_t.get(col_tall_loc, '')).strip()
-                if s_k and t_v and t_v.lower() != "nan":
-                    mapa_taller_sin[s_k] = t_v
+        doc = init_connection()
+        usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')
+        usuarios_reales, grupos_identidad = obtener_mapa_usuarios()
+        df_tareas, headers_tareas = leer_tareas_normalizadas()
 
-        estatus_inactivos = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"]
-        if not df_uni_local.empty and col_est_loc:
-            df_uni_local = df_uni_local[~df_uni_local[col_est_loc].astype(str).str.strip().str.upper().isin(estatus_inactivos)].copy()
-
-        lista_siniestros = []
-        if not df_uni_local.empty and col_sin_loc:
-            df_unicos = df_uni_local.drop_duplicates(subset=[col_sin_loc])
-            for _, r in df_unicos.iterrows():
-                sin_val = str(r.get(col_sin_loc, '')).strip()
-                mar_val = str(r.get(col_marca_loc, '')).strip() if col_marca_loc else ""
-                mod_val = str(r.get(col_mod_loc, '')).strip() if col_mod_loc else ""
-                veh_str = mod_val if mod_val.upper().startswith(mar_val.upper()) else f"{mar_val} {mod_val}".strip()
-                if sin_val and sin_val.lower() != "nan":
-                    lista_siniestros.append(f"{sin_val} | {veh_str}" if veh_str else sin_val)
-            lista_siniestros = sorted(lista_siniestros)
-    except Exception:
-        df_uni_local = pd.DataFrame()
-        lista_siniestros = []
-
-    chats_activos = pd.DataFrame()
-    chats_finalizados = pd.DataFrame()
-    n_atencion = 0
-
-    if not df_tareas.empty:
-        mask_mios = df_tareas.apply(
-            lambda r: es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad) or es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad),
-            axis=1
-        )
-        df_mios = df_tareas[mask_mios].copy()
-        if not df_mios.empty:
-            chats_activos = df_mios[df_mios['Status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])].copy()
-            chats_finalizados = df_mios[df_mios['Status'].astype(str).str.strip().str.lower() == 'finalizado'].copy()
-
-            def requiere_mi_accion(r):
-                st_v = str(r.get('Status', '')).strip().lower()
-                soy_rec = es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad)
-                soy_emi = es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad)
-                if (soy_rec and st_v == 'pendiente') or (soy_emi and st_v == 'resuelto'):
-                    return 0
-                return 1
-
-            if not chats_activos.empty:
-                chats_activos['_prio'] = chats_activos.apply(requiere_mi_accion, axis=1)
-                n_atencion = int((chats_activos['_prio'] == 0).sum())
-                chats_activos = chats_activos.sort_values(by=['_prio', 'GS_Row'], ascending=[True, False])
-
-    lbl_chats = f"💬 Chats por Siniestro / Tema ({n_atencion} nuevos)" if n_atencion > 0 else f"💬 Chats Activos ({len(chats_activos)})"
-    tabs_tareas = st.tabs([lbl_chats, "➕ Nuevo Chat / Tarea", f"📁 Finalizados ({len(chats_finalizados)})"])
-
-    # --- TAB 1: INTERFAZ ESTILO WHATSAPP (LISTA VERTICAL A LA IZQUIERDA | CHAT A LA DERECHA) ---
-    with tabs_tareas[0]:
-        if not chats_activos.empty:
-            col_lista, col_ventana = st.columns([1.35, 2.65], gap="medium")
-
-            def seleccionar_chat_cb(gs_id):
-                st.session_state['chat_activo_gs_row'] = gs_id
-
-            def refrescar_lista_cb():
-                leer_tareas_normalizadas.clear()
-                cargar_fotos_chat_sheets.clear()
-
-            with col_lista:
-                c_tit, c_ref_btn = st.columns([3, 1], vertical_alignment="center")
-                c_tit.markdown(f"##### 📋 Temas ({len(chats_activos)})")
-                c_ref_btn.button("🔄", key="btn_ref_wa_list", help="Actualizar mensajes", on_click=refrescar_lista_cb)
-
-                busqueda_chat = st.text_input(
-                    "🔍 Buscar chat en proceso:",
-                    placeholder="🔍 Siniestro, auto, taller, pieza o persona...",
-                    label_visibility="collapsed",
-                    key="inp_buscar_chat_wa"
-                ).strip().lower()
-
-                chats_filtrados = chats_activos.copy()
-                if busqueda_chat:
-                    def coincide_busqueda_chat(r):
-                        ref_txt = str(r.get('Siniestro / Taller / Piezas', '')).lower()
-                        id_s = ref_txt.split('|')[0].strip().upper()
-                        if id_s.endswith('.0'): id_s = id_s[:-2]
-                        taller_txt = str(mapa_taller_sin.get(id_s, '')).lower()
-                        emi_txt = str(r.get('Emisor', '')).lower()
-                        rec_txt = str(r.get('Receptor', '')).lower()
-                        ins_txt = str(r.get('Instruccion', '')).lower()
-                        res_txt = str(r.get('Respuesta', '')).lower()
-                        todo = f"{ref_txt} {taller_txt} {emi_txt} {rec_txt} {ins_txt} {res_txt}"
-                        return all(palabra in todo for palabra in busqueda_chat.split())
-
-                    chats_filtrados = chats_activos[chats_activos.apply(coincide_busqueda_chat, axis=1)].copy()
-
-                opciones_ids_todas = chats_activos['GS_Row'].tolist()
-                opciones_ids = chats_filtrados['GS_Row'].tolist()
-
-                if 'chat_activo_gs_row' not in st.session_state or st.session_state['chat_activo_gs_row'] not in opciones_ids_todas:
-                    st.session_state['chat_activo_gs_row'] = opciones_ids[0] if opciones_ids else opciones_ids_todas[0]
-                elif busqueda_chat and opciones_ids and st.session_state['chat_activo_gs_row'] not in opciones_ids:
-                    st.session_state['chat_activo_gs_row'] = opciones_ids[0]
-
-                with st.container(height=340, border=True):
-                    if not opciones_ids:
-                        st.caption("Sin coincidencias para tu búsqueda.")
-                    for gs_r in opciones_ids:
-                        fila_c = chats_activos[chats_activos['GS_Row'] == gs_r].iloc[0]
-                        ref_c = str(fila_c.get('Siniestro / Taller / Piezas', 'General')).strip()
-                        ref_corta = ref_c.split(" | ⚙️")[0].strip()
-                        if len(ref_corta) > 25:
-                            ref_corta = ref_corta[:25] + "..."
-                        soy_rec = es_mismo_usuario(usuario_activo_real, fila_c.get('Receptor', ''), grupos_identidad)
-                        contraparte = fila_c.get('Emisor', '') if soy_rec else fila_c.get('Receptor', '')
-                        icono = "🔴" if fila_c.get('_prio', 1) == 0 else "🟢"
-                        es_seleccionado = (st.session_state['chat_activo_gs_row'] == gs_r)
-                        
-                        lbl_boton = f"{icono} {ref_corta} ({contraparte})"
-                        st.button(
-                            lbl_boton,
-                            key=f"sel_chat_btn_{gs_r}",
-                            type="primary" if es_seleccionado else "secondary",
-                            use_container_width=True,
-                            on_click=seleccionar_chat_cb,
-                            args=(gs_r,)
-                        )
-
-            with col_ventana:
-                chat_sel_row = st.session_state['chat_activo_gs_row']
-                row_activa = chats_activos[chats_activos['GS_Row'] == chat_sel_row].iloc[0]
-                soy_emisor_chat = es_mismo_usuario(usuario_activo_real, row_activa.get('Emisor', ''), grupos_identidad)
-                st_chat = str(row_activa.get('Status', '')).strip().lower()
-
-                ref_completa_chat = str(row_activa.get("Siniestro / Taller / Piezas", "General")).strip()
-                id_sin_chat = ref_completa_chat.split("|")[0].strip().upper()
-                if id_sin_chat.endswith('.0'): id_sin_chat = id_sin_chat[:-2]
-                taller_chat = mapa_taller_sin.get(id_sin_chat, "")
-                html_taller_chat = f'  |  🏢 <b>Taller:</b> <span style="color:#E9EDEF; font-weight:600;">{taller_chat}</span>' if taller_chat else ""
-
-                st.markdown(
-                    f'<div style="background-color:#1F2C34; padding:10px 14px; border-radius:8px; margin-bottom:4px; border-left:4px solid #00A884;">'
-                    f'<div style="font-size:0.95rem; font-weight:700; color:#E9EDEF;">🚗 {ref_completa_chat}</div>'
-                    f'<div style="font-size:0.78rem; color:#8696A0;">'
-                    f'👤 <b>Emisor:</b> {row_activa.get("Emisor", "N/A")}  |  🎯 <b>Para:</b> {row_activa.get("Receptor", "N/A")}  |  📌 <b>Estatus:</b> {st_chat.upper()}{html_taller_chat}'
-                    f'</div></div>',
-                    unsafe_allow_html=True
-                )
-
-                # Ventana de mensajes aislada en iframe con scroll garantizado e imágenes
-                renderizar_hilo_chat(row_activa, usuario_activo_real, grupos_identidad)
-
-                key_input_actual = f"wa_msg_input_{chat_sel_row}"
-                ver_up_key = f"ver_up_chat_{chat_sel_row}"
-                if ver_up_key not in st.session_state:
-                    st.session_state[ver_up_key] = 0
-                key_uploader_actual = f"wa_img_up_{chat_sel_row}_{st.session_state[ver_up_key]}"
-
-                def enviar_msg_cb(row_act, soy_emi, k_inp, k_up, v_key):
-                    texto = st.session_state.get(k_inp, "").strip()
-                    arch_up = st.session_state.get(k_up, None)
-                    if not texto and arch_up is None:
-                        return
-
-                    tag_foto = ""
-                    if arch_up is not None:
-                        try:
-                            id_f = guardar_foto_chat_en_sheet(arch_up.getvalue(), usuario_activo_real)
-                            tag_foto = f"[FOTO:{id_f}]"
-                        except Exception as e_img:
-                            st.toast(f"Error al subir imagen: {e_img}", icon="⚠️")
-
-                    cuerpo_msg = f"{tag_foto} {texto}".strip() if (tag_foto and texto) else (tag_foto or texto)
-                    if cuerpo_msg:
-                        tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
-                        ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
-                        hist_prev = str(row_act.get('Respuesta', '')).strip()
-                        linea_nueva = f"[{ahora_str}] {usuario_activo_real}: {cuerpo_msg}"
-                        hist_final = f"{hist_prev}\n{linea_nueva}".strip() if hist_prev else linea_nueva
-                        prox_status = "Pendiente" if soy_emi else "Resuelto"
-                        ws_t = doc.worksheet("Gestor_Tareas")
-                        actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, prox_status, hist_final)
-                        leer_tareas_normalizadas.clear()
-                        st.session_state[k_inp] = ""
-                        st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
-
-                def finalizar_chat_cb(row_act):
-                    ws_t = doc.worksheet("Gestor_Tareas")
-                    actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, "Finalizado", str(row_act.get('Respuesta', '')).strip())
-                    leer_tareas_normalizadas.clear()
-
-                # Barra inferior unificada en 1 sola línea: [↑ Upload] [Escribe un mensaje o presiona Ctrl+V...] [📤 Enviar] [🏁 Finalizar]
-                st.markdown("""
-                    <style>
-                    div[role="dialog"] [data-testid="stFileUploaderDropzoneInstructions"],
-                    div[role="dialog"] [data-testid="stFileUploaderFile"],
-                    div[role="dialog"] [data-testid="stFileUploader"] small {
-                        display: none !important;
-                    }
-                    div[role="dialog"] [data-testid="stFileUploaderDropzone"] {
-                        padding: 0px !important;
-                        min-height: 2.4rem !important;
-                        height: 2.4rem !important;
-                        border: none !important;
-                        background: transparent !important;
-                        display: flex !important;
-                        align-items: center !important;
-                        justify-content: center !important;
-                    }
-                    div[role="dialog"] [data-testid="stFileUploaderDropzone"] button {
-                        width: 100% !important;
-                        min-height: 2.4rem !important;
-                        height: 2.4rem !important;
-                        margin: 0px !important;
-                        padding: 0.2rem 0.5rem !important;
-                    }
-                    </style>
-                """, unsafe_allow_html=True)
-
-                c_up_btn, c_inp, c_send, c_fin = st.columns([0.85, 2.35, 0.9, 0.9], vertical_alignment="bottom")
-                with c_up_btn:
-                    archivo_chat_sel = st.file_uploader(
-                        "Adjuntar:",
-                        type=["png", "jpg", "jpeg", "webp"],
-                        key=key_uploader_actual,
-                        label_visibility="collapsed"
-                    )
-                with c_inp:
-                    st.text_input(
-                        "Mensaje:",
-                        key=key_input_actual,
-                        placeholder="Escribe un mensaje o presiona Ctrl+V para pegar imagen...",
-                        label_visibility="collapsed"
-                    )
-                with c_send:
-                    st.button(
-                        "📤 Enviar",
-                        key=f"wa_btn_send_{chat_sel_row}",
-                        type="primary",
-                        use_container_width=True,
-                        on_click=enviar_msg_cb,
-                        args=(row_activa, soy_emisor_chat, key_input_actual, key_uploader_actual, ver_up_key)
-                    )
-                with c_fin:
-                    st.button(
-                        "🏁 Finalizar",
-                        key=f"wa_btn_fin_{chat_sel_row}",
-                        use_container_width=True,
-                        help="Cerrar y archivar este tema",
-                        on_click=finalizar_chat_cb,
-                        args=(row_activa,)
-                    )
-
-                if archivo_chat_sel is not None:
-                    st.image(archivo_chat_sel, caption="✅ Imagen lista — Escribe un comentario (opcional) y pulsa 📤 Enviar", width=150)
-
-                # --- HERRAMIENTA PARA ELIMINAR MENSAJES ENVIADOS POR ERROR ---
-                hist_raw_del = str(row_activa.get('Respuesta', '')).strip()
-                lineas_hist_del = [
-                    l.strip() for l in hist_raw_del.replace('\\n', '\n').split('\n')
-                    if l.strip() and l.strip().lower() not in ["none", "nan"]
-                ]
-                msg_ini_del = str(row_activa.get('Instruccion', '')).strip()
-
-                opciones_lineas_del = [f"0. [Mensaje Inicial] {row_activa.get('Emisor', '')}: {msg_ini_del}"]
-                for idx_l, l_txt in enumerate(lineas_hist_del, start=1):
-                    opciones_lineas_del.append(f"{idx_l}. {l_txt}")
-
-                key_sel_del = f"sel_del_msg_{chat_sel_row}"
-
-                def eliminar_linea_chat_cb(row_act, lineas_actuales, k_sel):
-                    sel_val = st.session_state.get(k_sel, "")
-                    if not sel_val:
-                        return
-                    idx_borrar = int(sel_val.split(".")[0].strip())
-                    ws_t = doc.worksheet("Gestor_Tareas")
-                    row_mod = row_act.to_dict() if hasattr(row_act, "to_dict") else dict(row_act)
-                    if idx_borrar == 0:
-                        if lineas_actuales:
-                            primera_resp = lineas_actuales[0]
-                            m_p = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', primera_resp)
-                            row_mod['Instruccion'] = m_p.group(3).strip() if m_p else primera_resp
-                            nuevo_hist = "\n".join(lineas_actuales[1:])
-                            actualizar_tarea_en_sheet(ws_t, headers_tareas, row_mod, row_mod.get('Status', 'Pendiente'), nuevo_hist)
-                        else:
-                            actualizar_tarea_en_sheet(ws_t, headers_tareas, row_mod, "Eliminado", "")
-                    else:
-                        pos_lista = idx_borrar - 1
-                        if 0 <= pos_lista < len(lineas_actuales):
-                            nuevas_lineas = [l for i, l in enumerate(lineas_actuales) if i != pos_lista]
-                            nuevo_hist = "\n".join(nuevas_lineas)
-                            actualizar_tarea_en_sheet(ws_t, headers_tareas, row_mod, row_mod.get('Status', 'Pendiente'), nuevo_hist)
-                    leer_tareas_normalizadas.clear()
-
-                with st.expander("🗑️ Borrar un mensaje enviado por error en este chat", expanded=False):
-                    c_del_sel, c_del_btn = st.columns([3.4, 1.4], vertical_alignment="bottom")
-                    with c_del_sel:
-                        st.selectbox(
-                            "Selecciona la línea que deseas eliminar:",
-                            options=opciones_lineas_del,
-                            index=len(opciones_lineas_del) - 1,
-                            key=key_sel_del
-                        )
-                    with c_del_btn:
-                        st.button(
-                            "🗑️ Eliminar Línea",
-                            key=f"btn_del_msg_{chat_sel_row}",
-                            use_container_width=True,
-                            on_click=eliminar_linea_chat_cb,
-                            args=(row_activa, lineas_hist_del, key_sel_del)
-                        )
-        else:
-            st.info("🎉 No tienes conversaciones ni tareas activas por el momento.")
-
-    # --- TAB 2: NUEVO CHAT / TAREA ---
-    with tabs_tareas[1]:
-        st.subheader("Abrir Nuevo Tema / Siniestro")
-        col_nueva_1, col_nueva_2 = st.columns(2)
-        with col_nueva_1:
-            usuario_destino = st.selectbox("Participante (Asignar a):", ["Seleccionar..."] + usuarios_reales)
-        with col_nueva_2:
-            siniestro_seleccionado = st.selectbox("Tema / Siniestro (Solo Activos):", ["Seleccionar...", "General (Tema Libre)"] + lista_siniestros)
-        
-        tema_libre = ""
-        piezas_seleccionadas = []
-        if siniestro_seleccionado == "General (Tema Libre)":
-            tema_libre = st.text_input("Escribe el Asunto o Siniestro Histórico:", placeholder="Ej. Siniestro Histórico B801122 / Duda de Facturación")
-        elif siniestro_seleccionado != "Seleccionar..." and not df_uni_local.empty and col_desc_loc:
-            id_sin_puro = siniestro_seleccionado.split(" | ")[0].strip()
-            piezas_del_siniestro = df_uni_local[df_uni_local[col_sin_loc].astype(str).str.strip() == id_sin_puro][col_desc_loc].dropna().unique().tolist()
-            piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro)
-
-        instruccion_nueva = st.text_area("Mensaje inicial:")
-        foto_inicial_up = st.file_uploader("📎 Adjuntar imagen al mensaje inicial (Opcional):", type=["png", "jpg", "jpeg", "webp"], key="up_foto_nuevo_chat")
-        
-        if st.button("📤 Iniciar Conversación", type="primary"):
-            if usuario_destino != "Seleccionar..." and siniestro_seleccionado != "Seleccionar..." and (instruccion_nueva.strip() or foto_inicial_up is not None):
-                import uuid
-                tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
-                id_tarea = str(uuid.uuid4().hex)[:6].upper()
-                fecha_hoy = datetime.datetime.now(tz_mx_t).strftime("%Y-%m-%d %H:%M")
-                
-                if siniestro_seleccionado == "General (Tema Libre)":
-                    ref_final = f"General: {tema_libre.strip()}" if tema_libre.strip() else "General"
-                else:
-                    ref_final = siniestro_seleccionado
-                    if piezas_seleccionadas:
-                        ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
-
-                try:
-                    tag_foto_ini = ""
-                    if foto_inicial_up is not None:
-                        id_f_ini = guardar_foto_chat_en_sheet(foto_inicial_up.getvalue(), usuario_activo_real)
-                        tag_foto_ini = f"[FOTO:{id_f_ini}]"
-
-                    msg_ini_guardar = f"{tag_foto_ini} {instruccion_nueva.strip()}".strip() if (tag_foto_ini and instruccion_nueva.strip()) else (tag_foto_ini or instruccion_nueva.strip())
-
-                    ws_tareas = doc.worksheet("Gestor_Tareas")
-                    if not headers_tareas:
-                        headers_tareas = [str(h).strip() for h in ws_tareas.row_values(1)]
-                    if not headers_tareas:
-                        headers_tareas = ["ID_Tarea", "Fecha_Creacion", "Emisor", "Receptor", "Siniestro / Taller / Piezas", "Instruccion", "Status", "Respuesta"]
-                    headers_up = [str(h).strip().upper().rstrip(':') for h in headers_tareas]
-                    nueva_fila = [""] * len(headers_tareas)
-
-                    def pos_col(posibles, default_idx):
-                        for p in posibles:
-                            if p in headers_up:
-                                return headers_up.index(p)
-                        return default_idx if default_idx < len(headers_tareas) else -1
-
-                    i_id = pos_col(["ID_TAREA"], 0)
-                    i_fe = pos_col(["FECHA_CREACION"], 1)
-                    i_em = pos_col(["EMISOR"], 2)
-                    i_re = pos_col(["RECEPTOR"], 3)
-                    i_rf = pos_col(["SINIESTRO / TALLER / PIEZAS", "REFERENCIA"], 4)
-                    i_in = pos_col(["INSTRUCCION"], 5)
-                    i_st = pos_col(["STATUS", "ESTATUS"], 6)
-                    i_rp = pos_col(["RESPUESTA"], 7)
-
-                    if i_id >= 0: nueva_fila[i_id] = id_tarea
-                    if i_fe >= 0: nueva_fila[i_fe] = fecha_hoy
-                    if i_em >= 0: nueva_fila[i_em] = usuario_activo_real
-                    if i_re >= 0: nueva_fila[i_re] = usuario_destino
-                    if i_rf >= 0: nueva_fila[i_rf] = ref_final
-                    if i_in >= 0: nueva_fila[i_in] = msg_ini_guardar
-                    if i_st >= 0: nueva_fila[i_st] = "Pendiente"
-                    if i_rp >= 0: nueva_fila[i_rp] = ""
-
-                    ws_tareas.append_row(nueva_fila, value_input_option='USER_ENTERED')
-                    leer_tareas_normalizadas.clear()
-                    st.success(f"✅ Conversación iniciada con {usuario_destino}")
-                    time.sleep(0.4)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error al guardar: {e}")
+        mapa_taller_sin = {}
+        try:
+            if 'cargar_base_viva' in globals():
+                df_uni_local = cargar_base_viva().copy()
             else:
-                st.warning("⚠️ Selecciona el participante, el tema/siniestro y escribe un mensaje o adjunta una foto.")
+                ws_uni = doc.worksheet("BD_UNIFICADA")
+                datos_uni = ws_uni.get_all_values()
+                df_uni_local = pd.DataFrame(datos_uni[1:], columns=[str(h).strip() for h in datos_uni[0]]) if len(datos_uni) > 1 else pd.DataFrame()
+            
+            col_sin_loc = next((c for c in df_uni_local.columns if "SINIESTRO" in str(c).upper() or "PEDIDO" in str(c).upper()), None)
+            col_tall_loc = next((c for c in df_uni_local.columns if "TALLER" in str(c).upper() or "CDR" in str(c).upper()), None)
+            col_marca_loc = next((c for c in df_uni_local.columns if "MARCA" in str(c).upper()), None)
+            col_mod_loc = next((c for c in df_uni_local.columns if "MODELO" in str(c).upper() or "VEH" in str(c).upper()), None)
+            col_desc_loc = next((c for c in df_uni_local.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
+            col_est_loc = next((c for c in df_uni_local.columns if "ESTATUS" in str(c).upper() and "ENV" not in str(c).upper() and "PAGO" not in str(c).upper()), None)
 
-    # --- TAB 3: HISTORIAL DE FINALIZADOS ---
-    with tabs_tareas[2]:
-        if not chats_finalizados.empty:
-            cols_fin = [c for c in ['Fecha_Creacion', 'Emisor', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta'] if c in chats_finalizados.columns]
-            st.dataframe(chats_finalizados[cols_fin], hide_index=True, use_container_width=True)
-        else:
-            st.info("No hay conversaciones finalizadas en el archivo.")
+            if not df_uni_local.empty and col_sin_loc and col_tall_loc:
+                for _, r_t in df_uni_local.drop_duplicates(subset=[col_sin_loc]).iterrows():
+                    s_k = str(r_t.get(col_sin_loc, '')).strip().upper()
+                    if s_k.endswith('.0'): s_k = s_k[:-2]
+                    t_v = str(r_t.get(col_tall_loc, '')).strip()
+                    if s_k and t_v and t_v.lower() != "nan":
+                        mapa_taller_sin[s_k] = t_v
+
+            estatus_inactivos = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"]
+            if not df_uni_local.empty and col_est_loc:
+                df_uni_local = df_uni_local[~df_uni_local[col_est_loc].astype(str).str.strip().str.upper().isin(estatus_inactivos)].copy()
+
+            lista_siniestros = []
+            if not df_uni_local.empty and col_sin_loc:
+                df_unicos = df_uni_local.drop_duplicates(subset=[col_sin_loc])
+                for _, r in df_unicos.iterrows():
+                    sin_val = str(r.get(col_sin_loc, '')).strip()
+                    mar_val = str(r.get(col_marca_loc, '')).strip() if col_marca_loc else ""
+                    mod_val = str(r.get(col_mod_loc, '')).strip() if col_mod_loc else ""
+                    veh_str = mod_val if mod_val.upper().startswith(mar_val.upper()) else f"{mar_val} {mod_val}".strip()
+                    if sin_val and sin_val.lower() != "nan":
+                        lista_siniestros.append(f"{sin_val} | {veh_str}" if veh_str else sin_val)
+                lista_siniestros = sorted(lista_siniestros)
+        except Exception:
+            df_uni_local = pd.DataFrame()
+            lista_siniestros = []
+
+        chats_activos = pd.DataFrame()
+        chats_finalizados = pd.DataFrame()
+        n_atencion = 0
+
+        if not df_tareas.empty:
+            mask_mios = df_tareas.apply(
+                lambda r: es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad) or es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad),
+                axis=1
+            )
+            df_mios = df_tareas[mask_mios].copy()
+            if not df_mios.empty:
+                chats_activos = df_mios[df_mios['Status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])].copy()
+                chats_finalizados = df_mios[df_mios['Status'].astype(str).str.strip().str.lower() == 'finalizado'].copy()
+
+                def requiere_mi_accion(r):
+                    st_v = str(r.get('Status', '')).strip().lower()
+                    soy_rec = es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad)
+                    soy_emi = es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad)
+                    if (soy_rec and st_v == 'pendiente') or (soy_emi and st_v == 'resuelto'):
+                        return 0
+                    return 1
+
+                if not chats_activos.empty:
+                    chats_activos['_prio'] = chats_activos.apply(requiere_mi_accion, axis=1)
+                    n_atencion = int((chats_activos['_prio'] == 0).sum())
+                    chats_activos = chats_activos.sort_values(by=['_prio', 'GS_Row'], ascending=[True, False])
+
+        lbl_chats = f"💬 Chats ({n_atencion} nuevos)" if n_atencion > 0 else f"💬 Chats Activos ({len(chats_activos)})"
+        tabs_tareas = st.tabs([lbl_chats, "➕ Nuevo Chat / Tarea", f"📁 Finalizados ({len(chats_finalizados)})"])
+
+        # --- TAB 1: CHATS ACTIVOS ---
+        with tabs_tareas[0]:
+            if not chats_activos.empty:
+                col_lista, col_ventana = st.columns([1.35, 2.65], gap="medium")
+
+                def seleccionar_chat_cb(gs_id):
+                    st.session_state['chat_activo_gs_row'] = gs_id
+
+                def refrescar_lista_cb():
+                    leer_tareas_normalizadas.clear()
+                    cargar_fotos_chat_sheets.clear()
+
+                with col_lista:
+                    c_tit, c_ref_btn = st.columns([3, 1], vertical_alignment="center")
+                    c_tit.markdown(f"##### 📋 Temas ({len(chats_activos)})")
+                    c_ref_btn.button("🔄", key="btn_ref_wa_list", help="Actualizar mensajes", on_click=refrescar_lista_cb)
+
+                    busqueda_chat = st.text_input(
+                        "🔍 Buscar chat:",
+                        placeholder="🔍 Siniestro, auto, taller o persona...",
+                        label_visibility="collapsed",
+                        key="inp_buscar_chat_wa"
+                    ).strip().lower()
+
+                    chats_filtrados = chats_activos.copy()
+                    if busqueda_chat:
+                        def coincide_busqueda_chat(r):
+                            ref_txt = str(r.get('Siniestro / Taller / Piezas', '')).lower()
+                            id_s = ref_txt.split('|')[0].strip().upper()
+                            if id_s.endswith('.0'): id_s = id_s[:-2]
+                            taller_txt = str(mapa_taller_sin.get(id_s, '')).lower()
+                            todo = f"{ref_txt} {taller_txt} {str(r.get('Emisor', '')).lower()} {str(r.get('Receptor', '')).lower()} {str(r.get('Instruccion', '')).lower()} {str(r.get('Respuesta', '')).lower()}"
+                            return all(palabra in todo for palabra in busqueda_chat.split())
+                        chats_filtrados = chats_activos[chats_activos.apply(coincide_busqueda_chat, axis=1)].copy()
+
+                    opciones_ids_todas = chats_activos['GS_Row'].tolist()
+                    opciones_ids = chats_filtrados['GS_Row'].tolist()
+
+                    if 'chat_activo_gs_row' not in st.session_state or st.session_state['chat_activo_gs_row'] not in opciones_ids_todas:
+                        st.session_state['chat_activo_gs_row'] = opciones_ids[0] if opciones_ids else opciones_ids_todas[0]
+                    elif busqueda_chat and opciones_ids and st.session_state['chat_activo_gs_row'] not in opciones_ids:
+                        st.session_state['chat_activo_gs_row'] = opciones_ids[0]
+
+                    with st.container(height=320, border=True):
+                        if not opciones_ids:
+                            st.caption("Sin coincidencias para tu búsqueda.")
+                        for gs_r in opciones_ids:
+                            fila_c = chats_activos[chats_activos['GS_Row'] == gs_r].iloc[0]
+                            ref_c = str(fila_c.get('Siniestro / Taller / Piezas', 'General')).strip()
+                            ref_corta = ref_c.split(" | ⚙️")[0].strip()
+                            if len(ref_corta) > 24:
+                                ref_corta = ref_corta[:24] + "..."
+                            soy_rec = es_mismo_usuario(usuario_activo_real, fila_c.get('Receptor', ''), grupos_identidad)
+                            contraparte = fila_c.get('Emisor', '') if soy_rec else fila_c.get('Receptor', '')
+                            icono = "🔴" if fila_c.get('_prio', 1) == 0 else "🟢"
+                            es_seleccionado = (st.session_state['chat_activo_gs_row'] == gs_r)
+                            
+                            st.button(
+                                f"{icono} {ref_corta} ({contraparte})",
+                                key=f"sel_chat_btn_{gs_r}",
+                                type="primary" if es_seleccionado else "secondary",
+                                use_container_width=True,
+                                on_click=seleccionar_chat_cb,
+                                args=(gs_r,)
+                            )
+
+                with col_ventana:
+                    chat_sel_row = st.session_state['chat_activo_gs_row']
+                    row_activa = chats_activos[chats_activos['GS_Row'] == chat_sel_row].iloc[0]
+                    soy_emisor_chat = es_mismo_usuario(usuario_activo_real, row_activa.get('Emisor', ''), grupos_identidad)
+                    st_chat = str(row_activa.get('Status', '')).strip().lower()
+
+                    ref_completa_chat = str(row_activa.get("Siniestro / Taller / Piezas", "General")).strip()
+                    id_sin_chat = ref_completa_chat.split("|")[0].strip().upper()
+                    if id_sin_chat.endswith('.0'): id_sin_chat = id_sin_chat[:-2]
+                    taller_chat = mapa_taller_sin.get(id_sin_chat, "")
+                    html_taller_chat = f'  |  🏢 <b>Taller:</b> <span style="color:#E9EDEF; font-weight:600;">{taller_chat}</span>' if taller_chat else ""
+
+                    st.markdown(
+                        f'<div style="background-color:#1F2C34; padding:8px 12px; border-radius:8px; margin-bottom:4px; border-left:4px solid #00A884;">'
+                        f'<div style="font-size:0.9rem; font-weight:700; color:#E9EDEF;">🚗 {ref_completa_chat}</div>'
+                        f'<div style="font-size:0.75rem; color:#8696A0;">'
+                        f'👤 <b>Emisor:</b> {row_activa.get("Emisor", "N/A")}  |  🎯 <b>Para:</b> {row_activa.get("Receptor", "N/A")}  |  📌 <b>Estatus:</b> {st_chat.upper()}{html_taller_chat}'
+                        f'</div></div>',
+                        unsafe_allow_html=True
+                    )
+
+                    renderizar_hilo_chat(row_activa, usuario_activo_real, grupos_identidad)
+
+                    key_input_actual = f"wa_msg_input_{chat_sel_row}"
+                    ver_up_key = f"ver_up_chat_{chat_sel_row}"
+                    if ver_up_key not in st.session_state:
+                        st.session_state[ver_up_key] = 0
+                    key_uploader_actual = f"wa_img_up_{chat_sel_row}_{st.session_state[ver_up_key]}"
+
+                    def enviar_msg_cb(row_act, soy_emi, k_inp, k_up, v_key):
+                        texto = st.session_state.get(k_inp, "").strip()
+                        arch_up = st.session_state.get(k_up, None)
+                        if not texto and arch_up is None:
+                            return
+
+                        tag_adj = ""
+                        if arch_up is not None:
+                            try:
+                                tag_adj = guardar_adjunto_chat_en_sheet(arch_up.getvalue(), arch_up.name, usuario_activo_real)
+                            except Exception as e_adj:
+                                st.toast(f"No se pudo subir el archivo: {e_adj}", icon="⚠️")
+                                return
+
+                        cuerpo_msg = f"{tag_adj} {texto}".strip() if (tag_adj and texto) else (tag_adj or texto)
+                        if cuerpo_msg:
+                            tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
+                            ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
+                            hist_prev = str(row_act.get('Respuesta', '')).strip()
+                            linea_nueva = f"[{ahora_str}] {usuario_activo_real}: {cuerpo_msg}"
+                            hist_final = f"{hist_prev}\n{linea_nueva}".strip() if hist_prev else linea_nueva
+                            prox_status = "Pendiente" if soy_emi else "Resuelto"
+                            ws_t = doc.worksheet("Gestor_Tareas")
+                            actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, prox_status, hist_final)
+                            leer_tareas_normalizadas.clear()
+                            st.session_state[k_inp] = ""
+                            st.session_state[v_key] = st.session_state.get(v_key, 0) + 1
+
+                    def finalizar_chat_cb(row_act):
+                        ws_t = doc.worksheet("Gestor_Tareas")
+                        actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, "Finalizado", str(row_act.get('Respuesta', '')).strip())
+                        leer_tareas_normalizadas.clear()
+
+                    c_up_btn, c_inp, c_send, c_fin = st.columns([0.85, 2.35, 0.9, 0.9], vertical_alignment="bottom")
+                    with c_up_btn:
+                        archivo_chat_sel = st.file_uploader(
+                            "Adjuntar:",
+                            type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "doc", "xlsx", "xls", "csv"],
+                            key=key_uploader_actual,
+                            label_visibility="collapsed"
+                        )
+                    with c_inp:
+                        st.text_input(
+                            "Mensaje:",
+                            key=key_input_actual,
+                            placeholder="Escribe un mensaje o Ctrl+V para pegar captura...",
+                            label_visibility="collapsed"
+                        )
+                    with c_send:
+                        st.button(
+                            "📤 Enviar",
+                            key=f"wa_btn_send_{chat_sel_row}",
+                            type="primary",
+                            use_container_width=True,
+                            on_click=enviar_msg_cb,
+                            args=(row_activa, soy_emisor_chat, key_input_actual, key_uploader_actual, ver_up_key)
+                        )
+                    with c_fin:
+                        st.button(
+                            "🏁 Finalizar",
+                            key=f"wa_btn_fin_{chat_sel_row}",
+                            use_container_width=True,
+                            help="Cerrar y archivar este tema",
+                            on_click=finalizar_chat_cb,
+                            args=(row_activa,)
+                        )
+
+                    if archivo_chat_sel is not None:
+                        ext_sel = os.path.splitext(archivo_chat_sel.name.lower())[1]
+                        if ext_sel in [".png", ".jpg", ".jpeg", ".webp"]:
+                            st.image(archivo_chat_sel, caption=f"✅ {archivo_chat_sel.name} — Pulsa 📤 Enviar", width=130)
+                        else:
+                            st.info(f"📎 Archivo listo ({round(len(archivo_chat_sel.getvalue())/1024, 1)} KB): **{archivo_chat_sel.name}** — Pulsa **📤 Enviar** (vigencia 5 días).")
+
+                    # --- HERRAMIENTA PARA ELIMINAR MENSAJES ENVIADOS POR ERROR ---
+                    hist_raw_del = str(row_activa.get('Respuesta', '')).strip()
+                    lineas_hist_del = [
+                        l.strip() for l in hist_raw_del.replace('\\n', '\n').split('\n')
+                        if l.strip() and l.strip().lower() not in ["none", "nan"]
+                    ]
+                    msg_ini_del = str(row_activa.get('Instruccion', '')).strip()
+
+                    opciones_lineas_del = [f"0. [Mensaje Inicial] {row_activa.get('Emisor', '')}: {msg_ini_del}"]
+                    for idx_l, l_txt in enumerate(lineas_hist_del, start=1):
+                        opciones_lineas_del.append(f"{idx_l}. {l_txt}")
+
+                    key_sel_del = f"sel_del_msg_{chat_sel_row}"
+
+                    def eliminar_linea_chat_cb(row_act, lineas_actuales, k_sel):
+                        sel_val = st.session_state.get(k_sel, "")
+                        if not sel_val:
+                            return
+                        idx_borrar = int(sel_val.split(".")[0].strip())
+                        ws_t = doc.worksheet("Gestor_Tareas")
+                        row_mod = row_act.to_dict() if hasattr(row_act, "to_dict") else dict(row_act)
+                        if idx_borrar == 0:
+                            if lineas_actuales:
+                                primera_resp = lineas_actuales[0]
+                                m_p = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', primera_resp)
+                                row_mod['Instruccion'] = m_p.group(3).strip() if m_p else primera_resp
+                                nuevo_hist = "\n".join(lineas_actuales[1:])
+                                actualizar_tarea_en_sheet(ws_t, headers_tareas, row_mod, row_mod.get('Status', 'Pendiente'), nuevo_hist)
+                            else:
+                                actualizar_tarea_en_sheet(ws_t, headers_tareas, row_mod, "Eliminado", "")
+                        else:
+                            pos_lista = idx_borrar - 1
+                            if 0 <= pos_lista < len(lineas_actuales):
+                                nuevas_lineas = [l for i, l in enumerate(lineas_actuales) if i != pos_lista]
+                                nuevo_hist = "\n".join(nuevas_lineas)
+                                actualizar_tarea_en_sheet(ws_t, headers_tareas, row_mod, row_mod.get('Status', 'Pendiente'), nuevo_hist)
+                        leer_tareas_normalizadas.clear()
+
+                    with st.expander("🗑️ Borrar un mensaje enviado por error en este chat", expanded=False):
+                        c_del_sel, c_del_btn = st.columns([3.4, 1.4], vertical_alignment="bottom")
+                        with c_del_sel:
+                            st.selectbox(
+                                "Selecciona la línea que deseas eliminar:",
+                                options=opciones_lineas_del,
+                                index=len(opciones_lineas_del) - 1,
+                                key=key_sel_del
+                            )
+                        with c_del_btn:
+                            st.button(
+                                "🗑️ Eliminar Línea",
+                                key=f"btn_del_msg_{chat_sel_row}",
+                                use_container_width=True,
+                                on_click=eliminar_linea_chat_cb,
+                                args=(row_activa, lineas_hist_del, key_sel_del)
+                            )
+            else:
+                st.info("🎉 No tienes conversaciones ni tareas activas por el momento.")
+
+        # --- TAB 2: NUEVO CHAT / TAREA ---
+        with tabs_tareas[1]:
+            st.subheader("Abrir Nuevo Tema / Siniestro")
+            col_nueva_1, col_nueva_2 = st.columns(2)
+            with col_nueva_1:
+                usuario_destino = st.selectbox("Participante (Asignar a):", ["Seleccionar..."] + usuarios_reales)
+            with col_nueva_2:
+                siniestro_seleccionado = st.selectbox("Tema / Siniestro (Solo Activos):", ["Seleccionar...", "General (Tema Libre)"] + lista_siniestros)
+            
+            tema_libre = ""
+            piezas_seleccionadas = []
+            if siniestro_seleccionado == "General (Tema Libre)":
+                tema_libre = st.text_input("Escribe el Asunto o Siniestro Histórico:", placeholder="Ej. Siniestro Histórico B801122 / Duda de Facturación")
+            elif siniestro_seleccionado != "Seleccionar..." and not df_uni_local.empty and col_desc_loc:
+                id_sin_puro = siniestro_seleccionado.split(" | ")[0].strip()
+                piezas_del_siniestro = df_uni_local[df_uni_local[col_sin_loc].astype(str).str.strip() == id_sin_puro][col_desc_loc].dropna().unique().tolist()
+                piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro)
+
+            instruccion_nueva = st.text_area("Mensaje inicial:")
+            adj_inicial_up = st.file_uploader(
+                "📎 Adjuntar imagen o documento PDF/Excel/Word/CSV (Opcional, máx. 450 KB):",
+                type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "doc", "xlsx", "xls", "csv"],
+                key="up_foto_nuevo_chat"
+            )
+            
+            if st.button("📤 Iniciar Conversación", type="primary"):
+                if usuario_destino != "Seleccionar..." and siniestro_seleccionado != "Seleccionar..." and (instruccion_nueva.strip() or adj_inicial_up is not None):
+                    import uuid
+                    tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
+                    id_tarea = str(uuid.uuid4().hex)[:6].upper()
+                    fecha_hoy = datetime.datetime.now(tz_mx_t).strftime("%Y-%m-%d %H:%M")
+                    
+                    if siniestro_seleccionado == "General (Tema Libre)":
+                        ref_final = f"General: {tema_libre.strip()}" if tema_libre.strip() else "General"
+                    else:
+                        ref_final = siniestro_seleccionado
+                        if piezas_seleccionadas:
+                            ref_final += f" | ⚙️ Piezas: {', '.join(piezas_seleccionadas)}"
+
+                    try:
+                        tag_adj_ini = ""
+                        if adj_inicial_up is not None:
+                            tag_adj_ini = guardar_adjunto_chat_en_sheet(adj_inicial_up.getvalue(), adj_inicial_up.name, usuario_activo_real)
+
+                        msg_ini_guardar = f"{tag_adj_ini} {instruccion_nueva.strip()}".strip() if (tag_adj_ini and instruccion_nueva.strip()) else (tag_adj_ini or instruccion_nueva.strip())
+
+                        ws_tareas = doc.worksheet("Gestor_Tareas")
+                        if not headers_tareas:
+                            headers_tareas = [str(h).strip() for h in ws_tareas.row_values(1)]
+                        if not headers_tareas:
+                            headers_tareas = ["ID_Tarea", "Fecha_Creacion", "Emisor", "Receptor", "Siniestro / Taller / Piezas", "Instruccion", "Status", "Respuesta"]
+                        headers_up = [str(h).strip().upper().rstrip(':') for h in headers_tareas]
+                        nueva_fila = [""] * len(headers_tareas)
+
+                        def pos_col(posibles, default_idx):
+                            for p in posibles:
+                                if p in headers_up:
+                                    return headers_up.index(p)
+                            return default_idx if default_idx < len(headers_tareas) else -1
+
+                        i_id = pos_col(["ID_TAREA"], 0)
+                        i_fe = pos_col(["FECHA_CREACION"], 1)
+                        i_em = pos_col(["EMISOR"], 2)
+                        i_re = pos_col(["RECEPTOR"], 3)
+                        i_rf = pos_col(["SINIESTRO / TALLER / PIEZAS", "REFERENCIA"], 4)
+                        i_in = pos_col(["INSTRUCCION"], 5)
+                        i_st = pos_col(["STATUS", "ESTATUS"], 6)
+                        i_rp = pos_col(["RESPUESTA"], 7)
+
+                        if i_id >= 0: nueva_fila[i_id] = id_tarea
+                        if i_fe >= 0: nueva_fila[i_fe] = fecha_hoy
+                        if i_em >= 0: nueva_fila[i_em] = usuario_activo_real
+                        if i_re >= 0: nueva_fila[i_re] = usuario_destino
+                        if i_rf >= 0: nueva_fila[i_rf] = ref_final
+                        if i_in >= 0: nueva_fila[i_in] = msg_ini_guardar
+                        if i_st >= 0: nueva_fila[i_st] = "Pendiente"
+                        if i_rp >= 0: nueva_fila[i_rp] = ""
+
+                        ws_tareas.append_row(nueva_fila, value_input_option='USER_ENTERED')
+                        leer_tareas_normalizadas.clear()
+                        st.success(f"✅ Conversación iniciada con {usuario_destino}")
+                        time.sleep(0.4)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error al guardar: {e}")
+                else:
+                    st.warning("⚠️ Selecciona el participante, el tema/siniestro y escribe un mensaje o adjunta un archivo.")
+
+        # --- TAB 3: HISTORIAL DE FINALIZADOS ---
+        with tabs_tareas[2]:
+            if not chats_finalizados.empty:
+                cols_fin = [c for c in ['Fecha_Creacion', 'Emisor', 'Receptor', 'Siniestro / Taller / Piezas', 'Instruccion', 'Respuesta'] if c in chats_finalizados.columns]
+                st.dataframe(chats_finalizados[cols_fin], hide_index=True, use_container_width=True)
+            else:
+                st.info("No hay conversaciones finalizadas en el archivo.")
 
 @st.dialog("📖 Directorio Operativo", width="large")
 def abrir_directorio():
@@ -2162,11 +2340,15 @@ tipo_btn_tareas = "primary" if pendientes_badge > 0 else "secondary"
 with col_btn_tar:
     if st.button(label_btn_tareas, type=tipo_btn_tareas, use_container_width=True):
         leer_tareas_normalizadas.clear()
-        abrir_centro_tareas()
+        st.session_state['chat_flotante_estado'] = 'abierto'
+        st.rerun()
 
 with col_btn_gua:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)
     espacio_spinner = st.empty()
+
+# Renderizar el Centro de Tareas Flotante (Abierto o Minimizado en esquina inferior derecha)
+renderizar_widget_tareas_flotante()
 
 
 # ==============================================================================

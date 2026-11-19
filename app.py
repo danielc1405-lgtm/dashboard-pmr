@@ -5200,7 +5200,7 @@ elif vista_actual == "🚚 Rutas":
     doc = init_connection()
 
     # --- PESTAÑAS DE OPERACIÓN ---
-    tab_entregas, tab_recolecciones, tab_compras, tab_cotizaciones = st.tabs(["📦 Entregas (CDR)", "↩️ Recolecciones (CDR)", "🛒 Compras", "🔎 Cotizaciones"])
+    tab_entregas, tab_recolecciones, tab_compras, tab_eventuales = st.tabs(["📦 Entregas (CDR)", "↩️ Recolecciones (CDR)", "🛒 Compras", "🔄 Eventuales"])
     
     # ---------------------------------------------------------
     # TAB 1: ENTREGAS (SOLO NUEVO LEÓN Y SIN PAQUETERÍA)
@@ -5474,14 +5474,28 @@ elif vista_actual == "🚚 Rutas":
             st.info("Falta información de compras para cruzar datos.")
 
     # ---------------------------------------------------------
-    # TAB 4: PROVEEDORES EVENTUALES Y COTIZACIONES FUERA DE BASE
+    # TAB 4: VUELTAS EVENTUALES (COTIZAR, REVISAR, REPARACIÓN, PAQUETERÍA)
     # ---------------------------------------------------------
-    with tab_cotizaciones:
-        st.markdown("### 🔎 Vueltas a Proveedores Eventuales (Fuera de Base)")
-        st.caption("Usa esta pestaña exclusivamente para enviar al operador a lugares nuevos, yonkes o agencias que **no están** en tu catálogo principal de compras.")
-        
-        lista_provs_cot = []
-        dict_dir_cot = {}
+    with tab_eventuales:
+        st.markdown("### 🔄 Vueltas Eventuales")
+        st.caption("Programa visitas especiales: cotizaciones, revisiones físicas en taller, entregas/recolecciones de reparación o paqueterías ocurre.")
+
+        # 1. Catálogo unificado (Talleres + Proveedores) con direcciones precargadas
+        lista_lugares_ev = []
+        dict_dir_ev = {}
+
+        if not df_catalogo.empty:
+            c_tall_e = next((c for c in df_catalogo.columns if 'TALLER' in str(c).upper()), None)
+            c_dir_t = next((c for c in df_catalogo.columns if 'DIRECC' in str(c).upper()), None)
+            if c_tall_e:
+                for _, rt_e in df_catalogo.iterrows():
+                    t_nom = str(rt_e.get(c_tall_e, '')).strip().upper()
+                    if not t_nom or t_nom in ['NAN', 'NONE']: continue
+                    etq_t = f"[TALLER] {t_nom}"
+                    lista_lugares_ev.append(etq_t)
+                    if c_dir_t and str(rt_e.get(c_dir_t, '')).strip() not in ['', 'nan', 'None']:
+                        dict_dir_ev[etq_t] = str(rt_e.get(c_dir_t, '')).strip()
+
         if not df_proveedores.empty:
             c_prv_c = next((c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper()), None)
             c_suc_c = next((c for c in df_proveedores.columns if 'SUCURSAL' in str(c).upper()), None)
@@ -5490,18 +5504,74 @@ elif vista_actual == "🚚 Rutas":
                 for _, rp_c in df_proveedores.iterrows():
                     p_n = str(rp_c.get(c_prv_c, '')).strip().upper()
                     s_n = str(rp_c.get(c_suc_c, '')).strip().upper() if c_suc_c else ""
-                    if not p_n or p_n == 'NAN': continue
-                    llave_p = f"{p_n} - {s_n}" if (s_n and s_n != 'NAN') else p_n
-                    lista_provs_cot.append(llave_p)
-                    if c_dir_c and str(rp_c.get(c_dir_c, '')).strip():
-                        dict_dir_cot[llave_p] = str(rp_c.get(c_dir_c, '')).strip()
-                lista_provs_cot = sorted(list(set(lista_provs_cot)))
+                    if not p_n or p_n in ['NAN', 'NONE']: continue
+                    llave_p = f"{p_n} - {s_n}" if (s_n and s_n not in ['NAN', 'NONE']) else p_n
+                    etq_p = f"[PROV] {llave_p}"
+                    lista_lugares_ev.append(etq_p)
+                    if c_dir_c and str(rp_c.get(c_dir_c, '')).strip() not in ['', 'nan', 'None']:
+                        dict_dir_ev[etq_p] = str(rp_c.get(c_dir_c, '')).strip()
 
-        col_sel_p, col_vin_p = st.columns(2)
+        lista_lugares_ev = sorted(list(set(lista_lugares_ev)))
+
+        # 2. Lista opcional de Siniestros Activos para autocompletar Vehículo, VIN y Piezas
+        lista_sin_ev = ["General / Sin Siniestro"]
+        mapa_sin_info_ev = {}
+        if not df_completo.empty and col_id:
+            df_ev_act = df_completo.copy()
+            if col_estatus:
+                est_cerr_ev = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"]
+                df_ev_act = df_ev_act[~df_ev_act[col_estatus].astype(str).str.strip().str.upper().isin(est_cerr_ev)].copy()
+            if not df_ev_act.empty:
+                df_ev_act['_Veh_Ev'] = df_ev_act.apply(armar_vehiculo, axis=1)
+                for sid_val, grp_s in df_ev_act.groupby(col_id):
+                    sid_str = str(sid_val).strip().removesuffix('.0')
+                    if not sid_str or sid_str.upper() in ['NAN', 'NONE']: continue
+                    veh_s = str(grp_s['_Veh_Ev'].iloc[0]).strip()
+                    vin_s = str(grp_s[col_vin].iloc[0]).strip() if (col_vin and col_vin in grp_s.columns) else ""
+                    if vin_s.upper() in ['NAN', 'NONE']: vin_s = ""
+                    tall_s = str(grp_s[col_taller].iloc[0]).strip().upper() if (col_taller and col_taller in grp_s.columns) else ""
+                    piezas_s = sorted(list(set([str(x).strip() for x in grp_s[col_desc].dropna().tolist() if str(x).strip()]))) if (col_desc and col_desc in grp_s.columns) else []
+                    etq_sin = f"{sid_str} | {veh_s}"
+                    lista_sin_ev.append(etq_sin)
+                    mapa_sin_info_ev[etq_sin] = {'id': sid_str, 'veh': veh_s, 'vin': vin_s, 'taller': tall_s, 'piezas': piezas_s}
+        lista_sin_ev = ["General / Sin Siniestro"] + sorted(lista_sin_ev[1:])
+
+        # Fila 1: Tipo de Vuelta + Siniestro Activo (Opcional)
+        mapa_tipos_vuelta = {
+            "🔎 Cotización / Búsqueda": "COTIZACION",
+            "🧐 Revisión en Taller": "REVISION",
+            "🔧 Reparación - Entrega": "REPARACION - ENTREGA",
+            "🔧 Reparación - Recolección": "REPARACION - RECOLECCION",
+            "📦 Paquetería (Ocurre)": "PAQUETERIA"
+        }
+        ce1, ce2 = st.columns([1.2, 1.8])
+        with ce1:
+            tipo_vuelta_lbl = st.selectbox("Tipo de Vuelta *", list(mapa_tipos_vuelta.keys()), key="sel_tipo_vuelta_ev")
+        with ce2:
+            sin_ev_sel = st.selectbox("🚗 Siniestro Activo (Opcional - Autocompleta datos):", lista_sin_ev, key="sel_sin_ev_ruta")
+
+        info_sin_ev = mapa_sin_info_ev.get(sin_ev_sel, {})
+        idx_lugar_default = 0
+        if info_sin_ev.get('taller'):
+            etq_taller_match = f"[TALLER] {info_sin_ev['taller']}"
+            if etq_taller_match in lista_lugares_ev:
+                idx_lugar_default = lista_lugares_ev.index(etq_taller_match) + 2
+
+        # Fila 2: Lugar (Catálogo Unificado) + VIN
+        col_sel_p, col_vin_p = st.columns([1.8, 1.2])
         with col_sel_p:
-            prov_eventual = st.selectbox("Lugar (Yonke / Agencia / Proveedor) *", ["", "-- ESCRIBIR NUEVO --"] + lista_provs_cot, key="sel_prov_cot_ruta")
+            prov_eventual = st.selectbox(
+                "Lugar (Taller / Proveedor / Reparación / Paquetería) *",
+                ["", "-- ESCRIBIR NUEVO --"] + lista_lugares_ev,
+                index=idx_lugar_default,
+                key=f"sel_prov_cot_ruta_{info_sin_ev.get('id', 'gen')}"
+            )
         with col_vin_p:
-            vin_eventual = st.text_input("VIN / Número de Serie (Opcional)", key="vin_cot_ruta")
+            vin_eventual = st.text_input(
+                "VIN / Número de Serie (Opcional)",
+                value=info_sin_ev.get('vin', ''),
+                key=f"vin_cot_ruta_{info_sin_ev.get('id', 'gen')}"
+            )
 
         if prov_eventual == "":
             st.info("👆 Selecciona un lugar arriba para habilitar la captura.")
@@ -5517,29 +5587,37 @@ elif vista_actual == "🚚 Rutas":
                 guardar_en_directorio = True
 
                 if prov_eventual == "-- ESCRIBIR NUEVO --":
-                    st.markdown("##### 🏢 Datos del Nuevo Proveedor (Se registrará en `BD_PROVEEDORES`)")
+                    st.markdown("##### 🏢 Datos del Nuevo Lugar / Proveedor")
                     cp1, cp2, cp3 = st.columns([2, 1.5, 1.5])
-                    nuevo_prov = cp1.text_input("Nombre del Proveedor * (Ej. YONKE EL TIO)").strip().upper()
+                    nuevo_prov = cp1.text_input("Nombre del Lugar * (Ej. TALLER DE FASCIAS / PAQUETEXPRESS)").strip().upper()
                     nueva_suc_cot = cp2.text_input("Sucursal / Zona (Ej. ESCOBEDO)").strip().upper()
                     nuevo_tel_cot = cp3.text_input("Teléfono / Contacto").strip()
 
                     cp4, cp5 = st.columns([2.5, 1.5])
                     dir_eventual = cp4.text_input("Dirección Completa (Para navegación del chofer) *").strip()
-                    nuevas_marcas_cot = cp5.text_input("Marcas / Especialidad", placeholder="Ej. Suspensión, General").strip().upper()
+                    nuevas_marcas_cot = cp5.text_input("Especialidad / Notas", placeholder="Ej. Reparación de fascias, Paquetería").strip().upper()
 
                     cp6, cp7, cp8 = st.columns(3)
                     nuevo_tiempo_cot = cp6.selectbox("Tiempo Promedio de Entrega", ["Inmediata", "1 a 2 días", "3 a 5 días", "Más de 5 días", "Bajo Pedido"])
                     nueva_cond_cot = cp7.selectbox("Condición de Pago", ["Contra Entrega", "Pago Anticipado", "Anticipo", "Crédito", "Pago en Plataforma"])
                     nuevos_dias_cot = cp8.number_input("Días Crédito", min_value=0, value=0, step=1)
-                    guardar_en_directorio = st.checkbox("☑️ Guardar este proveedor en el Directorio (BD_PROVEEDORES)", value=True)
+                    guardar_en_directorio = st.checkbox("☑️ Guardar este lugar en el Directorio (BD_PROVEEDORES)", value=False)
                 else:
-                    dir_precargada = dict_dir_cot.get(prov_eventual, "")
+                    dir_precargada = dict_dir_ev.get(prov_eventual, "")
                     dir_eventual = st.text_input("Dirección o Zona (Para que navegue el chofer)", value=dir_precargada)
 
-                st.markdown("##### ⚙️ Piezas a buscar / comprar")
-                st.caption("Puedes capturar solo el **# Parte**, solo la **Descripción**, o ambos. Usa el signo **`+`** abajo de la tabla para agregar más renglones.")
-                
-                df_piezas_base = pd.DataFrame([{"No. Parte": "", "Descripción de la Pieza": ""}, {"No. Parte": "", "Descripción de la Pieza": ""}])
+                st.markdown("##### ⚙️ Piezas implicadas en la vuelta")
+                piezas_sin_sel = []
+                if info_sin_ev.get('piezas'):
+                    piezas_sin_sel = st.multiselect(
+                        "Selecciona las piezas del siniestro:",
+                        options=info_sin_ev['piezas'],
+                        default=info_sin_ev['piezas'][:1] if len(info_sin_ev['piezas']) == 1 else [],
+                        key=f"ms_pzas_ev_{info_sin_ev.get('id', 'gen')}"
+                    )
+
+                st.caption("También puedes capturar piezas manuales o # de parte abajo (usa `+` para agregar más renglones):")
+                df_piezas_base = pd.DataFrame([{"No. Parte": "", "Descripción de la Pieza": ""}])
                 ed_piezas_cot = st.data_editor(
                     df_piezas_base,
                     num_rows="dynamic",
@@ -5551,46 +5629,42 @@ elif vista_actual == "🚚 Rutas":
                     },
                     key="ed_tabla_piezas_cot"
                 )
-                
-                notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Checar condiciones, comprar si vale menos de $500")
-                
-                btn_cot = st.form_submit_button("➕ Enviar Vuelta a la Ruta", type="primary")
-                
+
+                notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Recoger fascia para llevar a detallar / Tomar fotos de la pieza dañada...")
+
+                btn_cot = st.form_submit_button(f"➕ Enviar Vuelta ({mapa_tipos_vuelta[tipo_vuelta_lbl]}) a la Ruta", type="primary")
+
                 if btn_cot:
                     if prov_eventual == "-- ESCRIBIR NUEVO --":
                         nombre_final = f"{nuevo_prov} - {nueva_suc_cot}" if nueva_suc_cot else nuevo_prov
                     else:
-                        nombre_final = prov_eventual
+                        nombre_final = prov_eventual.replace("[TALLER] ", "").replace("[PROV] ", "").strip()
 
-                    piezas_lista = []
+                    piezas_lista = list(piezas_sin_sel)
                     for _, r_pz in ed_piezas_cot.iterrows():
                         np_val = str(r_pz.get("No. Parte", "")).strip().upper()
                         ds_val = str(r_pz.get("Descripción de la Pieza", "")).strip().upper()
                         if np_val == "NAN": np_val = ""
                         if ds_val == "NAN": ds_val = ""
-                        
                         if np_val and ds_val: piezas_lista.append(f"[{np_val}] {ds_val}")
                         elif np_val: piezas_lista.append(f"NP: {np_val}")
                         elif ds_val: piezas_lista.append(ds_val)
 
                     if not nombre_final or len(piezas_lista) == 0:
-                        st.error("⚠️ El Lugar y al menos 1 Pieza (No. Parte o Descripción) son obligatorios.")
+                        st.error("⚠️ El Lugar y al menos 1 Pieza (seleccionada o capturada) son obligatorios.")
                     else:
                         if prov_eventual == "-- ESCRIBIR NUEVO --" and guardar_en_directorio and nuevo_prov:
                             try:
                                 ws_p = doc.worksheet("BD_PROVEEDORES")
                                 headers_p = [str(h).strip() for h in ws_p.row_values(1)]
                                 fila_prov = [""] * max(len(headers_p), 10)
-                                
                                 def safe_idx_p(name):
                                     for idx_h, h_val in enumerate(headers_p):
                                         if h_val.upper() == name.upper(): return idx_h
                                     return -1
-
                                 i_prv = safe_idx_p('Proveedor'); i_suc = safe_idx_p('Sucursal'); i_mar = safe_idx_p('Marcas Especialidad')
                                 i_tel = safe_idx_p('Teléfono'); i_dir = safe_idx_p('Dirección'); i_tie = safe_idx_p('Tiempo de Entrega')
                                 i_con = safe_idx_p('Condición Pago'); i_dia = safe_idx_p('Días Crédito')
-
                                 if i_prv >= 0: fila_prov[i_prv] = nuevo_prov
                                 if i_suc >= 0: fila_prov[i_suc] = nueva_suc_cot
                                 if i_mar >= 0: fila_prov[i_mar] = nuevas_marcas_cot
@@ -5599,26 +5673,30 @@ elif vista_actual == "🚚 Rutas":
                                 if i_tie >= 0: fila_prov[i_tie] = nuevo_tiempo_cot
                                 if i_con >= 0: fila_prov[i_con] = nueva_cond_cot
                                 if i_dia >= 0: fila_prov[i_dia] = str(nuevos_dias_cot)
-
                                 ws_p.append_row(fila_prov[:len(headers_p)] if headers_p else fila_prov, value_input_option='USER_ENTERED')
                                 st.cache_data.clear()
                             except Exception as e_prov:
                                 st.warning(f"Nota: No se pudo guardar en BD_PROVEEDORES ({e_prov}), pero se enviará a la ruta.")
-                        
-                        datos_cot = {
+
+                        tipo_op_final = mapa_tipos_vuelta[tipo_vuelta_lbl]
+                        veh_ev_final = info_sin_ev.get('veh', f"Vuelta Eventual ({tipo_op_final})")
+                        sin_ev_final = info_sin_ev.get('id', 'N/A')
+
+                        datos_ev = {
                             'Proveedor': [nombre_final] * len(piezas_lista),
-                            'Vehiculo_Info': ["Cotización / Vuelta Eventual"] * len(piezas_lista),
+                            'Taller': [nombre_final] * len(piezas_lista),
+                            'Vehiculo_Info': [veh_ev_final] * len(piezas_lista),
                             'Descrip.': piezas_lista,
                             'Direccion_Manual': [dir_eventual] * len(piezas_lista)
                         }
-                        if col_vin: datos_cot[col_vin] = [vin_eventual if vin_eventual else "S/D"] * len(piezas_lista)
-                        if col_id: datos_cot[col_id] = ["N/A"] * len(piezas_lista)
-                        
-                        df_cot = pd.DataFrame(datos_cot)
-                        if col_desc and col_desc not in df_cot.columns: df_cot[col_desc] = piezas_lista
-                        
-                        if despachar_a_bd_rutas(df_cot, "cotizacion", notas_eventual):
-                            st.success(f"✅ ¡Enviado a ruta para {nombre_final} ({len(piezas_lista)} pieza(s))!")
+                        if col_vin: datos_ev[col_vin] = [vin_eventual if vin_eventual else "S/D"] * len(piezas_lista)
+                        if col_id: datos_ev[col_id] = [sin_ev_final] * len(piezas_lista)
+
+                        df_ev_out = pd.DataFrame(datos_ev)
+                        if col_desc and col_desc not in df_ev_out.columns: df_ev_out[col_desc] = piezas_lista
+
+                        if despachar_a_bd_rutas(df_ev_out, tipo_op_final, notas_eventual):
+                            st.success(f"✅ ¡Vuelta de {tipo_op_final} enviada a ruta para {nombre_final} ({len(piezas_lista)} pieza(s))!")
                             time.sleep(1)
                             st.rerun()
 

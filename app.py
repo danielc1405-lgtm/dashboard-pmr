@@ -1020,8 +1020,8 @@ with col_logo:
 
 with col_derecha:
     vista_actual = st.radio("Navegación", opciones_menu, horizontal=True, label_visibility="collapsed")
-    col_espacio, col_aseg, col_btn_dir, col_btn_fot, col_btn_tar, col_btn_ref, col_btn_pop, col_btn_gua = st.columns(
-        [1.9, 1.4, 0.95, 0.95, 1.0, 0.45, 0.45, 1.0], vertical_alignment="center"
+    col_espacio, col_aseg, col_btn_dir, col_btn_fot, col_btn_ref, col_btn_pop, col_btn_gua = st.columns(
+        [2.9, 1.4, 0.95, 0.95, 0.45, 0.45, 1.0], vertical_alignment="center"
     )
 
 with col_aseg:
@@ -1630,22 +1630,22 @@ def contar_tareas_pendientes(usuario):
         return 0
 
 def renderizar_widget_tareas_flotante():
-    estado_chat = st.session_state.get('chat_flotante_estado', 'cerrado')
+    estado_chat = st.session_state.get('chat_flotante_estado', 'minimizado')
     if estado_chat == 'cerrado':
-        return
+        estado_chat = 'minimizado'
 
     st.markdown("""
         <style>
         .st-key-pmr_chat_float_open,
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) {
             position: fixed !important;
-            bottom: 14px !important;
+            bottom: 58px !important;
             right: 16px !important;
             width: 860px !important;
             max-width: 94vw !important;
-            max-height: 82vh !important;
+            max-height: 80vh !important;
             overflow-y: auto !important;
-            z-index: 999995 !important;
+            z-index: 999996 !important;
             background-color: #05070A !important;
             border: 1.5px solid #00A884 !important;
             border-radius: 12px !important;
@@ -1655,15 +1655,14 @@ def renderizar_widget_tareas_flotante():
         .st-key-pmr_chat_float_min,
         div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-min) {
             position: fixed !important;
-            bottom: 14px !important;
-            right: 16px !important;
-            width: 280px !important;
-            z-index: 999995 !important;
-            background-color: #0B141A !important;
-            border: 1.5px solid #00A884 !important;
-            border-radius: 30px !important;
-            box-shadow: 0px 8px 25px rgba(0, 0, 0, 0.9) !important;
-            padding: 4px 10px !important;
+            top: 8px !important;
+            right: 22px !important;
+            width: 215px !important;
+            z-index: 999996 !important;
+            background-color: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0px !important;
         }
         .st-key-pmr_chat_float_open [data-testid="stFileUploaderDropzoneInstructions"],
         .st-key-pmr_chat_float_open [data-testid="stFileUploaderFile"],
@@ -1690,18 +1689,15 @@ def renderizar_widget_tareas_flotante():
         </style>
     """, unsafe_allow_html=True)
 
-    # --- ESTADO MINIMIZADO (PASTILLA FLOTANTE EN ESQUINA INFERIOR DERECHA) ---
+    # --- BOTÓN FIJO EN ESQUINA SUPERIOR DERECHA (ESTADO MINIMIZADO) ---
     if estado_chat == 'minimizado':
-        with st.container(border=True, key="pmr_chat_float_min"):
+        with st.container(border=False, key="pmr_chat_float_min"):
             st.markdown('<span class="pmr-chat-float-min" style="display:none;"></span>', unsafe_allow_html=True)
             n_pend_min = contar_tareas_pendientes(usuario_activo)
-            lbl_min = f"💬 Tareas ({n_pend_min} nuevos)" if n_pend_min > 0 else "💬 Tareas (Abierto)"
-            c_m1, c_m2 = st.columns([3.5, 1.0], vertical_alignment="center")
-            if c_m1.button(lbl_min, key="btn_restaurar_chat_float", type="primary" if n_pend_min > 0 else "secondary", use_container_width=True):
+            lbl_min = f"💬 Tareas ({n_pend_min} nuevos)" if n_pend_min > 0 else "💬 Tareas"
+            if st.button(lbl_min, key="btn_restaurar_chat_float", type="primary" if n_pend_min > 0 else "secondary", use_container_width=True):
+                leer_tareas_normalizadas.clear()
                 st.session_state['chat_flotante_estado'] = 'abierto'
-                st.rerun()
-            if c_m2.button("✖", key="btn_cerrar_min_float", help="Cerrar chat", use_container_width=True):
-                st.session_state['chat_flotante_estado'] = 'cerrado'
                 st.rerun()
         return
 
@@ -2334,15 +2330,6 @@ with col_btn_fot:
         st.session_state.pop('fotos_gnp_log', None)
         abrir_visor_fotos_inpart()
 
-pendientes_badge = contar_tareas_pendientes(usuario_activo)
-label_btn_tareas = f"🔔 Tareas ({pendientes_badge})" if pendientes_badge > 0 else "🔔 Tareas"
-tipo_btn_tareas = "primary" if pendientes_badge > 0 else "secondary"
-
-with col_btn_tar:
-    if st.button(label_btn_tareas, type=tipo_btn_tareas, use_container_width=True):
-        leer_tareas_normalizadas.clear()
-        st.session_state['chat_flotante_estado'] = 'abierto'
-        st.rerun()
 
 with col_btn_gua:
     btn_guardar = st.button("💾 Guardar", type="primary", use_container_width=True)

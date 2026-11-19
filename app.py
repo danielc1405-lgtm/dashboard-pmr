@@ -1709,7 +1709,7 @@ def renderizar_widget_tareas_flotante():
     with st.container(border=True, key="pmr_chat_float_open"):
         st.markdown('<span class="pmr-chat-float-open" style="display:none;"></span>', unsafe_allow_html=True)
         ch_tit, ch_min, ch_cls = st.columns([6.4, 0.8, 0.8], vertical_alignment="center")
-            st.markdown(
+        st.markdown(
                 '<div class="pmr-drag-handle" style="font-size:1.05rem; font-weight:700; color:#E9EDEF; padding:4px 6px; user-select:none;" title="Arrastra desde aquí para mover la ventana">'
                 '🔔 Centro de Tareas y Mensajería <span style="font-size:0.75rem; color:#8696A0; font-weight:normal;">(⠿ Arrastra para mover)</span>'
                 '</div>',

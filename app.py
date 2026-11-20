@@ -1908,7 +1908,8 @@ def renderizar_widget_tareas_flotante():
                         unsafe_allow_html=True
                     )
 
-                    renderizar_hilo_chat(row_activa, usuario_activo_real, grupos_identidad)
+                    with st.container(border=False, key="pmr_chat_msgs_box"):
+                        renderizar_hilo_chat(row_activa, usuario_activo_real, grupos_identidad)
 
                     key_input_actual = f"wa_msg_input_{chat_sel_row}"
                     ver_up_key = f"ver_up_chat_{chat_sel_row}"
@@ -1949,30 +1950,40 @@ def renderizar_widget_tareas_flotante():
                         actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, "Finalizado", str(row_act.get('Respuesta', '')).strip())
                         leer_tareas_normalizadas.clear()
 
-                    c_up_btn, c_inp, c_send, c_fin = st.columns([0.85, 2.35, 0.9, 0.9], vertical_alignment="bottom")
-                    with c_up_btn:
-                        archivo_chat_sel = st.file_uploader(
-                            "Adjuntar:",
-                            type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "doc", "xlsx", "xls", "csv"],
-                            key=key_uploader_actual,
-                            label_visibility="collapsed"
-                        )
-                    with c_inp:
-                        st.text_input(
-                            "Mensaje:",
-                            key=key_input_actual,
-                            placeholder="Escribe un mensaje o Ctrl+V para pegar captura...",
-                            label_visibility="collapsed"
-                        )
-                    with c_send:
-                        st.button(
-                            "📤 Enviar",
-                            key=f"wa_btn_send_{chat_sel_row}",
-                            type="primary",
-                            use_container_width=True,
-                            on_click=enviar_msg_cb,
-                            args=(row_activa, soy_emisor_chat, key_input_actual, key_uploader_actual, ver_up_key)
-                        )
+                    with st.container(border=True, key="pmr_chat_input_box"):
+                        c_up_btn, c_inp, c_send, c_fin = st.columns([0.85, 2.35, 0.9, 0.9], vertical_alignment="bottom")
+                        with c_up_btn:
+                            archivo_chat_sel = st.file_uploader(
+                                "Adjuntar:",
+                                type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "doc", "xlsx", "xls", "csv"],
+                                key=key_uploader_actual,
+                                label_visibility="collapsed"
+                            )
+                        with c_inp:
+                            st.text_input(
+                                "Mensaje:",
+                                key=key_input_actual,
+                                placeholder="Escribe un mensaje o Ctrl+V para pegar captura...",
+                                label_visibility="collapsed"
+                            )
+                        with c_send:
+                            st.button(
+                                "📤 Enviar",
+                                key=f"wa_btn_send_{chat_sel_row}",
+                                type="primary",
+                                use_container_width=True,
+                                on_click=enviar_msg_cb,
+                                args=(row_activa, soy_emisor_chat, key_input_actual, key_uploader_actual, ver_up_key)
+                            )
+                        with c_fin:
+                            st.button(
+                                "🏁 Finalizar",
+                                key=f"wa_btn_fin_{chat_sel_row}",
+                                use_container_width=True,
+                                help="Cerrar y archivar este tema",
+                                on_click=finalizar_chat_cb,
+                                args=(row_activa,)
+                            )
                     with c_fin:
                         st.button(
                             "🏁 Finalizar",
@@ -2217,12 +2228,28 @@ if st.query_params.get("vista") == "tareas":
             height: calc(100vh - 230px) !important;
             max-height: calc(100vh - 230px) !important;
         }
-        /* Autoajuste de la columna derecha (Contenedor padre + iframe para empujar los botones abajo) */
-        .st-key-pmr_chat_float_open div[data-testid="stElementContainer"]:has(iframe),
-        .st-key-pmr_chat_float_open div.element-container:has(iframe),
-        .st-key-pmr_chat_float_open iframe {
-            height: calc(100vh - 305px) !important;
-            min-height: 260px !important;
+        /* Frame de mensajes: altura sincronizada en la caja y todos sus hijos */
+        .st-key-pmr_chat_msgs_box,
+        .st-key-pmr_chat_msgs_box > div,
+        .st-key-pmr_chat_msgs_box [data-testid="stElementContainer"],
+        .st-key-pmr_chat_msgs_box [data-testid="stCustomComponentV1"],
+        .st-key-pmr_chat_msgs_box iframe {
+            height: calc(100vh - 345px) !important;
+            max-height: calc(100vh - 345px) !important;
+            min-height: 220px !important;
+        }
+        .st-key-pmr_chat_msgs_box {
+            overflow: hidden !important;
+            margin-bottom: 6px !important;
+        }
+        /* Frame independiente para la barra de botones */
+        .st-key-pmr_chat_input_box {
+            background-color: #0D1418 !important;
+            border: 1px solid #222E35 !important;
+            border-radius: 10px !important;
+            padding: 8px 10px !important;
+            position: relative !important;
+            z-index: 10 !important;
         }
         </style>
     """, unsafe_allow_html=True)

@@ -249,7 +249,11 @@ if not st.session_state['autenticado'] and 'usr' in st.query_params:
 if not st.session_state['autenticado']:
     col_l1, col_l2, col_l3 = st.columns([1.2, 1.6, 1.2])
     with col_l2:
-        st.markdown("<h2 style='text-align: center; color: #E50914;'>🔐 Acceso PMR Hub AI</h2>", unsafe_allow_html=True)
+        try:
+            st.image("logo.png", use_container_width=True)
+        except Exception:
+            pass
+        st.markdown("<h2 style='text-align: center; color: #FFFFFF;'>🔐 Acceso PMR Hub AI</h2>", unsafe_allow_html=True)
         with st.form("login_form_pmr"):
             usuario_in = st.text_input("👤 Usuario").strip().lower()
             password_in = st.text_input("🔑 Contraseña", type="password")

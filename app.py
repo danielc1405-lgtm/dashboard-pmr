@@ -249,10 +249,12 @@ if not st.session_state['autenticado'] and 'usr' in st.query_params:
 if not st.session_state['autenticado']:
     col_l1, col_l2, col_l3 = st.columns([1.2, 1.6, 1.2])
     with col_l2:
-        try:
-            st.image("logo.png", use_container_width=True)
-        except Exception:
-            pass
+        _, c_logo_mid, _ = st.columns([1, 1.2, 1])
+        with c_logo_mid:
+            try:
+                st.image("logo.png", width=180)
+            except Exception:
+                pass
         st.markdown("<h2 style='text-align: center; color: #FFFFFF;'>🔐 Acceso PMR Hub AI</h2>", unsafe_allow_html=True)
         with st.form("login_form_pmr"):
             usuario_in = st.text_input("👤 Usuario").strip().lower()
@@ -2179,11 +2181,30 @@ if st.query_params.get("vista") == "tareas":
     st.session_state['chat_flotante_estado'] = 'abierto'
     st.markdown("""
         <style>
-        .st-key-pmr_chat_float_open {
-            top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important;
-            width: 100vw !important; max-width: 100vw !important;
-            height: 100vh !important; max-height: 100vh !important;
-            border-radius: 0px !important; border: none !important;
+        div[data-testid="stHorizontalBlock"]:has([data-testid="stImage"]):has([data-testid="stRadio"]),
+        .st-key-pmr_chat_float_min {
+            display: none !important;
+        }
+        .stApp, div[data-testid="stAppViewContainer"], .main {
+            background-color: #05070A !important;
+        }
+        .st-key-pmr_chat_float_open,
+        div[data-testid="stVerticalBlockBorderWrapper"]:has(.pmr-chat-float-open) {
+            position: fixed !important;
+            top: 0px !important;
+            left: 0px !important;
+            right: 0px !important;
+            bottom: 0px !important;
+            width: 100vw !important;
+            max-width: 100vw !important;
+            height: 100vh !important;
+            max-height: 100vh !important;
+            border-radius: 0px !important;
+            border: none !important;
+            box-shadow: none !important;
+            z-index: 999999 !important;
+            background-color: #05070A !important;
+            padding: 12px 16px !important;
         }
         </style>
     """, unsafe_allow_html=True)

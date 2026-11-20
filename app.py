@@ -26,7 +26,7 @@ st.markdown("""
         [data-testid="stDataFrame"] { zoom: 0.95; }
         
         /* 1. Reducir al mínimo el margen superior de la aplicación */
-        header, footer, header[data-testid="stHeader"] { 
+        header[data-testid="stHeader"], footer { 
             visibility: hidden !important; 
             display: none !important; 
         }
@@ -2028,29 +2028,31 @@ def renderizar_widget_tareas_flotante():
         # --- TAB 2: NUEVO CHAT / TAREA ---
         with tabs_tareas[1]:
             st.subheader("Abrir Nuevo Tema / Siniestro")
+            v_nc = st.session_state.get('ver_nuevo_chat_form', 0)
+
             col_nueva_1, col_nueva_2 = st.columns(2)
             with col_nueva_1:
-                usuario_destino = st.selectbox("Participante (Asignar a):", ["Seleccionar..."] + usuarios_reales)
+                usuario_destino = st.selectbox("Participante (Asignar a):", ["Seleccionar..."] + usuarios_reales, key=f"nc_dest_{v_nc}")
             with col_nueva_2:
-                siniestro_seleccionado = st.selectbox("Tema / Siniestro (Solo Activos):", ["Seleccionar...", "General (Tema Libre)"] + lista_siniestros)
+                siniestro_seleccionado = st.selectbox("Tema / Siniestro (Solo Activos):", ["Seleccionar...", "General (Tema Libre)"] + lista_siniestros, key=f"nc_sin_{v_nc}")
             
             tema_libre = ""
             piezas_seleccionadas = []
             if siniestro_seleccionado == "General (Tema Libre)":
-                tema_libre = st.text_input("Escribe el Asunto o Siniestro Histórico:", placeholder="Ej. Siniestro Histórico B801122 / Duda de Facturación")
+                tema_libre = st.text_input("Escribe el Asunto o Siniestro Histórico:", placeholder="Ej. Siniestro Histórico B801122 / Duda de Facturación", key=f"nc_tema_{v_nc}")
             elif siniestro_seleccionado != "Seleccionar..." and not df_uni_local.empty and col_desc_loc:
                 id_sin_puro = siniestro_seleccionado.split(" | ")[0].strip()
                 piezas_del_siniestro = df_uni_local[df_uni_local[col_sin_loc].astype(str).str.strip() == id_sin_puro][col_desc_loc].dropna().unique().tolist()
-                piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro)
+                piezas_seleccionadas = st.multiselect("Selecciona la(s) Pieza(s) implicada(s):", piezas_del_siniestro, key=f"nc_pzas_{v_nc}")
 
-            instruccion_nueva = st.text_area("Mensaje inicial:")
+            instruccion_nueva = st.text_area("Mensaje inicial:", key=f"nc_msg_{v_nc}")
             adj_inicial_up = st.file_uploader(
                 "📎 Adjuntar imagen o documento PDF/Excel/Word/CSV (Opcional, máx. 450 KB):",
                 type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "doc", "xlsx", "xls", "csv"],
-                key="up_foto_nuevo_chat"
+                key=f"up_foto_nuevo_chat_{v_nc}"
             )
             
-            if st.button("📤 Iniciar Conversación", type="primary"):
+            if st.button("📤 Iniciar Conversación", type="primary", key=f"btn_iniciar_conv_{v_nc}"):
                 if usuario_destino != "Seleccionar..." and siniestro_seleccionado != "Seleccionar..." and (instruccion_nueva.strip() or adj_inicial_up is not None):
                     import uuid
                     tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
@@ -2105,7 +2107,8 @@ def renderizar_widget_tareas_flotante():
 
                         ws_tareas.append_row(nueva_fila, value_input_option='USER_ENTERED')
                         leer_tareas_normalizadas.clear()
-                        st.success(f"✅ Conversación iniciada con {usuario_destino}")
+                        st.session_state['ver_nuevo_chat_form'] = v_nc + 1
+                        st.toast(f"✅ Conversación iniciada con {usuario_destino}", icon="✅")
                         time.sleep(0.4)
                         st.rerun()
                     except Exception as e:

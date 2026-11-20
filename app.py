@@ -1537,7 +1537,10 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
         </div>
         <script>
             const vp = document.getElementById('chat-viewport');
-            if (vp) {{ vp.scrollTop = vp.scrollHeight; }}
+            function bajarAlFondo() {{ if (vp) {{ vp.scrollTop = vp.scrollHeight; }} }}
+            bajarAlFondo();
+            window.addEventListener('load', bajarAlFondo);
+            setTimeout(bajarAlFondo, 300);
 
             function abrirZoom(src) {{
                 const ov = document.getElementById('zoom-overlay');

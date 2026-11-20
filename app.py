@@ -2181,6 +2181,8 @@ def monitor_sonoro_tareas():
 
 if st.query_params.get("vista") == "tareas":
     st.session_state['chat_flotante_estado'] = 'abierto'
+    monitor_sonoro_tareas()
+    renderizar_widget_tareas_flotante()
     st.markdown("""
         <style>
         div[data-testid="stHorizontalBlock"]:has([data-testid="stImage"]):has([data-testid="stRadio"]),
@@ -2212,19 +2214,18 @@ if st.query_params.get("vista") == "tareas":
         .st-key-pmr_lista_temas_scroll,
         .st-key-pmr_lista_temas_scroll > div[data-testid="stVerticalBlock"],
         .st-key-pmr_lista_temas_scroll div[style*="height: 320px"] {
-            height: calc(100vh - 220px) !important;
-            max-height: calc(100vh - 220px) !important;
+            height: calc(100vh - 230px) !important;
+            max-height: calc(100vh - 230px) !important;
         }
-        /* Autoajuste de la columna derecha (Ventana de Chat / Mensajes) */
+        /* Autoajuste de la columna derecha (Contenedor padre + iframe para empujar los botones abajo) */
+        .st-key-pmr_chat_float_open div[data-testid="stElementContainer"]:has(iframe),
+        .st-key-pmr_chat_float_open div.element-container:has(iframe),
         .st-key-pmr_chat_float_open iframe {
-            height: calc(100vh - 285px) !important;
-            min-height: 290px !important;
+            height: calc(100vh - 305px) !important;
+            min-height: 260px !important;
         }
-        </style>
         </style>
     """, unsafe_allow_html=True)
-    monitor_sonoro_tareas()
-    renderizar_widget_tareas_flotante()
     st.stop()
 
 @st.dialog("📖 Directorio Operativo", width="large")

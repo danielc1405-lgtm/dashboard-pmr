@@ -2221,19 +2221,18 @@ if st.query_params.get("vista") == "tareas":
             max-height: calc(100vh - 185px) !important;
             min-height: 220px !important;
         }
-        /* Frame de mensajes: extendido hasta empujar los botones al fondo */
-        .st-key-pmr_chat_msgs_box,
-        .st-key-pmr_chat_msgs_box > div,
+        /* Frame de mensajes: el contenedor se adapta al iframe sin recortarlo */
+        .st-key-pmr_chat_msgs_box {
+            height: auto !important;
+            overflow: visible !important;
+            margin-bottom: 6px !important;
+        }
         .st-key-pmr_chat_msgs_box [data-testid="stElementContainer"],
         .st-key-pmr_chat_msgs_box [data-testid="stCustomComponentV1"],
         .st-key-pmr_chat_msgs_box iframe {
-            height: calc(100vh - 275px) !important;
-            max-height: calc(100vh - 275px) !important;
+            height: calc(100vh - 305px) !important;
+            max-height: calc(100vh - 305px) !important;
             min-height: 220px !important;
-        }
-        .st-key-pmr_chat_msgs_box {
-            overflow: hidden !important;
-            margin-bottom: 6px !important;
         }
         /* Frame independiente para la barra de botones */
         .st-key-pmr_chat_input_box {

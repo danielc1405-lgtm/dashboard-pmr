@@ -5,6 +5,8 @@ import streamlit as st
 import pandas as pd
 import gspread
 import json
+import re
+import base64
 from google.oauth2.service_account import Credentials
 import datetime
 import time
@@ -23,11 +25,29 @@ def init_connection():
     cliente = gspread.authorize(credenciales)
     return cliente.open_by_key(SHEET_ID)
 
+@st.cache_data(ttl=300)
+def cargar_fotos_nube():
+    """Lee las imágenes/QR de BD_CHAT_IMAGENES para mostrarlas en la ruta del operador."""
+    mapa_fotos = {}
+    try:
+        doc = init_connection()
+        ws_img = doc.worksheet("BD_CHAT_IMAGENES")
+        filas = ws_img.get_all_values()
+        if len(filas) > 1:
+            for r in filas[1:]:
+                if len(r) >= 4 and str(r[0]).strip():
+                    id_f = str(r[0]).strip().upper()
+                    b64_full = "".join([str(c).strip() for c in r[3:] if str(c).strip()])
+                    if b64_full:
+                        mapa_fotos[id_f] = b64_full
+    except Exception:
+        pass
+    return mapa_fotos
+
 # ==========================================
 # 1. SISTEMA DE LOGIN Y ESTILOS CSS
 # ==========================================
 if 'autenticado' not in st.session_state:
-    # Intentar auto-login si el celular recuerda el parámetro en la URL
     if 'usr' in st.query_params:
         st.session_state['autenticado'] = True
         st.session_state['usuario_actual'] = st.query_params['usr']
@@ -37,16 +57,16 @@ if 'autenticado' not in st.session_state:
 st.markdown("""
     <style>
     div[data-testid="stExpander"] details summary p {
-        font-size: 1.5rem !important;
+        font-size: 1.45rem !important;
         font-weight: 800 !important;
         color: #FFFFFF !important;
         line-height: 1.3 !important;
-        padding-top: 5px !important;
-        padding-bottom: 5px !important;
+        padding-top: 4px !important;
+        padding-bottom: 4px !important;
     }
     .stButton>button, .stLinkButton>a { 
         width: 100% !important; 
-        height: 55px !important; 
+        height: 52px !important; 
         font-size: 16px !important; 
         font-weight: bold !important; 
         border-radius: 8px !important; 
@@ -56,9 +76,8 @@ st.markdown("""
         text-decoration: none !important;
         margin: 0px !important;
     }
-    .tarjeta { background-color: #1E1E1E; padding: 20px; border-radius: 15px; margin-bottom: 10px; border: 1px solid #333;}
-    .datos-auto { background-color: #2D2D2D; padding: 12px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: #FFF; border-left: 4px solid #F63366;}
-    .nota-operador { background-color: #3b2a00; border-left: 5px solid #FFD700; padding: 10px; margin-bottom: 15px; border-radius: 5px; color: #FFF; font-size: 15px;}
+    .datos-auto { background-color: #2D2D2D; padding: 10px 12px; border-radius: 8px; margin-bottom: 10px; font-size: 14px; color: #FFF; border-left: 4px solid #F63366; line-height: 1.45;}
+    .nota-operador { background-color: #3b2a00; border-left: 5px solid #FFD700; padding: 10px 12px; margin-top: 6px; margin-bottom: 10px; border-radius: 5px; color: #FFF; font-size: 15px; line-height: 1.35;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -84,21 +103,42 @@ if not st.session_state['autenticado']:
                     nombre_usuario = match.iloc[0]['Nombre Completo']
                     st.session_state['autenticado'] = True
                     st.session_state['usuario_actual'] = nombre_usuario
-                    
-                    # Guardar el token en la URL de forma silenciosa
                     st.query_params['usr'] = nombre_usuario
                     st.rerun()
-                else: st.error("❌ Usuario o contraseña incorrectos.")
-            except Exception as e: st.error(f"Error al conectar con la base de usuarios: {e}")
+                else:
+                    st.error("❌ Usuario o contraseña incorrectos.")
+            except Exception as e:
+                st.error(f"Error al conectar con la base de usuarios: {e}")
     st.stop()
 
 # ==========================================
-# 2. MOTOR DE DESCARGA DESDE LA NUBE
+# 2. MOTOR DE DESCARGA Y LIMPIEZA DE TEXTOS
 # ==========================================
 def formatear_vin(vin):
     v = str(vin).replace(" ", "").upper()
-    if not v or v in ['NAN', 'S/D', 'NONE']: return "S/D"
+    if not v or v in ['NAN', 'S/D', 'NONE']:
+        return "S/D"
     return " ".join([v[i:i+4] for i in range(0, len(v), 4)])
+
+def limpiar_vehiculo(veh_str, vin_raw=""):
+    """Elimina palabras consecutivas duplicadas (ej. VOLKSWAGEN VOLKSWAGEN) y el VIN repetido."""
+    v = str(veh_str).strip()
+    if not v or v.upper() in ['NAN', 'NONE', 'S/D']:
+        return "S/D"
+    vin_limpio = str(vin_raw).replace(" ", "").upper()
+    partes = [p.strip() for p in v.split("|") if p.strip()]
+    partes_limpias = []
+    for p in partes:
+        p_sin_esp = p.replace(" ", "").upper()
+        # Omitir segmento si coincide con el VIN o tiene formato de VIN (17 caracteres alfanuméricos)
+        if vin_limpio and vin_limpio not in ['NAN', 'S/D', 'NONE'] and p_sin_esp == vin_limpio:
+            continue
+        if len(p_sin_esp) == 17 and p_sin_esp.isalnum() and any(c.isdigit() for c in p_sin_esp) and any(c.isalpha() for c in p_sin_esp):
+            continue
+        # Quitar palabras consecutivas duplicadas (ej. VOLKSWAGEN VOLKSWAGEN -> VOLKSWAGEN)
+        p = re.sub(r'\b(\w+)(\s+\1\b)+', r'\1', p, flags=re.IGNORECASE)
+        partes_limpias.append(p)
+    return " | ".join(partes_limpias) if partes_limpias else v
 
 def cargar_rutas_nube():
     try:
@@ -124,8 +164,6 @@ def cargar_rutas_nube():
             hoy_str_r = datetime.datetime.now(tz_mx).strftime("%d/%m/%Y")
             col_fecha = next((c for c in df.columns if 'FECHA' in c), None)
 
-            # Arrastrar todas las rutas PENDIENTES, sin importar su fecha original de creación
-            # Arrastrar todas las rutas PENDIENTES asegurando limpiar espacios
             df_pendientes = df[df[col_estatus].astype(str).str.strip().str.upper() == 'PENDIENTE'].copy()
             
             if col_fecha:
@@ -139,15 +177,16 @@ def cargar_rutas_nube():
                     id_ruta = str(row.get(col_id_ruta, ''))
                     pieza_actual = str(row.get(col_piezas, '')) if col_piezas else ''
                     sin_actual = str(row.get(col_siniestros, '')) if col_siniestros else ''
+                    vin_raw = str(row.get('VIN', ''))
                     
                     if id_ruta not in r_dict:
                         r_dict[id_ruta] = {
                             "id": id_ruta,
-                            "tipo": str(row.get('TIPO_OPERACION', 'entrega')).lower(),
+                            "tipo": str(row.get('TIPO_OPERACION', 'entrega')).strip().lower(),
                             "lugar": str(row.get('LUGAR', 'S/D')),
                             "direccion": str(row.get('DIRECCION', 'S/D')),
-                            "vehiculo": str(row.get('VEHICULO', 'S/D')),
-                            "serie": formatear_vin(row.get('VIN', '')),
+                            "vehiculo": limpiar_vehiculo(row.get('VEHICULO', 'S/D'), vin_raw),
+                            "serie": formatear_vin(vin_raw),
                             "piezas": [{"desc": pieza_actual, "np": ""}] if pieza_actual and pieza_actual not in ['S/D', ''] else [],
                             "siniestros": [sin_actual] if sin_actual and sin_actual not in ['S/D', ''] else [],
                             "notas": str(row.get(col_notas, '')) if col_notas else ""
@@ -167,7 +206,8 @@ def cargar_rutas_nube():
         return False
     return False
 
-if 'ruta_hoy' not in st.session_state: st.session_state['ruta_hoy'] = []
+if 'ruta_hoy' not in st.session_state:
+    st.session_state['ruta_hoy'] = []
 
 # ==========================================
 # 3. ENCABEZADO Y SINCRONIZACIÓN
@@ -176,8 +216,10 @@ st.title("🚚 Mi Ruta de Hoy")
 st.caption(f"👤 Operador: **{st.session_state['usuario_actual']}**")
 
 if st.button("🔄 Sincronizar (Descargar Ruta)", use_container_width=True, type="primary"):
+    cargar_fotos_nube.clear()
     with st.spinner("Descargando asignaciones..."):
-        if cargar_rutas_nube(): st.toast("Ruta actualizada exitosamente", icon="☁️")
+        if cargar_rutas_nube():
+            st.toast("Ruta actualizada exitosamente", icon="☁️")
             
 st.markdown("---")
 
@@ -187,6 +229,10 @@ st.markdown("---")
 if not st.session_state['ruta_hoy']:
     st.info("👋 ¡Todo limpio! No tienes destinos pendientes.")
 else:
+    # Cargar fotos/QR solo si alguna nota tiene [FOTO:...]
+    hay_fotos = any("[FOTO:" in str(p.get("notas", "")).upper() for p in st.session_state['ruta_hoy'])
+    mapa_fotos_ruta = cargar_fotos_nube() if hay_fotos else {}
+
     def cambiar_posicion_nombre(old_idx, key_selectbox):
         seleccion = st.session_state[key_selectbox]
         new_idx = int(seleccion.split(" - ")[0]) - 1
@@ -197,13 +243,17 @@ else:
             st.session_state['ruta_hoy'] = ruta
 
     for i, parada in enumerate(st.session_state['ruta_hoy']):
+        tipo_p = parada['tipo']
         
         # --- DEFINICIÓN DE ICONOS ---
-        if parada['tipo'] == 'entrega': icono = "📦"
-        elif parada['tipo'] == 'recoleccion': icono = "↩️"
-        elif parada['tipo'] == 'compra': icono = "🛒"
-        elif parada['tipo'] == 'cotizacion': icono = "🔍"
-        elif parada['tipo'] == 'pago': icono = "💵"
+        if tipo_p == 'entrega': icono = "📦"
+        elif tipo_p == 'recoleccion': icono = "↩️"
+        elif tipo_p == 'compra': icono = "🛒"
+        elif tipo_p == 'cotizacion': icono = "🔍"
+        elif tipo_p == 'pago': icono = "💵"
+        elif 'reparacion' in tipo_p: icono = "🔧"
+        elif 'revision' in tipo_p: icono = "🧐"
+        elif 'paqueteria' in tipo_p: icono = "📬"
         else: icono = "🔵"
             
         titulo_tarjeta = f"{icono} #{i+1} - {parada['lugar']}"
@@ -212,37 +262,63 @@ else:
             opciones_orden = [f"{idx + 1} - {r['lugar']}" for idx, r in enumerate(st.session_state['ruta_hoy'])]
             st.selectbox("Mover al lugar:", options=opciones_orden, index=i, key=f"pos_{parada['id']}", on_change=cambiar_posicion_nombre, args=(i, f"pos_{parada['id']}"))
             
-            st.markdown("---")
-            st.caption(f"📍 **Dirección:** {parada['direccion']}")
-            
-            if parada['notas']: st.markdown(f'<div class="nota-operador">⚠️ <b>INSTRUCCIÓN:</b> {parada["notas"]}</div>', unsafe_allow_html=True)
-            
-            if parada['tipo'] == 'entrega':
-                st.markdown(f"**Siniestro / Pedido:** {', '.join(parada['siniestros'])}")
-                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}</div>', unsafe_allow_html=True)
+            # Extraer etiquetas [FOTO:ID] de las notas para mostrar QR / imágenes
+            notas_raw = str(parada.get('notas', '')).strip()
+            ids_fotos = re.findall(r'\[FOTO:([A-Za-z0-9]+)\]', notas_raw, flags=re.IGNORECASE)
+            notas_limpias = re.sub(r'\[FOTO:[A-Za-z0-9]+\]', '', notas_raw, flags=re.IGNORECASE).strip()
+
+            if notas_limpias:
+                st.markdown(f'<div class="nota-operador">⚠️ {notas_limpias}</div>', unsafe_allow_html=True)
+
+            # Mostrar QR / Fotos adjuntas directamente en la tarjeta
+            for fid in ids_fotos:
+                src_b64 = mapa_fotos_ruta.get(fid.upper(), "")
+                if src_b64:
+                    try:
+                        b64_puro = src_b64.split(",", 1)[1] if "," in src_b64 else src_b64
+                        st.image(base64.b64decode(b64_puro), caption=f"📷 Código / Foto ({fid.upper()})", use_container_width=True)
+                    except Exception:
+                        pass
+
+            veh_txt = parada.get("vehiculo", "S/D")
+            vin_txt = parada.get("serie", "S/D")
+            sin_txt = ", ".join(parada['siniestros']) if parada['siniestros'] else ""
+
+            if tipo_p == 'entrega':
+                if sin_txt: st.markdown(f"**Siniestro / Pedido:** {sin_txt}")
+                st.markdown(f'<div class="datos-auto">🚗 {veh_txt}</div>', unsafe_allow_html=True)
                 st.markdown(f"**📦 Piezas a Entregar ({len(parada['piezas'])}):**")
                 for p in parada['piezas']: st.markdown(f"- {p['desc']}")
 
-            elif parada['tipo'] == 'recoleccion':
-                st.markdown(f"**Siniestro / Pedido:** {', '.join(parada['siniestros'])}")
-                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}</div>', unsafe_allow_html=True)
+            elif tipo_p == 'recoleccion':
+                if sin_txt: st.markdown(f"**Siniestro / Pedido:** {sin_txt}")
+                st.markdown(f'<div class="datos-auto">🚗 {veh_txt}</div>', unsafe_allow_html=True)
                 st.markdown(f"**↩️ Piezas a Recolectar (Devolución) ({len(parada['piezas'])}):**")
                 for p in parada['piezas']: st.markdown(f"- {p['desc']}")
 
-            elif parada['tipo'] == 'compra':
-                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}<br>🏷️ <b>Serie (VIN):</b> {parada.get("serie", "S/D")}</div>', unsafe_allow_html=True)
+            elif tipo_p == 'compra':
+                st.markdown(f'<div class="datos-auto">🚗 {veh_txt}<br>🏷️ <b>Serie (VIN):</b> {vin_txt}</div>', unsafe_allow_html=True)
                 st.markdown(f"**🛒 Piezas a Recoger (Compra) ({len(parada['piezas'])}):**")
                 for p in parada['piezas']: st.markdown(f"- {p['desc']}")
 
-            elif parada['tipo'] == 'cotizacion':
-                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}<br>🏷️ <b>Serie (VIN):</b> {parada.get("serie", "S/D")}</div>', unsafe_allow_html=True)
+            elif tipo_p == 'cotizacion':
+                st.markdown(f'<div class="datos-auto">🚗 {veh_txt}<br>🏷️ <b>Serie (VIN):</b> {vin_txt}</div>', unsafe_allow_html=True)
                 st.markdown(f"**🔎 Piezas a Cotizar ({len(parada['piezas'])}):**")
                 for p in parada['piezas']: st.markdown(f"- {p['desc']}")
 
-            elif parada['tipo'] == 'pago':
-                st.markdown(f'<div class="datos-auto">🚗 <b>Vehículo:</b> {parada.get("vehiculo", "S/D")}<br>🏷️ <b>Serie (VIN):</b> {parada.get("serie", "S/D")}</div>', unsafe_allow_html=True)
+            elif tipo_p == 'pago':
+                st.markdown(f'<div class="datos-auto">🚗 {veh_txt}<br>🏷️ <b>Serie (VIN):</b> {vin_txt}</div>', unsafe_allow_html=True)
                 st.markdown(f"**💵 Pago a Proveedor ({len(parada['piezas'])} pza):**")
                 for p in parada['piezas']: st.markdown(f"- {p['desc']}")
+
+            else:
+                # Vueltas eventuales (Reparación, Revisión, Paquetería, etc.)
+                if sin_txt and sin_txt.upper() != "N/A":
+                    st.markdown(f"**Siniestro / Pedido:** {sin_txt}")
+                st.markdown(f'<div class="datos-auto">🚗 {veh_txt}<br>🏷️ <b>Serie (VIN):</b> {vin_txt}</div>', unsafe_allow_html=True)
+                if parada['piezas']:
+                    st.markdown(f"**{icono} Piezas ({len(parada['piezas'])}):**")
+                    for p in parada['piezas']: st.markdown(f"- {p['desc']}")
 
             st.markdown("<br>", unsafe_allow_html=True)
             
@@ -252,13 +328,11 @@ else:
                 query_str = f"{parada['lugar']} {parada['direccion']}".replace(' ', '+')
                 st.link_button("🧭 Navegar", f"https://www.google.com/maps/search/?api=1&query={query_str}", use_container_width=True)
             with col2:
-                # --- AQUÍ APLICAMOS LOS ICONOS DINÁMICOS AL BOTÓN ---
-                
-                if parada['tipo'] == 'entrega': 
+                if tipo_p == 'entrega': 
                     texto_btn = f"{icono} Entregado"
-                elif parada['tipo'] in ['compra', 'recoleccion']: 
+                elif tipo_p in ['compra', 'recoleccion'] or 'recoleccion' in tipo_p: 
                     texto_btn = f"{icono} Recolectado"
-                elif parada['tipo'] == 'pago': 
+                elif tipo_p == 'pago': 
                     texto_btn = f"{icono} Pago Realizado"
                 else: 
                     texto_btn = f"{icono} Visita Lista"
@@ -272,17 +346,17 @@ else:
                             
                             filas_a_actualizar = [idx + 1 for idx, r in enumerate(datos) if r[0] == parada['id']]
                             if filas_a_actualizar:
-                                celdas_cambio = []
-                                for fila_idx in filas_a_actualizar:
-                                    celdas_cambio.append(gspread.Cell(row=fila_idx, col=11, value="Completado"))
-                                
+                                celdas_cambio = [gspread.Cell(row=fila_idx, col=11, value="Completado") for fila_idx in filas_a_actualizar]
                                 ws_rutas.update_cells(celdas_cambio, value_input_option='USER_ENTERED')
                                 st.success("¡Listo! ✅")
                                 time.sleep(1)
                                 cargar_rutas_nube()
                                 st.rerun()
-                            else: st.error("Error: No se encontró este folio en la base.")
-                        except Exception as e: st.error(f"Error actualizando sistema: {e}")
+                            else:
+                                st.error("Error: No se encontró este folio en la base.")
+                        except Exception as e:
+                            st.error(f"Error actualizando sistema: {e}")
+
 # ==========================================
 # 5. SECCIÓN PARA REVIVIR VISITAS COMPLETADAS POR ERROR
 # ==========================================

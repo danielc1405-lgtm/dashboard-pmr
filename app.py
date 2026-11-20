@@ -227,43 +227,52 @@ def init_connection():
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
 
+# Auto-login silencioso si la URL recuerda al usuario (evita cierres al reconectar Streamlit Cloud)
+if not st.session_state['autenticado'] and 'usr' in st.query_params:
+    try:
+        usr_url = str(st.query_params['usr']).strip()
+        if usr_url:
+            doc_auto = init_connection()
+            ws_u_auto = doc_auto.worksheet("Usuarios")
+            df_u_auto = pd.DataFrame(ws_u_auto.get_all_records())
+            match_auto = df_u_auto[df_u_auto['Nombre Completo'].astype(str).str.strip().str.upper() == usr_url.upper()]
+            if not match_auto.empty:
+                nom_ok = str(match_auto.iloc[0]['Nombre Completo']).strip()
+                rol_ok = str(match_auto.iloc[0]['Rol']).strip()
+                st.session_state['autenticado'] = True
+                st.session_state['usuario_actual'] = nom_ok
+                st.session_state['rol_actual'] = rol_ok
+                st.session_state['permiso_edicion'] = ("DIONICIO" not in nom_ok.upper())
+    except Exception:
+        pass
+
 if not st.session_state['autenticado']:
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    col_logo1, col_logo2, col_logo3 = st.columns([2.5, 1, 2.5])
-    with col_logo2:
-        import os
-        if os.path.exists("logo.png"):
-            st.image("logo.png", width=220)
-            
-    st.markdown("<h1 style='text-align: center; color: white; font-size: 3.5rem; margin-top: -10px;'>PMR Hub AI</h1>", unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns([1,2,1])
-    with col2:
-        with st.form("login_form"):
-            usuario_input = st.text_input("👤 Usuario").strip().lower()
-            password_input = st.text_input("🔑 Contraseña", type="password")
-            btn_login = st.form_submit_button("Entrar al Dashboard", use_container_width=True)
-            
-            if btn_login:
+    col_l1, col_l2, col_l3 = st.columns([1.2, 1.6, 1.2])
+    with col_l2:
+        st.markdown("<h2 style='text-align: center; color: #E50914;'>🔐 Acceso PMR Hub AI</h2>", unsafe_allow_html=True)
+        with st.form("login_form_pmr"):
+            usuario_in = st.text_input("👤 Usuario").strip().lower()
+            password_in = st.text_input("🔑 Contraseña", type="password")
+            if st.form_submit_button("Entrar", type="primary", use_container_width=True):
                 try:
-                    doc = init_connection()
-                    ws_usuarios = doc.worksheet("Usuarios") 
-                    df_usuarios = pd.DataFrame(ws_usuarios.get_all_records())
-                    df_usuarios['Usuario'] = df_usuarios['Usuario'].astype(str).str.strip().str.lower()
-                    df_usuarios['Password'] = df_usuarios['Password'].astype(str).str.strip()
-                    
-                    match = df_usuarios[(df_usuarios['Usuario'] == usuario_input) & (df_usuarios['Password'] == password_input)]
+                    doc_l = init_connection()
+                    df_u_l = pd.DataFrame(doc_l.worksheet("Usuarios").get_all_records())
+                    df_u_l['Usuario'] = df_u_l['Usuario'].astype(str).str.strip().str.lower()
+                    df_u_l['Password'] = df_u_l['Password'].astype(str).str.strip()
+                    match = df_u_l[(df_u_l['Usuario'] == usuario_in) & (df_u_l['Password'] == password_in)]
                     if not match.empty:
+                        nom_u = str(match.iloc[0]['Nombre Completo']).strip()
                         st.session_state['autenticado'] = True
-                        st.session_state['usuario_actual'] = match.iloc[0]['Nombre Completo']
-                        st.session_state['rol_actual'] = match.iloc[0]['Rol']
+                        st.session_state['usuario_actual'] = nom_u
+                        st.session_state['rol_actual'] = str(match.iloc[0]['Rol']).strip()
+                        st.session_state['permiso_edicion'] = ("DIONICIO" not in nom_u.upper())
+                        st.query_params['usr'] = nom_u
                         st.rerun()
                     else:
                         st.error("❌ Usuario o contraseña incorrectos.")
                 except Exception as e:
                     st.error(f"Error al conectar con la base de usuarios: {e}")
-    st.stop() 
+    st.stop()
 
 usuario_activo = str(st.session_state.get('usuario_actual', '')).strip().upper()
 rol_activo = str(st.session_state.get('rol_actual', '')).strip().upper()
@@ -1694,11 +1703,17 @@ def renderizar_widget_tareas_flotante():
         with st.container(border=False, key="pmr_chat_float_min"):
             st.markdown('<span class="pmr-chat-float-min" style="display:none;"></span>', unsafe_allow_html=True)
             n_pend_min = contar_tareas_pendientes(usuario_activo)
-            lbl_min = f"💬 Tareas ({n_pend_min} nuevos)" if n_pend_min > 0 else "💬 Tareas"
-            if st.button(lbl_min, key="btn_restaurar_chat_float", type="primary" if n_pend_min > 0 else "secondary", use_container_width=True):
-                leer_tareas_normalizadas.clear()
-                st.session_state['chat_flotante_estado'] = 'abierto'
-                st.rerun()
+            lbl_min = f"💬 Tareas ({n_pend_min})" if n_pend_min > 0 else "💬 Tareas"
+            import urllib.parse
+            usr_q = urllib.parse.quote(str(st.session_state.get('usuario_actual', '')))
+            cm_a, cm_b = st.columns([3.2, 1.0], vertical_alignment="center")
+            with cm_a:
+                if st.button(lbl_min, key="btn_restaurar_chat_float", type="primary" if n_pend_min > 0 else "secondary", use_container_width=True):
+                    leer_tareas_normalizadas.clear()
+                    st.session_state['chat_flotante_estado'] = 'abierto'
+                    st.rerun()
+            with cm_b:
+                st.link_button("↗️", url=f"?vista=tareas&usr={usr_q}", help="Abrir Tareas en ventana independiente con sonido", use_container_width=True)
         return
 
     # --- ESTADO ABIERTO (VENTANA FLOTANTE ARRASTRABLE Y MINIMIZABLE) ---
@@ -2114,7 +2129,7 @@ def renderizar_widget_tareas_flotante():
                     except Exception as e:
                         st.error(f"❌ Error al guardar: {e}")
                 else:
-                    st.warning("⚠️ Selecciona el participante, el tema/siniestro y escribe un mensaje o adjunta un archivo.")
+                    st.warning("⚠️ Selecciona el participante, el tema/siniestro y escribe un mensaje o adjunta un archivo.")    
 
         # --- TAB 3: HISTORIAL DE FINALIZADOS ---
         with tabs_tareas[2]:
@@ -2123,6 +2138,54 @@ def renderizar_widget_tareas_flotante():
                 st.dataframe(chats_finalizados[cols_fin], hide_index=True, use_container_width=True)
             else:
                 st.info("No hay conversaciones finalizadas en el archivo.")
+
+# ==============================================================================
+# === MODO VENTANA INDEPENDIENTE DE TAREAS (?vista=tareas) + AVISO SONORO ===
+# ==============================================================================
+@st.fragment(run_every=35)
+def monitor_sonoro_tareas():
+    """Revisa cada 35s si llegaron mensajes nuevos y reproduce un tono discreto."""
+    import streamlit.components.v1 as components
+    leer_tareas_normalizadas.clear()
+    n_ahora = contar_tareas_pendientes(usuario_activo)
+    n_prev = st.session_state.get('_ultimo_conteo_sonoro', n_ahora)
+    if n_ahora > n_prev:
+        st.toast(f"🔔 ¡Tienes {n_ahora} tarea(s)/mensaje(s) pendiente(s)!", icon="💬")
+        components.html("""
+            <script>
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.14);
+                gain.gain.setValueAtTime(0.18, ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.45);
+            } catch (e) {}
+            </script>
+        """, height=0)
+    st.session_state['_ultimo_conteo_sonoro'] = n_ahora
+
+if st.query_params.get("vista") == "tareas":
+    st.session_state['chat_flotante_estado'] = 'abierto'
+    st.markdown("""
+        <style>
+        .st-key-pmr_chat_float_open {
+            top: 0px !important; left: 0px !important; right: 0px !important; bottom: 0px !important;
+            width: 100vw !important; max-width: 100vw !important;
+            height: 100vh !important; max-height: 100vh !important;
+            border-radius: 0px !important; border: none !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    monitor_sonoro_tareas()
+    renderizar_widget_tareas_flotante()
+    st.stop()
 
 @st.dialog("📖 Directorio Operativo", width="large")
 def abrir_directorio():
@@ -5204,6 +5267,15 @@ elif vista_actual == "🚚 Rutas":
 
     doc = init_connection()
 
+    # --- FILTROS RÁPIDOS DE RUTAS ---
+    fr1, fr2, fr3 = st.columns([1.3, 1.2, 1.3])
+    with fr1:
+        f_ruta_lugar = st.text_input("🏢 Filtrar Taller / Proveedor:", placeholder="Ej. MERCADO LIBRE, GG...", key="f_rut_lug").strip().upper()
+    with fr2:
+        f_ruta_sin = st.text_input("🚗 Filtrar Siniestro:", placeholder="Ej. B86787861...", key="f_rut_sin").strip().upper()
+    with fr3:
+        f_ruta_pza = st.text_input("⚙️ Filtrar Refacción:", placeholder="Ej. FACIA, DEPOSITO...", key="f_rut_pza").strip().upper()
+
     # --- PESTAÑAS DE OPERACIÓN ---
     tab_entregas, tab_recolecciones, tab_compras, tab_eventuales = st.tabs(["📦 Entregas (CDR)", "↩️ Recolecciones (CDR)", "🛒 Compras", "🔄 Eventuales"])
     
@@ -5391,6 +5463,14 @@ elif vista_actual == "🚚 Rutas":
                     
                     st.markdown("#### 🏪 Gestión Global con Proveedores")
                     for prov, df_prov in df_comp_rutas.groupby('Proveedor'):
+                        if f_ruta_lugar and f_ruta_lugar not in str(prov).upper():
+                            continue
+                        if f_ruta_sin:
+                            df_prov = df_prov[df_prov['Siniestro_Col'].astype(str).str.upper().str.contains(f_ruta_sin, na=False)]
+                        if f_ruta_pza:
+                            df_prov = df_prov[df_prov['Pieza_Col'].astype(str).str.upper().str.contains(f_ruta_pza, na=False)]
+                        if df_prov.empty:
+                            continue
                         with st.expander(f"🛒 {prov} | {len(df_prov)} pieza(s) gestionables", expanded=False):
                             cols_ver = ['Cotizar', 'Pagar', 'Recoger', 'Directo', 'Siniestro_Col', 'Vehiculo_Info', 'Pieza_Col', 'Costo Compra', 'Condición Pago', 'Estatus_Real']
                             cols_ver = [c for c in cols_ver if c in df_prov.columns]
@@ -5409,8 +5489,24 @@ elif vista_actual == "🚚 Rutas":
                             }
                             ed_comp = st.data_editor(df_prov[cols_ver], column_config=cfg_comp, hide_index=True, use_container_width=True, key=f"gest_{prov}")
                             notas_comp = st.text_input("📝 Instrucciones para el Operador:", placeholder="Ej. Pagar en efectivo y traer factura...", key=f"notas_gest_{prov}")
-                            
-                            if st.button(f"➕ Procesar Selección para {prov}", type="primary", key=f"btn_gest_{prov}"):
+
+                            c_qr_c, c_btn_c = st.columns([1.5, 1.5], vertical_alignment="bottom")
+                            with c_qr_c:
+                                qr_comp_up = st.file_uploader(
+                                    "📷 Adjuntar QR / Foto (Opcional):",
+                                    type=["png", "jpg", "jpeg", "webp"],
+                                    key=f"qr_comp_ruta_{prov}"
+                                )
+                            with c_btn_c:
+                                btn_gest_ok = st.button(f"➕ Procesar Selección para {prov}", type="primary", use_container_width=True, key=f"btn_gest_{prov}")
+
+                            if btn_gest_ok:
+                                if qr_comp_up is not None:
+                                    try:
+                                        tag_qr = guardar_adjunto_chat_en_sheet(qr_comp_up.getvalue(), qr_comp_up.name, usuario_activo)
+                                        notas_comp = f"{notas_comp} {tag_qr}".strip()
+                                    except Exception as e_qr:
+                                        st.warning(f"No se pudo adjuntar el QR: {e_qr}")
                                 seleccionados = ed_comp[(ed_comp['Cotizar'] == True) | (ed_comp['Pagar'] == True) | (ed_comp['Recoger'] == True) | (ed_comp['Directo'] == True)]
                                 
                                 if not seleccionados.empty:
@@ -5636,6 +5732,7 @@ elif vista_actual == "🚚 Rutas":
                 )
 
                 notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Recoger fascia para llevar a detallar / Tomar fotos de la pieza dañada...")
+                qr_ev_up = st.file_uploader("📷 Adjuntar QR / Foto para el chofer (Opcional):", type=["png", "jpg", "jpeg", "webp"], key="qr_ev_ruta")
 
                 btn_cot = st.form_submit_button(f"➕ Enviar Vuelta ({mapa_tipos_vuelta[tipo_vuelta_lbl]}) a la Ruta", type="primary")
 
@@ -5687,6 +5784,10 @@ elif vista_actual == "🚚 Rutas":
                         veh_ev_final = info_sin_ev.get('veh', f"Vuelta Eventual ({tipo_op_final})")
                         sin_ev_final = info_sin_ev.get('id', 'N/A')
 
+                        resumen_pzas_ev = ", ".join(piezas_lista)
+                        prefijo_ev = f"[{tipo_op_final}] {veh_ev_final} (Sin: {sin_ev_final}) | Pieza(s): {resumen_pzas_ev}"
+                        notas_con_pieza = f"{prefijo_ev} — {notas_eventual.strip()}" if notas_eventual.strip() else prefijo_ev
+
                         datos_ev = {
                             'Proveedor': [nombre_final] * len(piezas_lista),
                             'Taller': [nombre_final] * len(piezas_lista),
@@ -5700,7 +5801,14 @@ elif vista_actual == "🚚 Rutas":
                         df_ev_out = pd.DataFrame(datos_ev)
                         if col_desc and col_desc not in df_ev_out.columns: df_ev_out[col_desc] = piezas_lista
 
-                        if despachar_a_bd_rutas(df_ev_out, tipo_op_final, notas_eventual):
+                        if qr_ev_up is not None:
+                            try:
+                                tag_qr_ev = guardar_adjunto_chat_en_sheet(qr_ev_up.getvalue(), qr_ev_up.name, usuario_activo)
+                                notas_con_pieza = f"{notas_con_pieza} {tag_qr_ev}".strip()
+                            except Exception:
+                                pass
+
+                        if despachar_a_bd_rutas(df_ev_out, tipo_op_final, notas_con_pieza):
                             st.success(f"✅ ¡Vuelta de {tipo_op_final} enviada a ruta para {nombre_final} ({len(piezas_lista)} pieza(s))!")
                             time.sleep(1)
                             st.rerun()

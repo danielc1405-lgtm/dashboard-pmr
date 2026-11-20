@@ -2212,21 +2212,23 @@ if st.query_params.get("vista") == "tareas":
             background-color: #05070A !important;
             padding: 12px 16px !important;
         }
-        /* Autoajuste de la columna izquierda (Lista de Temas) */
+        /* Autoajuste de la columna izquierda (Lista de Temas hasta el borde inferior) */
         .st-key-pmr_lista_temas_scroll,
         .st-key-pmr_lista_temas_scroll > div[data-testid="stVerticalBlock"],
-        .st-key-pmr_lista_temas_scroll div[style*="height: 320px"] {
-            height: calc(100vh - 230px) !important;
-            max-height: calc(100vh - 230px) !important;
+        .st-key-pmr_lista_temas_scroll > div[data-testid="stVerticalBlockBorderWrapper"],
+        .st-key-pmr_lista_temas_scroll div[style*="height"] {
+            height: calc(100vh - 185px) !important;
+            max-height: calc(100vh - 185px) !important;
+            min-height: 220px !important;
         }
-        /* Frame de mensajes: altura sincronizada en la caja y todos sus hijos */
+        /* Frame de mensajes: extendido hasta empujar los botones al fondo */
         .st-key-pmr_chat_msgs_box,
         .st-key-pmr_chat_msgs_box > div,
         .st-key-pmr_chat_msgs_box [data-testid="stElementContainer"],
         .st-key-pmr_chat_msgs_box [data-testid="stCustomComponentV1"],
         .st-key-pmr_chat_msgs_box iframe {
-            height: calc(100vh - 345px) !important;
-            max-height: calc(100vh - 345px) !important;
+            height: calc(100vh - 275px) !important;
+            max-height: calc(100vh - 275px) !important;
             min-height: 220px !important;
         }
         .st-key-pmr_chat_msgs_box {

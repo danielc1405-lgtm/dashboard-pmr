@@ -1984,15 +1984,6 @@ def renderizar_widget_tareas_flotante():
                                 on_click=finalizar_chat_cb,
                                 args=(row_activa,)
                             )
-                    with c_fin:
-                        st.button(
-                            "🏁 Finalizar",
-                            key=f"wa_btn_fin_{chat_sel_row}",
-                            use_container_width=True,
-                            help="Cerrar y archivar este tema",
-                            on_click=finalizar_chat_cb,
-                            args=(row_activa,)
-                        )
 
                     if archivo_chat_sel is not None:
                         ext_sel = os.path.splitext(archivo_chat_sel.name.lower())[1]

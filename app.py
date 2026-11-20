@@ -1433,13 +1433,15 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
         <meta charset="utf-8">
         <style>
             * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-            body {{
+            html, body {{
+                height: 100%;
+                width: 100%;
                 background-color: transparent;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                 overflow: hidden;
             }}
             #chat-viewport {{
-                height: 290px;
+                height: 100%;
                 width: 100%;
                 overflow-y: auto;
                 overflow-x: hidden;
@@ -1862,7 +1864,7 @@ def renderizar_widget_tareas_flotante():
                     elif busqueda_chat and opciones_ids and st.session_state['chat_activo_gs_row'] not in opciones_ids:
                         st.session_state['chat_activo_gs_row'] = opciones_ids[0]
 
-                    with st.container(height=320, border=True):
+                    with st.container(height=320, border=True, key="pmr_lista_temas_scroll"):
                         if not opciones_ids:
                             st.caption("Sin coincidencias para tu búsqueda.")
                         for gs_r in opciones_ids:
@@ -2206,6 +2208,19 @@ if st.query_params.get("vista") == "tareas":
             background-color: #05070A !important;
             padding: 12px 16px !important;
         }
+        /* Autoajuste de la columna izquierda (Lista de Temas) */
+        .st-key-pmr_lista_temas_scroll,
+        .st-key-pmr_lista_temas_scroll > div[data-testid="stVerticalBlock"],
+        .st-key-pmr_lista_temas_scroll div[style*="height: 320px"] {
+            height: calc(100vh - 220px) !important;
+            max-height: calc(100vh - 220px) !important;
+        }
+        /* Autoajuste de la columna derecha (Ventana de Chat / Mensajes) */
+        .st-key-pmr_chat_float_open iframe {
+            height: calc(100vh - 285px) !important;
+            min-height: 290px !important;
+        }
+        </style>
         </style>
     """, unsafe_allow_html=True)
     monitor_sonoro_tareas()

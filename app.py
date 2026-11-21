@@ -1805,19 +1805,33 @@ def renderizar_widget_tareas_flotante():
         return
 
     # --- ESTADO ABIERTO (VENTANA FLOTANTE ARRASTRABLE Y MINIMIZABLE) ---
+    es_ventana_indep = (st.query_params.get("vista") == "tareas")
     with st.container(border=True, key="pmr_chat_float_open"):
         st.markdown('<span class="pmr-chat-float-open" style="display:none;"></span>', unsafe_allow_html=True)
-        ch_tit, ch_min, ch_cls = st.columns([6.4, 0.8, 0.8], vertical_alignment="center")
-        st.markdown(
-                '<div class="pmr-drag-handle" style="font-size:1.05rem; font-weight:700; color:#E9EDEF; padding:4px 6px; user-select:none;" title="Arrastra desde aquí para mover la ventana">'
-                '🔔 Centro de Tareas y Mensajería <span style="font-size:0.75rem; color:#8696A0; font-weight:normal;">(⠿ Arrastra para mover)</span>'
+        if es_ventana_indep:
+            st.markdown(
+                '<div style="font-size:1.05rem; font-weight:700; color:#E9EDEF; padding:2px 4px; user-select:none;">'
+                '🔔 Centro de Tareas y Mensajería'
                 '</div>',
                 unsafe_allow_html=True
             )
-        with ch_min:
-            if st.button("➖", key="btn_min_chat_float", help="Minimizar para trabajar en el Dashboard", use_container_width=True):
-                st.session_state['chat_flotante_estado'] = 'minimizado'
-                st.rerun()
+        else:
+            ch_tit, ch_min, ch_cls = st.columns([6.4, 0.8, 0.8], vertical_alignment="center")
+            with ch_tit:
+                st.markdown(
+                    '<div class="pmr-drag-handle" style="font-size:1.05rem; font-weight:700; color:#E9EDEF; padding:4px 6px; user-select:none;" title="Arrastra desde aquí para mover la ventana">'
+                    '🔔 Centro de Tareas y Mensajería <span style="font-size:0.75rem; color:#8696A0; font-weight:normal;">(⠿ Arrastra para mover)</span>'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+            with ch_min:
+                if st.button("➖", key="btn_min_chat_float", help="Minimizar para trabajar en el Dashboard", use_container_width=True):
+                    st.session_state['chat_flotante_estado'] = 'minimizado'
+                    st.rerun()
+            with ch_cls:
+                if st.button("✖", key="btn_cls_chat_float", help="Cerrar ventana", use_container_width=True):
+                    st.session_state['chat_flotante_estado'] = 'cerrado'
+                    st.rerun()
         with ch_cls:
             if st.button("✖", key="btn_cls_chat_float", help="Cerrar ventana", use_container_width=True):
                 st.session_state['chat_flotante_estado'] = 'cerrado'

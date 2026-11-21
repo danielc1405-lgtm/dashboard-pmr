@@ -1832,10 +1832,6 @@ def renderizar_widget_tareas_flotante():
                 if st.button("✖", key="btn_cls_chat_float", help="Cerrar ventana", use_container_width=True):
                     st.session_state['chat_flotante_estado'] = 'cerrado'
                     st.rerun()
-        with ch_cls:
-            if st.button("✖", key="btn_cls_chat_float", help="Cerrar ventana", use_container_width=True):
-                st.session_state['chat_flotante_estado'] = 'cerrado'
-                st.rerun()
 
         doc = init_connection()
         usuario_activo_real = st.session_state.get('usuario_actual', 'Usuario Desconocido')

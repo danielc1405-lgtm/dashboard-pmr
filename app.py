@@ -1426,6 +1426,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 f'</div></div>'
             )
 
+    es_indep_js = "true" if st.query_params.get("vista") == "tareas" else "false"
     iframe_html = f"""
     <!DOCTYPE html>
     <html>
@@ -1536,11 +1537,87 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
             </div>
         </div>
         <script>
+            const esIndependiente = {es_indep_js};
             const vp = document.getElementById('chat-viewport');
             function bajarAlFondo() {{ if (vp) {{ vp.scrollTop = vp.scrollHeight; }} }}
-            bajarAlFondo();
-            window.addEventListener('load', bajarAlFondo);
-            setTimeout(bajarAlFondo, 300);
+
+            function ajustarPanelesTareas() {{
+                if (!esIndependiente) {{ bajarAlFondo(); return; }}
+                try {{
+                    const pWin = window.parent;
+                    const parentDoc = pWin.document;
+                    const myIframe = window.frameElement;
+                    if (!myIframe) return;
+
+                    const rectIf = myIframe.getBoundingClientRect();
+                    if (rectIf.top <= 0) return;
+
+                    const inBox = parentDoc.querySelector('.st-key-pmr_chat_input_box');
+                    const hIn = (inBox && inBox.getBoundingClientRect().height > 20) ? inBox.getBoundingClientRect().height : 64;
+                    const hChat = Math.max(220, Math.floor(pWin.innerHeight - rectIf.top - hIn - 82));
+
+                    myIframe.setAttribute('height', String(hChat));
+                    myIframe.style.setProperty('height', hChat + 'px', 'important');
+                    myIframe.style.setProperty('min-height', hChat + 'px', 'important');
+                    myIframe.style.setProperty('max-height', hChat + 'px', 'important');
+                    myIframe.style.setProperty('display', 'block', 'important');
+
+                    let cur = myIframe.parentElement;
+                    let pasos = 0;
+                    while (cur && pasos < 7) {{
+                        if (cur.matches('[data-testid="stColumn"]') || cur.classList.contains('st-key-pmr_chat_float_open')) break;
+                        cur.style.setProperty('height', hChat + 'px', 'important');
+                        cur.style.setProperty('min-height', hChat + 'px', 'important');
+                        cur.style.setProperty('max-height', hChat + 'px', 'important');
+                        cur.style.setProperty('flex', 'none', 'important');
+                        cur.style.setProperty('overflow', 'visible', 'important');
+                        if (cur.classList.contains('st-key-pmr_chat_msgs_box')) {{
+                            if (cur.parentElement && cur.parentElement.children.length === 1 && !cur.parentElement.matches('[data-testid="stColumn"]')) {{
+                                cur.parentElement.style.setProperty('height', 'auto', 'important');
+                                cur.parentElement.style.setProperty('flex', 'none', 'important');
+                            }}
+                            break;
+                        }}
+                        cur = cur.parentElement;
+                        pasos++;
+                    }}
+
+                    const listaBox = parentDoc.querySelector('.st-key-pmr_lista_temas_scroll');
+                    if (listaBox) {{
+                        const rectL = listaBox.getBoundingClientRect();
+                        if (rectL.top > 0) {{
+                            const hLista = Math.max(220, Math.floor(pWin.innerHeight - rectL.top - 22));
+                            listaBox.style.setProperty('height', hLista + 'px', 'important');
+                            listaBox.style.setProperty('max-height', hLista + 'px', 'important');
+                            listaBox.style.setProperty('min-height', hLista + 'px', 'important');
+                            listaBox.style.setProperty('box-sizing', 'border-box', 'important');
+                            if (listaBox.parentElement && listaBox.parentElement.children.length === 1 && !listaBox.parentElement.matches('[data-testid="stColumn"]')) {{
+                                listaBox.parentElement.style.setProperty('height', hLista + 'px', 'important');
+                                listaBox.parentElement.style.setProperty('max-height', hLista + 'px', 'important');
+                            }}
+                            listaBox.querySelectorAll('div[style*="height"]').forEach(d => {{
+                                d.style.setProperty('height', '100%', 'important');
+                                d.style.setProperty('max-height', '100%', 'important');
+                            }});
+                        }}
+                    }}
+
+                    bajarAlFondo();
+                }} catch (e) {{}}
+            }}
+
+            ajustarPanelesTareas();
+            window.addEventListener('load', ajustarPanelesTareas);
+            setTimeout(ajustarPanelesTareas, 150);
+            setTimeout(ajustarPanelesTareas, 450);
+            try {{
+                const pWinR = window.parent;
+                if (pWinR._pmrResizeHandler) {{
+                    pWinR.removeEventListener('resize', pWinR._pmrResizeHandler);
+                }}
+                pWinR._pmrResizeHandler = ajustarPanelesTareas;
+                pWinR.addEventListener('resize', pWinR._pmrResizeHandler);
+            }} catch (e) {{}}
 
             function abrirZoom(src) {{
                 const ov = document.getElementById('zoom-overlay');
@@ -2215,28 +2292,8 @@ if st.query_params.get("vista") == "tareas":
             background-color: #05070A !important;
             padding: 12px 16px !important;
         }
-        /* Autoajuste de la columna izquierda (Lista de Temas hasta el borde inferior) */
-        .st-key-pmr_lista_temas_scroll,
-        .st-key-pmr_lista_temas_scroll > div[data-testid="stVerticalBlock"],
-        .st-key-pmr_lista_temas_scroll > div[data-testid="stVerticalBlockBorderWrapper"],
-        .st-key-pmr_lista_temas_scroll div[style*="height"] {
-            height: calc(100vh - 185px) !important;
-            max-height: calc(100vh - 185px) !important;
-            min-height: 220px !important;
-        }
-        /* Frame de mensajes: caja empuja los botones al fondo e iframe cabe holgado sin cortarse */
         .st-key-pmr_chat_msgs_box {
-            height: calc(100vh - 305px) !important;
-            min-height: 230px !important;
-            overflow: hidden !important;
             margin-bottom: 8px !important;
-        }
-        .st-key-pmr_chat_msgs_box [data-testid="stElementContainer"],
-        .st-key-pmr_chat_msgs_box [data-testid="stCustomComponentV1"],
-        .st-key-pmr_chat_msgs_box iframe {
-            height: calc(100vh - 315px) !important;
-            min-height: 220px !important;
-            display: block !important;
         }
         /* Frame independiente para la barra de botones */
         .st-key-pmr_chat_input_box {

@@ -2224,18 +2224,19 @@ if st.query_params.get("vista") == "tareas":
             max-height: calc(100vh - 185px) !important;
             min-height: 220px !important;
         }
-        /* Frame de mensajes: el contenedor se adapta al iframe sin recortarlo */
+        /* Frame de mensajes: caja empuja los botones al fondo e iframe cabe holgado sin cortarse */
         .st-key-pmr_chat_msgs_box {
-            height: auto !important;
-            overflow: visible !important;
-            margin-bottom: 6px !important;
+            height: calc(100vh - 305px) !important;
+            min-height: 230px !important;
+            overflow: hidden !important;
+            margin-bottom: 8px !important;
         }
         .st-key-pmr_chat_msgs_box [data-testid="stElementContainer"],
         .st-key-pmr_chat_msgs_box [data-testid="stCustomComponentV1"],
         .st-key-pmr_chat_msgs_box iframe {
-            height: calc(100vh - 305px) !important;
-            max-height: calc(100vh - 305px) !important;
+            height: calc(100vh - 315px) !important;
             min-height: 220px !important;
+            display: block !important;
         }
         /* Frame independiente para la barra de botones */
         .st-key-pmr_chat_input_box {

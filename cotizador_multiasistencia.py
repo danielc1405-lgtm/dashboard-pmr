@@ -7,6 +7,7 @@ import random
 import datetime
 import traceback
 import urllib.parse
+import statistics
 import requests
 from playwright.sync_api import sync_playwright
 import gspread
@@ -47,6 +48,7 @@ DICCIONARIO_BASE = {
     "BRAZ.": "BRAZO", "BRAZ": "BRAZO",
     "SUSP.": "SUSPENSION", "SUSP": "SUSPENSION",
     "ABSORBED.": "ABSORBEDOR", "ABSORBED": "ABSORBEDOR", "ABSORB.": "ABSORBEDOR", "ABSORB": "ABSORBEDOR",
+    "ABSORVEDOR": "ABSORBEDOR",
     "DIRECC.": "DIRECCIONAL", "DIRECC": "DIRECCIONAL",
     "LIMPIAPARAB.": "LIMPIAPARABRISAS", "LIMPIAPARAB": "LIMPIAPARABRISAS",
     "TRAVES.": "TRAVESANO", "TRAVES": "TRAVESANO",
@@ -62,6 +64,65 @@ PORTALES_DEFAULT = [
     {"nombre": "PARTSLINK24", "url": "partslink24.com", "categoria": "ORIGINAL"}
 ]
 
+def parse_monto_seguro(val):
+    try:
+        return float(str(val or "0").replace('$', '').replace(',', '').strip() or 0)
+    except Exception:
+        return 0.0
+
+def normalizar_texto_clave(txt):
+    return re.sub(r'\s+', ' ', str(txt or '').strip().upper())
+
+def normalizar_fecha_clave(f_str):
+    s = re.sub(r'[\.\,]', '', str(f_str or '').strip().upper())
+    s = re.sub(r'\s+', ' ', s)
+    if not s:
+        return ""
+    meses = {
+        'ENE': '01', 'JAN': '01', 'FEB': '02', 'MAR': '03', 'ABR': '04', 'APR': '04',
+        'MAY': '05', 'JUN': '06', 'JUL': '07', 'AGO': '08', 'AUG': '08',
+        'SEP': '09', 'SET': '09', 'OCT': '10', 'NOV': '11', 'DIC': '12', 'DEC': '12'
+    }
+    m_txt = re.match(r'^(\d{1,2})[\s\-/]+([A-Z]{3})[A-Z]*[\s\-/]+(\d{4})$', s)
+    if m_txt and m_txt.group(2) in meses:
+        return f"{m_txt.group(3)}-{meses[m_txt.group(2)]}-{int(m_txt.group(1)):02d}"
+    m_iso = re.match(r'^(\d{4})[\-/](\d{1,2})[\-/](\d{1,2})$', s)
+    if m_iso:
+        return f"{m_iso.group(1)}-{int(m_iso.group(2)):02d}-{int(m_iso.group(3)):02d}"
+    m_lat = re.match(r'^(\d{1,2})[\-/](\d{1,2})[\-/](\d{4})$', s)
+    if m_lat:
+        return f"{m_lat.group(3)}-{int(m_lat.group(2)):02d}-{int(m_lat.group(1)):02d}"
+    return s
+
+def construir_llave_partida(siniestro, descripcion, fecha_fin, partida_idx):
+    s_norm = normalizar_texto_clave(siniestro)
+    d_norm = normalizar_texto_clave(descripcion)
+    f_norm = normalizar_fecha_clave(fecha_fin)
+    i_norm = str(partida_idx).strip()
+    return f"{s_norm}|{d_norm}|{f_norm}|{i_norm}"
+
+def normalizar_pieza_para_match(desc_raw):
+    txt = str(desc_raw or "").upper().strip()
+    txt = re.sub(r'^OTROS\s+', '', txt)
+    txt = re.sub(r'\.(?=[A-Z])', '. ', txt)
+    palabras = re.sub(r'[^A-Z0-9\s\.]', ' ', txt).split()
+    out = []
+    for pal in palabras:
+        p_s = pal.rstrip('.')
+        if pal in ["I.", "I"]:
+            out.append("IZQUIERDA")
+        elif pal in ["D.", "D"]:
+            out.append("DERECHA")
+        elif pal in DICCIONARIO_BASE:
+            if DICCIONARIO_BASE[pal]:
+                out.append(DICCIONARIO_BASE[pal])
+        elif p_s in DICCIONARIO_BASE:
+            if DICCIONARIO_BASE[p_s]:
+                out.append(DICCIONARIO_BASE[p_s])
+        elif p_s:
+            out.append(p_s)
+    return re.sub(r'\s+', ' ', " ".join(out)).strip()
+
 def conectar_sheets():
     scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
     credenciales = Credentials.from_service_account_file('credentials.json', scopes=scopes)
@@ -74,6 +135,7 @@ def cargar_configuracion_y_exclusiones(doc):
         "MULTI_PASS": "PmrNov1.",
         "TC_USD": 20.50,
         "GEMINI_API_KEY": "",
+        "GEMINI_USAR_SEARCH": False,
         "ESTADOS_EXCLUIDOS": ["DURANGO", "DGO"],
         "TALLERES_AUTOSURTIDO": {"MAZDA LAS TORRES"},
         "DICCIONARIO_EXTRA": {},
@@ -93,6 +155,8 @@ def cargar_configuracion_y_exclusiones(doc):
                     except: pass
                 elif k == "GEMINI_API_KEY" and v:
                     config["GEMINI_API_KEY"] = v
+                elif k == "GEMINI_USAR_SEARCH" and v:
+                    config["GEMINI_USAR_SEARCH"] = v.upper() in ["TRUE", "SI", "1", "VERDADERO"]
                 elif k == "ESTADOS_EXCLUIDOS" and v:
                     config["ESTADOS_EXCLUIDOS"] = [x.strip().upper() for x in v.split(",") if x.strip()]
                 elif k.startswith("ABREV_") and v:
@@ -160,7 +224,6 @@ def limpiar_modelo_comercial(marca, vehiculo_raw, ano):
             pass
         return "SEDAN"
 
-    # Unificar modelos compuestos separados por espacio (ej. CX 30 -> CX-30, CR V -> CR-V, F 150 -> F-150, S 10 -> S-10)
     v = re.sub(r'\b(CX|CR|HR|BR|MX|RX|NX|UX|GX|LX|FX|QX|XT|CT|ES|IS|LS|GS|RC|LC|GLC|GLE|GLA|GLB|GLS|CLA|CLS)\s*[\-\s]?\s*([0-9A-Z]{1,3})\b', r'\1-\2', v)
     v = re.sub(r'\b([FS])\s*[\-\s]?\s*(10|150|250|350|450|550)\b', r'\1-\2', v)
 
@@ -184,6 +247,7 @@ def limpiar_modelo_comercial(marca, vehiculo_raw, ano):
 
 def expandir_descripcion(desc_raw, marca, vehiculo, ano, dicc_extra=None):
     texto_orig = str(desc_raw).upper().strip()
+    texto_orig = re.sub(r'^OTROS\s+', '', texto_orig)
     dicc = DICCIONARIO_BASE.copy()
     dicc.update({
         "REFLECTOR": "CUARTO REFLEJANTE",
@@ -197,19 +261,20 @@ def expandir_descripcion(desc_raw, marca, vehiculo, ano, dicc_extra=None):
 
     texto = re.sub(r'\.(?=[A-Z])', '. ', texto_orig)
 
-    # 1. Reemplazar primero frases compuestas para desambiguar (ej. TOLVA SALPICADERA vs SALPICADERA)
     frases_compuestas = {
         "TOLVA SALP.": "TOLVA LODERA",
         "TOLVA SALPICADERA": "TOLVA LODERA",
         "FORRO SALPICADERA": "TOLVA LODERA",
         "LUZ DIRECC.": "CUARTO DIRECCIONAL",
-        "FARO NIEBLA": "FARO ANTINIEBLA"
+        "FARO NIEBLA": "FARO ANTINIEBLA",
+        "O LETRERO": "",
+        "O ABSORVEDOR": "ABSORBEDOR",
+        "O ABSORBEDOR": "ABSORBEDOR"
     }
     for k_f, v_f in sorted({**frases_compuestas, **(dicc_extra or {})}.items(), key=lambda x: -len(x[0])):
         if " " in k_f and k_f in texto:
             texto = texto.replace(k_f, v_f)
 
-    # 2. Traducir palabra por palabra y resolver sinónimos regionales
     palabras = texto.split()
     traducidas = []
     for pal in palabras:
@@ -231,7 +296,15 @@ def expandir_descripcion(desc_raw, marca, vehiculo, ano, dicc_extra=None):
 
     marca_clean = str(marca).upper().strip()
     mod_clean = limpiar_modelo_comercial(marca_clean, vehiculo, ano)
-    return f"{frase_pieza} {marca_clean} {mod_clean} {ano}".strip()
+
+    # Evitar duplicar marca/modelo cuando ya vienen dentro del nombre de la pieza (ej. EMBLEMA MG GT)
+    sufijo_auto = f"{marca_clean} {mod_clean}".strip()
+    if sufijo_auto and frase_pieza.endswith(sufijo_auto):
+        return f"{frase_pieza} {ano}".strip()
+    if marca_clean and frase_pieza.endswith(f" {marca_clean}"):
+        return f"{frase_pieza} {mod_clean} {ano}".strip()
+
+    return re.sub(r'\s+', ' ', f"{frase_pieza} {marca_clean} {mod_clean} {ano}").strip()
 
 def calcular_fecha_habiles(dias_habiles=6):
     meses_p = {1:'ENE', 2:'FEB', 3:'MAR', 4:'ABR', 5:'MAY', 6:'JUN', 7:'JUL', 8:'AGO', 9:'SEP', 10:'OCT', 11:'NOV', 12:'DIC'}
@@ -268,22 +341,37 @@ def cargar_mapa_historial_completo(doc):
             if len(datos) <= 1:
                 continue
             headers = [str(h).strip().upper() for h in datos[0]]
-            i_pza = next((i for i, h in enumerate(headers) if "DESCRIP" in h or "REFAC" in h), -1)
+            i_pza = next((i for i, h in enumerate(headers) if "DESCRIP" in h or "REFAC" in h or "PIEZA" in h), -1)
             i_mod = next((i for i, h in enumerate(headers) if "MODELO" in h or "VEH" in h), -1)
             i_pre = next((i for i, h in enumerate(headers) if "PRECIO" in h or "COSTO" in h), -1)
             if i_pza >= 0 and i_pre >= 0 and i_mod >= 0:
                 for r in datos[1:]:
                     if len(r) > max(i_pza, i_pre, i_mod):
-                        try:
-                            val = float(str(r[i_pre]).replace('$', '').replace(',', '').strip())
-                            if val > 100:
-                                p_txt = str(r[i_pza]).upper().strip()
-                                m_txt = str(r[i_mod]).upper().strip()
-                                registros.append((p_txt, m_txt, val))
-                        except Exception:
-                            pass
+                        val = parse_monto_seguro(r[i_pre])
+                        if val > 100:
+                            p_norm = normalizar_pieza_para_match(r[i_pza])
+                            m_txt = str(r[i_mod]).upper().strip()
+                            if p_norm and m_txt:
+                                registros.append((p_norm, m_txt, val))
         except Exception:
             pass
+
+    # También aprovechar costos base reales de cotizaciones previas en BD_COTIZACIONES
+    try:
+        ws_c = doc.worksheet("BD_COTIZACIONES")
+        datos_c = ws_c.get_all_values()
+        if len(datos_c) > 1:
+            for r in datos_c[1:]:
+                if len(r) >= 24:
+                    costo_b = parse_monto_seguro(r[23])
+                    if costo_b > 100:
+                        p_norm = normalizar_pieza_para_match(r[14])
+                        m_txt = str(r[5]).upper().strip()
+                        if p_norm and m_txt:
+                            registros.append((p_norm, m_txt, costo_b))
+    except Exception:
+        pass
+
     return registros
 
 def buscar_en_historial(registros_hist, desc_raw, modelo_limpio):
@@ -291,198 +379,324 @@ def buscar_en_historial(registros_hist, desc_raw, modelo_limpio):
         return 0.0
     mod_up = str(modelo_limpio).upper().strip()
     mod_sin_guion = mod_up.replace("-", "")
-    d_raw_up = str(desc_raw).upper().strip()
+    d_norm = normalizar_pieza_para_match(desc_raw)
+    stop = {"DE", "LA", "EL", "LOS", "LAS", "PARA", "CON", "SIN", "EN", "Y", "O"}
+    tokens_busq = {t for t in d_norm.split() if len(t) >= 2 and t not in stop}
+
     precios_exactos = []
-    for p_txt, m_txt, val in registros_hist:
+    precios_similares = []
+
+    for p_norm, m_txt, val in registros_hist:
         m_clean = m_txt.replace("-", "")
-        if (mod_up in m_txt or mod_sin_guion in m_clean) and d_raw_up == p_txt:
+        if not (mod_up in m_txt or mod_sin_guion in m_clean):
+            continue
+        if d_norm == p_norm:
             precios_exactos.append(val)
+        elif tokens_busq:
+            tokens_hist = {t for t in p_norm.split() if len(t) >= 2 and t not in stop}
+            if tokens_hist:
+                inter = tokens_busq.intersection(tokens_hist)
+                score = len(inter) / max(len(tokens_busq), len(tokens_hist))
+                if score >= 0.75:
+                    precios_similares.append(val)
+
     if precios_exactos:
-        return round(sum(precios_exactos) / len(precios_exactos))
+        return round(statistics.median(precios_exactos))
+    if precios_similares:
+        return round(statistics.median(precios_similares))
     return 0.0
 
 def descubrir_modelos_gemini(gemini_key):
-    """Prioriza los modelos estables con cuota activa y excluye los dados de baja (2.5-flash-lite) o de voz."""
+    """Prioriza modelos de texto con cuota gratuita estable (Flash-Lite, Flash y Gemma 4/3)."""
     preferidos = [
-        "gemini-flash-latest",
         "gemini-flash-lite-latest",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-2.5-flash-lite",
+        "gemini-flash-latest",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-2.5-flash",
+        "gemma-4-31b-it",
+        "gemma-4-26b-a4b-it",
         "gemma-3-27b-it",
-        "gemini-2.0-flash",
-        "gemini-2.0-flash-lite"
+        "gemma-3-12b-it",
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash"
     ]
     if not gemini_key:
         return []
     try:
-        r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}", timeout=10)
+        r = requests.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}", timeout=12)
         if r.status_code == 200:
             modelos_api = []
-            palabras_excluir = ["tts", "audio", "image", "imagen", "veo", "embedding", "aqa", "robotics", "computer", "learnlm", "thinking", "2.5-flash", "2.5-pro", "3-flash", "3.1-pro"]
+            palabras_excluir = [
+                "tts", "audio", "image", "imagen", "veo", "embedding", "aqa",
+                "robotics", "computer", "learnlm", "thinking", "live",
+                "transcribe", "omni", "nano-banana", "lyria", "customtools",
+                "gemini-4-", "pro-latest", "3.1-pro", "2.5-pro"
+            ]
             for m in r.json().get("models", []):
                 metodos = m.get("supportedGenerationMethods", [])
                 if "generateContent" in metodos:
                     nom = m.get("name", "").replace("models/", "")
-                    if ("gemini" in nom or "gemma-3-27b" in nom) and not any(ex in nom.lower() for ex in palabras_excluir):
+                    if ("gemini" in nom or "gemma-4" in nom or "gemma-3" in nom) and not any(ex in nom.lower() for ex in palabras_excluir):
                         modelos_api.append(nom)
 
             ordenados = [p for p in preferidos if p in modelos_api]
             for m_rest in modelos_api:
                 if m_rest not in ordenados:
                     ordenados.append(m_rest)
-            return ordenados[:4]
+            return ordenados[:8]
     except Exception:
         pass
-    return preferidos[:3]
+    return preferidos[:6]
 
-def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc_usd, gemini_key, portales_cfg):
+def cotizar_lote_con_gemini_ai(marca, modelo, ano, vin, lista_partidas_query, tc_usd, gemini_key, portales_cfg, estado_ia=None, usar_search_cfg=False):
     """
-    Capa 1: Prueba los modelos de texto válidos en tu cuenta (con y sin Google Search)
-    hasta obtener los precios en MXN.
+    Capa 1: Usa modelos gratuitos disponibles sin quemar cuota en google_search (429 en Free Tier),
+    con reintento automático ante 503 y memoria de modelos agotados.
     """
     resultados_ia = {}
     if not gemini_key:
         print("   ⚠️ [Capa 1 - IA]: No hay GEMINI_API_KEY guardada en BD_CONFIG_BOTS. Saltando a Capa 2...")
         return resultados_ia
 
-    modelos_disponibles = descubrir_modelos_gemini(gemini_key)
-    print(f"   🤖 [Capa 1 - IA]: Modelos de texto listos para probar: {modelos_disponibles}")
+    if estado_ia is None:
+        estado_ia = {"modelos": None, "agotados_429": set(), "search_ok": bool(usar_search_cfg)}
+
+    if estado_ia.get("modelos") is None:
+        estado_ia["modelos"] = descubrir_modelos_gemini(gemini_key)
+
+    modelos_disponibles = [m for m in estado_ia["modelos"] if m not in estado_ia["agotados_429"]]
+    if not modelos_disponibles:
+        print("   ⚠️ [Capa 1 - IA]: Todos los modelos agotaron cuota (429) en esta sesión. Pasando a Capa 2 (Web)...")
+        return resultados_ia
+
+    print(f"   🤖 [Capa 1 - IA]: Modelos listos: {modelos_disponibles}")
 
     lista_portales_txt = ", ".join([f"{p['nombre']} ({p['url']})" for p in portales_cfg])
 
     for i in range(0, len(lista_partidas_query), 8):
         lote = lista_partidas_query[i:i+8]
-        lineas_prompt = "\n".join([f"- ID {item['idx']}: {item['q']} (Descripción portal: {item['desc']})" for item in lote])
+        if i > 0:
+            time.sleep(1.5)
+
+        lineas_prompt = "\n".join([f"- ID {item['idx']}: {item['q']} (Portal: {item['desc']})" for item in lote])
         prompt = (
-            f"Actúa como cotizador senior de refacciones de colisión en México y EE.UU.\n"
+            f"Actúa como cotizador senior de refacciones de colisión automotriz en México.\n"
             f"Vehículo: {marca} {modelo} (Año {ano}) | VIN: {vin}\n"
-            f"Tipo de cambio USD a MXN: {tc_usd}\n"
-            f"Portales de referencia: Radec (radec.com.mx), Mercado Libre México, eBay Motors, PartSouq, PartsLink24 ({lista_portales_txt}).\n\n"
-            f"Para cada una de las siguientes piezas, entrega precios reales de mercado en pesos mexicanos (MXN, enteros mayores a 0):\n"
+            f"Tipo de cambio USD/MXN: {tc_usd}\n"
+            f"Referencias: Radec, Mercado Libre México, eBay Motors, Agencia ({lista_portales_txt}).\n\n"
+            f"Para cada pieza devuelve precios realistas de mercado en pesos mexicanos (MXN, enteros > 0):\n"
             f"- 'orig': Precio pieza ORIGINAL / OEM nueva.\n"
-            f"- 'semi': Precio pieza USADA / SEMINUEVA en Mercado Libre o eBay.\n"
-            f"- 'gen': Precio pieza GENÉRICA nueva (Radec / TYC / Depo / Tong Yang).\n\n"
-            f"Piezas a cotizar:\n{lineas_prompt}\n\n"
-            f"Responde ÚNICAMENTE con un arreglo JSON válido con este formato exacto:\n"
-            f'[{{"idx": numero_id, "orig": entero_mxn, "semi": entero_mxn, "gen": entero_mxn, "fuente": "RAD o ML o EB o AGEN", "link": "url_directa_o_vacio"}}]'
+            f"- 'semi': Precio pieza USADA / SEMINUEVA en Mercado Libre o yonke.\n"
+            f"- 'gen': Precio pieza GENÉRICA nueva (Radec / TYC / Depo / Tong Yang). Si no existe genérica para esa pieza, pon 0.\n\n"
+            f"Piezas:\n{lineas_prompt}\n\n"
+            f"Responde ÚNICAMENTE con un arreglo JSON válido sin texto extra:\n"
+            f'[{{"idx": numero_id, "orig": entero_mxn, "semi": entero_mxn, "gen": entero_mxn, "fuente": "RAD o ML o EB o AGEN"}}]'
         )
 
         exito_lote = False
-        for mod_name in modelos_disponibles:
-            if exito_lote:
-                break
-            # Los modelos gemma no usan la herramienta google_search; los gemini prueban con search y luego directo
-            modos_search = [False] if "gemma" in mod_name else [True, False]
+        for mod_name in list(modelos_disponibles):
+            if exito_lote or mod_name in estado_ia["agotados_429"]:
+                continue
+
+            modos_search = [True, False] if (estado_ia.get("search_ok") and "gemma" not in mod_name) else [False]
+
             for usar_search in modos_search:
                 if exito_lote:
                     break
-                try:
-                    url_gem = f"https://generativelanguage.googleapis.com/v1beta/models/{mod_name}:generateContent?key={gemini_key}"
-                    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-                    if usar_search:
-                        payload["tools"] = [{"google_search": {}}]
+                max_intentos = 2
+                for intento in range(1, max_intentos + 1):
+                    try:
+                        url_gem = f"https://generativelanguage.googleapis.com/v1beta/models/{mod_name}:generateContent?key={gemini_key}"
+                        payload = {
+                            "contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"temperature": 0.2}
+                        }
+                        if usar_search:
+                            payload["tools"] = [{"google_search": {}}]
 
-                    resp = requests.post(url_gem, json=payload, timeout=25)
-                    if resp.status_code == 200:
-                        cand = resp.json().get("candidates", [])
-                        if cand:
-                            partes_txt = cand[0].get("content", {}).get("parts", [])
-                            texto_completo = "".join([p.get("text", "") for p in partes_txt])
-                            m_arr = re.search(r'\[.*\]', texto_completo, re.DOTALL)
-                            if m_arr:
-                                arr_json = json.loads(m_arr.group(0))
-                                encontrados_cnt = 0
-                                for obj in arr_json:
-                                    idx_k = int(obj.get("idx", -1))
-                                    o_v = round(float(obj.get("orig", 0) or 0))
-                                    s_v = round(float(obj.get("semi", 0) or 0))
-                                    g_v = round(float(obj.get("gen", 0) or 0))
-                                    if o_v > 0 or s_v > 0 or g_v > 0:
-                                        encontrados_cnt += 1
-                                    resultados_ia[idx_k] = {
-                                        "orig": o_v,
-                                        "semi": s_v,
-                                        "gen": g_v,
-                                        "fuente": str(obj.get("fuente", "ML")).upper(),
-                                        "link": str(obj.get("link", ""))
-                                    }
-                                if encontrados_cnt > 0:
-                                    modo_lbl = "con Google Search" if usar_search else "modo Estimación Experta"
-                                    print(f"   ✅ [Capa 1 - IA]: {mod_name} ({modo_lbl}) cotizó {encontrados_cnt}/{len(lote)} piezas.")
-                                    exito_lote = True
-                    else:
-                        err_short = resp.text[:160].replace("\n", " ")
-                        print(f"   ℹ️ [Capa 1 - {mod_name} search={usar_search}]: HTTP {resp.status_code} ({err_short})")
-                except Exception as e_g:
-                    print(f"   ℹ️ [Capa 1 - {mod_name}]: {e_g}")
+                        resp = requests.post(url_gem, json=payload, timeout=45)
+                        if resp.status_code == 200:
+                            cand = resp.json().get("candidates", [])
+                            if cand:
+                                partes_txt = cand[0].get("content", {}).get("parts", [])
+                                texto_completo = "".join([p.get("text", "") for p in partes_txt])
+                                m_arr = re.search(r'\[.*\]', texto_completo, re.DOTALL)
+                                if m_arr:
+                                    arr_json = json.loads(m_arr.group(0))
+                                    encontrados_cnt = 0
+                                    for obj in arr_json:
+                                        idx_k = int(obj.get("idx", -1))
+                                        o_v = round(float(obj.get("orig", 0) or 0))
+                                        s_v = round(float(obj.get("semi", 0) or 0))
+                                        g_v = round(float(obj.get("gen", 0) or 0))
+                                        if o_v > 0 or s_v > 0 or g_v > 0:
+                                            encontrados_cnt += 1
+                                        resultados_ia[idx_k] = {
+                                            "orig": o_v,
+                                            "semi": s_v,
+                                            "gen": g_v,
+                                            "fuente": str(obj.get("fuente", "ML")).upper(),
+                                            "link": str(obj.get("link", ""))
+                                        }
+                                    if encontrados_cnt > 0:
+                                        modo_lbl = "con Google Search" if usar_search else "Estimación Experta"
+                                        print(f"   ✅ [Capa 1 - IA]: {mod_name} ({modo_lbl}) cotizó {encontrados_cnt}/{len(lote)} piezas.")
+                                        exito_lote = True
+                                        break
+                        elif resp.status_code == 429:
+                            err_short = resp.text[:140].replace("\n", " ")
+                            print(f"   ℹ️ [Capa 1 - {mod_name} search={usar_search}]: HTTP 429 ({err_short})")
+                            if usar_search:
+                                estado_ia["search_ok"] = False
+                            else:
+                                estado_ia["agotados_429"].add(mod_name)
+                            break
+                        elif resp.status_code in (500, 502, 503, 504):
+                            print(f"   ⏳ [Capa 1 - {mod_name}]: HTTP {resp.status_code} (demanda alta, intento {intento}/{max_intentos})...")
+                            if intento < max_intentos:
+                                time.sleep(4)
+                                continue
+                            break
+                        else:
+                            err_short = resp.text[:140].replace("\n", " ")
+                            print(f"   ℹ️ [Capa 1 - {mod_name}]: HTTP {resp.status_code} ({err_short})")
+                            break
+                    except requests.exceptions.Timeout:
+                        print(f"   ⏳ [Capa 1 - {mod_name}]: Timeout 45s (intento {intento}/{max_intentos})...")
+                        if intento < max_intentos:
+                            time.sleep(2)
+                            continue
+                        break
+                    except Exception as e_g:
+                        print(f"   ℹ️ [Capa 1 - {mod_name}]: {e_g}")
+                        break
 
     return resultados_ia
 
-def buscar_web_playwright_respaldo(page_buscador, query, marca, modelo):
-    """Devuelve los 3 precios y los 3 enlaces exactos (Original, Seminueva y Genérica)."""
+def buscar_mercadolibre_directo(page_buscador, query, modelo):
+    """Extrae precios y links reales directo desde listado.mercadolibre.com.mx."""
     precios_orig, precios_semi, precios_gen = [], [], []
-    mejor_link_orig, mejor_link_semi, mejor_link_gen = "", "", ""
+    link_orig, link_semi, link_gen = "", "", ""
 
-    q_clean = query.replace(modelo, modelo.replace("-", "")) if "-" in modelo else query
-    url_fallback_ml = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_clean.replace(' ', '-'))}"
-    consultas_web = [
-        f"{q_clean} radec OR mercadolibre precio",
-        f"site:mercadolibre.com.mx {q_clean}"
-    ]
+    q_sin_ano = re.sub(r'\b(19|20)\d{2}\b', '', query).strip()
+    q_sin_ano = re.sub(r'\s+', ' ', q_sin_ano)
+    intentos_q = [query]
+    if q_sin_ano and q_sin_ano != query:
+        intentos_q.append(q_sin_ano)
 
-    for q_w in consultas_web:
+    mod_clean = str(modelo or "").upper().replace("-", "").strip()
+
+    for q_try in intentos_q:
+        slug = re.sub(r'[^a-zA-Z0-9\s\-]', ' ', q_try)
+        slug = re.sub(r'\s+', '-', slug.strip()).lower()
+        url_ml = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(slug)}"
         try:
-            url_yh = f"https://mx.search.yahoo.com/search?p={urllib.parse.quote(q_w)}"
-            page_buscador.goto(url_yh, timeout=12000, wait_until="domcontentloaded")
-            time.sleep(0.9)
-            bloques = page_buscador.evaluate("""
-                () => Array.from(document.querySelectorAll('div.algo, li'))
-                    .map(el => {
-                        let a = el.querySelector('a');
-                        let t = el.querySelector('h3') ? el.querySelector('h3').innerText : '';
-                        return {
-                            titulo: t.replace(/\\s+/g, ' ').trim(),
-                            txt: (el.innerText || '').replace(/\\s+/g, ' ').toUpperCase(),
-                            href: a ? a.href : ''
-                        };
-                    })
-                    .filter(x => x.txt.includes('$') && x.href.startsWith('http'))
-                    .slice(0, 12)
+            page_buscador.goto(url_ml, timeout=15000, wait_until="domcontentloaded")
+            time.sleep(1.3)
+            items = page_buscador.evaluate("""
+                () => {
+                    const cards = Array.from(document.querySelectorAll('li.ui-search-layout__item, div.poly-card, div.ui-search-result__wrapper'));
+                    const out = [];
+                    for (const el of cards.slice(0, 18)) {
+                        const tEl = el.querySelector('a.poly-component__title, h2.poly-box, h2.ui-search-item__title, h3.poly-component__title-wrapper a, a.ui-search-link__title-card');
+                        const aEl = el.querySelector('a.poly-component__title, a.ui-search-link, a[href*="mercadolibre.com.mx"]');
+                        let pBox = el.querySelector('.poly-price__current, .ui-search-price__second-line');
+                        let frac = pBox ? pBox.querySelector('.andes-money-amount__fraction') : null;
+                        if (!frac) {
+                            const fracs = Array.from(el.querySelectorAll('.andes-money-amount__fraction')).filter(f =>
+                                !f.closest('.andes-money-amount--previous, .poly-price__installments, .ui-search-installments, s')
+                            );
+                            if (fracs.length > 0) frac = fracs[0];
+                        }
+                        const titulo = tEl ? tEl.innerText.replace(/\\s+/g, ' ').trim() : '';
+                        const precioStr = frac ? frac.innerText.replace(/[^0-9]/g, '') : '';
+                        const href = aEl ? aEl.href : '';
+                        if (titulo && precioStr) {
+                            out.push({ titulo, precio: parseInt(precioStr, 10) || 0, href });
+                        }
+                    }
+                    return out;
+                }
             """)
-            for b in bloques:
-                link_real = b['href']
-                m_ru = re.search(r'/RU=([^/]+)/', link_real)
-                if m_ru:
-                    link_real = urllib.parse.unquote(m_ru.group(1))
-                if "yahoo.com" in link_real:
+
+            if not items:
+                continue
+
+            for it in items:
+                val = it.get("precio", 0)
+                tit = str(it.get("titulo", "")).upper()
+                href = str(it.get("href", ""))
+                if not (200 <= val <= 85000):
+                    continue
+                if mod_clean and len(mod_clean) >= 3 and mod_clean not in tit.replace("-", ""):
                     continue
 
-                montos = re.findall(r'\$\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?|[0-9]{3,5}\.[0-9]{2}|[0-9]{4,5})', b['txt'])
-                for m in montos:
-                    val = float(m.replace(',', ''))
-                    if 250 <= val <= 65000:
-                        if any(k in b['txt'] for k in ["USADO", "USADA", "SEMINUEV", "YONKE"]):
-                            precios_semi.append(val)
-                            if not mejor_link_semi:
-                                mejor_link_semi = link_real
-                                print(f"        🔗 [Semi ${val:,.0f}]: {b['titulo'][:50]} -> {link_real[:60]}")
-                        elif any(k in b['txt'] for k in ["ORIGINAL", "OEM", "GENUIN", "AGENCIA"]) and "RADEC" not in b['txt'] and "TONG YANG" not in b['txt']:
-                            precios_orig.append(val)
-                            if not mejor_link_orig:
-                                mejor_link_orig = link_real
-                                print(f"        🔗 [Orig ${val:,.0f}]: {b['titulo'][:50]} -> {link_real[:60]}")
-                        else:
-                            precios_gen.append(val)
-                            if not mejor_link_gen:
-                                mejor_link_gen = link_real
-                                print(f"        🔗 [Gen ${val:,.0f}]: {b['titulo'][:50]} -> {link_real[:60]}")
+                if any(k in tit for k in ["USADO", "USADA", "SEMINUEV", "YONKE"]):
+                    precios_semi.append(val)
+                    if not link_semi:
+                        link_semi = href
+                elif any(k in tit for k in ["ORIGINAL", "OEM", "GENUIN", "AGENCIA"]) and not any(g in tit for g in ["TYC", "DEPO", "TONG YANG", "GENERICA", "RADEC"]):
+                    precios_orig.append(val)
+                    if not link_orig:
+                        link_orig = href
+                else:
+                    precios_gen.append(val)
+                    if not link_gen:
+                        link_gen = href
+
             if precios_orig or precios_semi or precios_gen:
                 break
         except Exception:
-            pass
+            continue
 
-    p_o = round(sum(sorted(precios_orig)[:3]) / len(precios_orig[:3])) if precios_orig else 0
-    p_s = round(sum(sorted(precios_semi)[:3]) / len(precios_semi[:3])) if precios_semi else 0
-    p_g = round(sum(sorted(precios_gen)[:3]) / len(precios_gen[:3])) if precios_gen else 0
+    p_o = round(statistics.median(sorted(precios_orig)[:5])) if precios_orig else 0
+    p_s = round(statistics.median(sorted(precios_semi)[:5])) if precios_semi else 0
+    p_g = round(statistics.median(sorted(precios_gen)[:5])) if precios_gen else 0
+    return p_o, p_s, p_g, link_orig, link_semi, link_gen
 
+def buscar_duckduckgo_html_respaldo(query):
+    """Respaldo ligero por HTTP a DuckDuckGo HTML si Mercado Libre bloquea la IP."""
+    precios_orig, precios_semi, precios_gen = [], [], []
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        }
+        resp = requests.post(
+            "https://html.duckduckgo.com/html/",
+            data={"q": f"{query} precio mercadolibre OR radec"},
+            headers=headers,
+            timeout=12
+        )
+        if resp.status_code == 200:
+            texto = re.sub(r'<[^>]+>', ' ', resp.text)
+            texto = re.sub(r'\s+', ' ', texto).upper()
+            montos = re.findall(r'\$\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?|[0-9]{3,5}\.[0-9]{2})', texto)
+            for m in montos[:12]:
+                val = float(m.replace(',', ''))
+                if 250 <= val <= 65000:
+                    precios_gen.append(val)
+    except Exception:
+        pass
+    p_g = round(statistics.median(sorted(precios_gen)[:5])) if precios_gen else 0
+    return 0, 0, p_g
+
+def buscar_web_playwright_respaldo(page_buscador, query, marca, modelo):
+    """Capa 2: Primero Mercado Libre directo con Playwright; si falla, DuckDuckGo HTML."""
+    q_clean = re.sub(r'^OTROS\s+', '', str(query).upper().strip())
+    if "-" in modelo:
+        q_clean = q_clean.replace(modelo, modelo.replace("-", ""))
+
+    p_o, p_s, p_g, mejor_link_orig, mejor_link_semi, mejor_link_gen = buscar_mercadolibre_directo(page_buscador, q_clean, modelo)
+
+    if p_o == 0 and p_s == 0 and p_g == 0:
+        p_o, p_s, p_g = buscar_duckduckgo_html_respaldo(q_clean)
+
+    url_fallback_ml = f"https://listado.mercadolibre.com.mx/{urllib.parse.quote(q_clean.replace(' ', '-'))}"
     l_o = mejor_link_orig or f"https://www.google.com/search?q={urllib.parse.quote(q_clean + ' OEM original precio')}"
     l_s = mejor_link_semi or url_fallback_ml
     l_g = mejor_link_gen or f"https://www.google.com/search?q={urllib.parse.quote('site:radec.com.mx OR site:mercadolibre.com.mx ' + q_clean)}"
@@ -566,32 +780,43 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
 
         key_len = len(cfg.get("GEMINI_API_KEY", ""))
         print(f"🔑 Estado Gemini API Key en BD_CONFIG_BOTS: {'CONFIGURADA (' + str(key_len) + ' caracteres)' if key_len > 10 else 'VACÍA / NO CONFIGURADA'}")
+        print(f"📚 Registros cargados en Historial (Capa 3): {len(registros_hist)}")
 
         filas_todas = ws_cot.get_all_values()
         filas_sanas = [ENCABEZADOS_COT]
-        existentes = set()
+        mapa_existentes = {}
         if len(filas_todas) > 1:
             for r in filas_todas[1:]:
                 if len(r) >= 32:
                     ciu_r, edo_r, tal_r = str(r[9]), str(r[10]), str(r[8])
                     excluido, _ = es_siniestro_excluido(ciu_r, edo_r, tal_r, cfg)
                     es_llanta_parab = es_pieza_convenio_excluida(r[14])
-                    llave_unica = f"{str(r[2]).strip()}_{str(r[12]).strip()}"
-                    if not excluido and not es_llanta_parab and llave_unica not in existentes:
+                    llave_unica = construir_llave_partida(r[2], r[14], r[11], r[12])
+                    if not excluido and not es_llanta_parab and llave_unica not in mapa_existentes:
+                        mapa_existentes[llave_unica] = len(filas_sanas)
                         filas_sanas.append(r[:32])
-                        existentes.add(llave_unica)
+        hubo_cambios_hoja = (len(filas_todas) > 1 and len(filas_sanas) != len(filas_todas))
     except Exception as e_sh:
         print(f"❌ [ERROR GOOGLE SHEETS]: {e_sh}")
         traceback.print_exc()
         return
 
     nuevas = []
+    archivadas_cnt = 0
+    reactivadas_cnt = 0
+    recotizadas_cnt = 0
+    estado_ia_sesion = {
+        "modelos": None,
+        "agotados_429": set(),
+        "search_ok": bool(cfg.get("GEMINI_USAR_SEARCH", False))
+    }
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=modo_headless, args=["--no-sandbox"])
         ctx = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-            viewport={"width": 1366, "height": 900}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            viewport={"width": 1366, "height": 900},
+            locale="es-MX"
         )
         page = ctx.new_page()
         page_buscador = ctx.new_page()
@@ -613,19 +838,15 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
             lista_siniestros = [t.strip() for t in enlaces_txt if len(t.strip()) >= 5]
             print(f"-> Siniestros activos en bandeja del portal: {len(lista_siniestros)}")
 
-            # Mover automáticamente al Historial los siniestros que estaban PENDIENTE pero ya cerraron en el portal
             activos_set = set(lista_siniestros)
-            archivadas_cnt = 0
-            for r_sana in filas_sanas[1:]:
-                if str(r_sana[31]).strip().upper() == "PENDIENTE" and str(r_sana[2]).strip() not in activos_set:
-                    r_sana[31] = "HISTORIAL / CERRADA"
-                    archivadas_cnt += 1
-
-            if archivadas_cnt > 0 or len(filas_sanas) != len(filas_todas):
-                ws_cot.clear()
-                ws_cot.update(range_name='A1', values=filas_sanas, value_input_option='USER_ENTERED')
-                if archivadas_cnt > 0:
-                    print(f"📁 Se movieron {archivadas_cnt} partida(s) que ya no están por cotizar al Historial como respaldo.")
+            if activos_set:
+                for r_sana in filas_sanas[1:]:
+                    if str(r_sana[31]).strip().upper() == "PENDIENTE" and str(r_sana[2]).strip() not in activos_set:
+                        r_sana[31] = "HISTORIAL / CERRADA"
+                        archivadas_cnt += 1
+                        hubo_cambios_hoja = True
+            else:
+                print("⚠️ La bandeja devolvió 0 siniestros activos; se omite el archivado automático por seguridad.")
 
             for idx, num_sin in enumerate(lista_siniestros):
                 print(f"\n[{idx+1}/{len(lista_siniestros)}] Revisando interior del Siniestro {num_sin}...")
@@ -680,7 +901,16 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                                 let tr = sel.closest('tr');
                                 if (tr) {
                                     let tds = tr.querySelectorAll('td');
-                                    piezas.push({ idx: idx, cantidad: tds[0]?tds[0].textContent.trim():'1', descripcion: tds[1]?fullTxt(tds[1]):'' });
+                                    let selVal = (sel.value || '').trim();
+                                    let priceInp = tr.querySelector("input[name='price']");
+                                    let priceVal = priceInp ? (priceInp.value || '').trim() : '';
+                                    let yaCotizada = (selVal === '133002' && priceVal !== '' && priceVal !== '0');
+                                    piezas.push({
+                                        idx: idx,
+                                        cantidad: tds[0] ? tds[0].textContent.trim() : '1',
+                                        descripcion: tds[1] ? fullTxt(tds[1]) : '',
+                                        ya_cotizada: yaCotizada
+                                    });
                                 }
                             });
                             return { marca, vehiculo, modelo, vin, taller, ciudad, estado, fecha_fin, piezas };
@@ -690,6 +920,7 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                     taller_real = detalle.get('taller', '')
                     ciudad_real = detalle.get('ciudad', '')
                     estado_real = detalle.get('estado', '')
+                    fecha_fin_real = detalle.get('fecha_fin', '').strip()
 
                     ex_det, motivo_det = es_siniestro_excluido(ciudad_real, estado_real, taller_real, cfg)
                     if ex_det:
@@ -707,34 +938,84 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                         if es_pieza_convenio_excluida(pza['descripcion']):
                             print(f"     ⏭️ Omitiendo por convenio (Llanta/Parabrisas): {pza['descripcion']}")
                             continue
-                        if f"{num_sin}_{pza['idx']}" in existentes:
+
+                        llave_pza = construir_llave_partida(num_sin, pza['descripcion'], fecha_fin_real, pza['idx'])
+                        ya_cot_portal = bool(pza.get('ya_cotizada', False))
+
+                        if llave_pza in mapa_existentes:
+                            idx_fila_sana = mapa_existentes[llave_pza]
+                            if idx_fila_sana > 0:
+                                fila_ex = filas_sanas[idx_fila_sana]
+                                est_actual = str(fila_ex[31]).strip().upper()
+                                if not ya_cot_portal and est_actual != "PENDIENTE":
+                                    fila_ex[31] = "PENDIENTE"
+                                    fila_ex[30] = "FALSE"
+                                    fila_ex[12] = str(pza['idx'])
+                                    if fecha_fin_real:
+                                        fila_ex[11] = fecha_fin_real
+                                    reactivadas_cnt += 1
+                                    hubo_cambios_hoja = True
+                                    print(f"     ♻️ Rescatada del Historial ('{est_actual}' -> 'PENDIENTE'): {pza['descripcion']}")
+                                elif ya_cot_portal and est_actual == "PENDIENTE":
+                                    fila_ex[31] = "ENVIADA PORTAL"
+                                    hubo_cambios_hoja = True
+                                    print(f"     ✅ Ya estaba cotizada en portal; marcada ENVIADA PORTAL: {pza['descripcion']}")
+
+                                # Auto-recotizar si sigue PENDIENTE pero sus precios quedaron en $0
+                                if not ya_cot_portal and str(fila_ex[31]).strip().upper() == "PENDIENTE":
+                                    costo_ex = parse_monto_seguro(fila_ex[23])
+                                    sug_ex = parse_monto_seguro(fila_ex[25])
+                                    lib_ex = parse_monto_seguro(fila_ex[26])
+                                    if costo_ex == 0 and sug_ex == 0 and lib_ex == 0:
+                                        q = expandir_descripcion(pza['descripcion'], marca_clean, detalle.get('vehiculo', ''), ano_clean, cfg.get("DICCIONARIO_EXTRA", {}))
+                                        partidas_a_cotizar.append({
+                                            "idx": pza['idx'],
+                                            "cantidad": pza['cantidad'],
+                                            "desc": pza['descripcion'],
+                                            "q": q,
+                                            "fila_sana_idx": idx_fila_sana
+                                        })
                             continue
+
+                        if ya_cot_portal:
+                            continue
+
                         q = expandir_descripcion(pza['descripcion'], marca_clean, detalle.get('vehiculo', ''), ano_clean, cfg.get("DICCIONARIO_EXTRA", {}))
                         partidas_a_cotizar.append({
                             "idx": pza['idx'],
                             "cantidad": pza['cantidad'],
                             "desc": pza['descripcion'],
-                            "q": q
+                            "q": q,
+                            "fila_sana_idx": None
                         })
 
                     if not partidas_a_cotizar:
                         regresar_a_lista_siniestros(page, frame)
                         continue
 
-                    print(f"  ✅ Cotizando {len(partidas_a_cotizar)} pieza(s) | Auto: {marca_clean} {mod_comercial} ({ano_clean}) | Taller: {taller_real}")
+                    cant_recot = sum(1 for x in partidas_a_cotizar if x["fila_sana_idx"] is not None)
+                    cant_nuevas = len(partidas_a_cotizar) - cant_recot
+                    etiqueta_op = f"{cant_nuevas} nueva(s), {cant_recot} en $0 a recotizar" if cant_recot else f"{cant_nuevas} pieza(s)"
+                    print(f"  ✅ Cotizando {etiqueta_op} | Auto: {marca_clean} {mod_comercial} ({ano_clean}) | Taller: {taller_real}")
 
                     # CAPA 1: Gemini AI
                     precios_ia_lote = cotizar_lote_con_gemini_ai(
                         marca_clean, mod_comercial, ano_clean, detalle.get('vin', ''),
                         partidas_a_cotizar, cfg.get("TC_USD", 20.50), cfg.get("GEMINI_API_KEY", ""),
-                        cfg.get("PORTALES_BUSQUEDA", PORTALES_DEFAULT)
+                        cfg.get("PORTALES_BUSQUEDA", PORTALES_DEFAULT),
+                        estado_ia=estado_ia_sesion,
+                        usar_search_cfg=cfg.get("GEMINI_USAR_SEARCH", False)
                     )
 
-                    ahora = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-6))).strftime("%Y-%m-%d %H:%M")
+                    tz_mx_now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-6)))
+                    ahora = tz_mx_now.strftime("%Y-%m-%d %H:%M")
+                    tag_fecha = tz_mx_now.strftime("%m%d")
+
                     for item_p in partidas_a_cotizar:
                         idx_p = item_p['idx']
                         desc_p = item_p['desc']
                         q = item_p['q']
+                        fila_sana_idx = item_p['fila_sana_idx']
 
                         datos_ia = precios_ia_lote.get(idx_p, {})
                         p_orig = datos_ia.get("orig", 0)
@@ -743,16 +1024,15 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                         link_directo = datos_ia.get("link", "")
                         fuente_ia = datos_ia.get("fuente", "ML").upper()
 
-                        # CAPA 2: Si Capa 1 devolvió $0, buscar con navegador Chromium en DuckDuckGo
+                        # CAPA 2: Mercado Libre directo + DuckDuckGo respaldo si Capa 1 devolvió $0
                         if p_orig == 0 and p_noorig == 0 and p_gen == 0:
-                            print(f"     🌐 [Capa 2 - Web] Buscando '{q}' en portales...")
+                            print(f"     🌐 [Capa 2 - ML/Web] Buscando '{q}'...")
                             p_orig, p_noorig, p_gen, link_web = buscar_web_playwright_respaldo(page_buscador, q, marca_clean, mod_comercial)
                             if link_web:
                                 link_directo = link_web
 
-                        # Construir los 3 enlaces dedicados por columna (sin URLs inventadas por IA que den 404)
+                        # Construir los 3 enlaces dedicados por columna
                         q_sin_guion = q.replace(mod_comercial, mod_comercial.replace("-", ""))
-                        # Para Radec quitamos el nombre largo de la marca (ej. CHEVROLET) porque Radec usa abreviaturas (CV SONIC 17-19)
                         q_radec = q_sin_guion.replace(f" {marca_clean} ", " ")
                         vin_clean = str(detalle.get('vin', '')).strip()
                         l_orig_def = f"https://partsouq.com/en/search/all?q={urllib.parse.quote(vin_clean)}" if len(vin_clean) >= 11 else f"https://www.google.com/search?q={urllib.parse.quote(q_sin_guion + ' OEM original partsouq')}"
@@ -761,7 +1041,7 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                         if "||" not in str(link_directo) or "radec.com.mx/catalogo/" in str(link_directo):
                             link_directo = f"{l_orig_def} || {l_base_ml} || {l_gen_def}"
 
-                        # CAPA 3: Historial exacto en tu base
+                        # CAPA 3: Historial normalizado
                         p_hist = buscar_en_historial(registros_hist, desc_p, mod_comercial)
                         flete = estimar_flete(desc_p, ciudad_real, estado_real)
 
@@ -781,19 +1061,41 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
                         tag_prov = re.sub(r'[^A-Z]', '', fuente_cod)[:4] or "RAD"
                         codigo_hub_gen = f"HUB{tag_prov}{random.randint(100, 999)}"
 
-                        print(f"     💰 #{idx_p+1} {desc_p} ({q}) ➔ Orig: ${p_orig} | Semi: ${p_noorig} | Gen: ${p_gen} | Hist: ${p_hist} ➔ Sug: ${sug} ({codigo_hub_gen})")
+                        pref_log = "🔄" if fila_sana_idx is not None else "💰"
+                        print(f"     {pref_log} #{idx_p+1} {desc_p} ({q}) ➔ Orig: ${p_orig} | Semi: ${p_noorig} | Gen: ${p_gen} | Hist: ${p_hist} ➔ Sug: ${sug} ({codigo_hub_gen})")
 
-                        nuevas.append([
-                            f"COT-{num_sin}-{idx_p+1}", ahora, num_sin, "1",
-                            marca_clean, f"{marca_clean} {mod_comercial}".strip(), ano_clean, detalle.get('vin', ''),
-                            taller_real, ciudad_real, estado_real, detalle.get('fecha_fin', ''),
-                            idx_p, item_p['cantidad'], desc_p, q,
-                            p_orig, p_noorig, p_gen, p_hist,
-                            flete, fuente_cod, origen, costo,
-                            margen_def, sug, 0, sug,
-                            codigo_hub_gen, link_directo, "FALSE", "PENDIENTE"
-                        ])
-                        existentes.add(f"{num_sin}_{idx_p}")
+                        if fila_sana_idx is not None:
+                            if costo > 0:
+                                fila_up = filas_sanas[fila_sana_idx]
+                                fila_up[15] = q
+                                fila_up[16] = p_orig
+                                fila_up[17] = p_noorig
+                                fila_up[18] = p_gen
+                                fila_up[19] = p_hist
+                                fila_up[20] = flete
+                                fila_up[21] = fuente_cod
+                                fila_up[22] = origen
+                                fila_up[23] = costo
+                                fila_up[24] = margen_def
+                                fila_up[25] = sug
+                                fila_up[27] = sug
+                                fila_up[28] = codigo_hub_gen
+                                fila_up[29] = link_directo
+                                recotizadas_cnt += 1
+                                hubo_cambios_hoja = True
+                        else:
+                            id_cot_unico = f"COT-{num_sin}-{tag_fecha}-{idx_p+1}"
+                            nuevas.append([
+                                id_cot_unico, ahora, num_sin, "1",
+                                marca_clean, f"{marca_clean} {mod_comercial}".strip(), ano_clean, detalle.get('vin', ''),
+                                taller_real, ciudad_real, estado_real, fecha_fin_real,
+                                idx_p, item_p['cantidad'], desc_p, q,
+                                p_orig, p_noorig, p_gen, p_hist,
+                                flete, fuente_cod, origen, costo,
+                                margen_def, sug, 0, sug,
+                                codigo_hub_gen, link_directo, "FALSE", "PENDIENTE"
+                            ])
+                            mapa_existentes[construir_llave_partida(num_sin, desc_p, fecha_fin_real, idx_p)] = -1
 
                     regresar_a_lista_siniestros(page, frame)
                 except Exception as e_sin:
@@ -802,11 +1104,24 @@ def ejecutar_extraccion_cotizaciones(modo_headless=True):
         finally:
             browser.close()
 
-    if nuevas:
+    if hubo_cambios_hoja:
+        total_final = filas_sanas + nuevas
+        if len(total_final) > 1:
+            ws_cot.clear()
+            ws_cot.update(range_name='A1', values=total_final, value_input_option='USER_ENTERED')
+        if archivadas_cnt > 0:
+            print(f"\n📁 Se movieron {archivadas_cnt} partida(s) cerradas al Historial.")
+        if reactivadas_cnt > 0:
+            print(f"♻️ Se rescataron automáticamente {reactivadas_cnt} partida(s) del Historial a PENDIENTE.")
+        if recotizadas_cnt > 0:
+            print(f"🔄 Se recotizaron y actualizaron {recotizadas_cnt} partida(s) que estaban en $0.")
+        if nuevas:
+            print(f"✅ Se agregaron {len(nuevas)} partida(s) nuevas en BD_COTIZACIONES.")
+    elif nuevas:
         ws_cot.append_rows(nuevas, value_input_option='USER_ENTERED')
         print(f"\n✅ {len(nuevas)} partidas cotizadas con éxito en BD_COTIZACIONES.")
     else:
-        print("\nℹ️ Proceso finalizado sin partidas nuevas por agregar.")
+        print("\nℹ️ Proceso finalizado sin partidas nuevas ni cambios por aplicar.")
 
 def ejecutar_envio_cotizaciones(modo_headless=True):
     print("=== INICIANDO ENVÍO DE COTIZACIONES AL PORTAL ===")
@@ -849,10 +1164,15 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
             p_suger = parse_m(idx_sug)
             p_int = p_libre if p_libre > 0 else (p_final if p_final > 0 else p_suger)
 
+            try:
+                pza_num = int(str(r[idx_pza]).strip())
+            except Exception:
+                continue
+
             if p_int > 0:
-                por_enviar.setdefault(str(r[idx_sin]).strip(), {})[int(r[idx_pza])] = {
+                por_enviar.setdefault(str(r[idx_sin]).strip(), {})[pza_num] = {
                     'gs_row': r_num,
-                    'partida_idx': int(r[idx_pza]),
+                    'partida_idx': pza_num,
                     'origen_txt': str(r[idx_ori]).strip().upper(),
                     'precio_int': str(p_int),
                     'codigo_hub': re.sub(r'[^A-Za-z0-9]', '', str(r[idx_cod]).strip().upper())[:20]
@@ -912,8 +1232,13 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                     time.sleep(2.5)
 
                     frame = obtener_frame_derecho(page, espera_seg=8)
+                    total_sels = frame.locator("select[name='statusPart']").count()
+                    inyectadas = []
 
                     for idx_fila, it in sorted(dict_partidas.items()):
+                        if idx_fila >= total_sels:
+                            print(f"   ⚠️ Partida #{idx_fila+1} fuera de rango en portal (solo hay {total_sels}). Omitida.")
+                            continue
                         cod_origen = mapa_orig.get(it['origen_txt'], "42008")
                         sel_status = frame.locator("select[name='statusPart']").nth(idx_fila)
                         sel_status.select_option("133002")
@@ -935,8 +1260,13 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                         frame.locator("input[name='codePart']").nth(idx_fila).fill(it['codigo_hub'])
                         frame.locator("input[name='price']").nth(idx_fila).fill(it['precio_int'])
                         frame.locator("select[name='origin']").nth(idx_fila).select_option(cod_origen)
+                        inyectadas.append(it)
                         print(f"   ✔ Partida #{idx_fila+1} llenada: ${it['precio_int']} | {it['origen_txt']} | {it['codigo_hub']} | Fecha: {fecha_usada}")
                         time.sleep(0.15)
+
+                    if not inyectadas:
+                        regresar_a_lista_siniestros(page, frame)
+                        continue
 
                     page.screenshot(path="evidencia_antes_grabar.png", full_page=True)
 
@@ -950,7 +1280,7 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                             if m_fec:
                                 fecha_corregida = m_fec.group(1).strip().upper()
                                 ultimo_dialogo["error"] = ""
-                                for idx_fila in dict_partidas.keys():
+                                for it in inyectadas:
                                     frame.evaluate(
                                         """(args) => {
                                             let fv = document.getElementById('promiseDatePart' + args.i);
@@ -958,7 +1288,7 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
                                             if (fv) fv.value = args.f;
                                             if (fh) fh.value = args.f;
                                         }""",
-                                        {"i": idx_fila, "f": fecha_corregida}
+                                        {"i": it['partida_idx'], "f": fecha_corregida}
                                     )
                                 btn.first.click()
                                 time.sleep(3.5)
@@ -967,7 +1297,7 @@ def ejecutar_envio_cotizaciones(modo_headless=True):
 
                         if not ultimo_dialogo["error"]:
                             print(f"   💾 Siniestro {sin} GRABADO exitosamente en el portal.")
-                            for it in dict_partidas.values():
+                            for it in inyectadas:
                                 actualizar.append(gspread.Cell(row=it['gs_row'], col=idx_est + 1, value="ENVIADA PORTAL"))
                         else:
                             print(f"   ❌ El portal rechazó el guardado con la alerta: {ultimo_dialogo['error']}")

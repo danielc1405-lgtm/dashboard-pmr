@@ -1257,7 +1257,7 @@ def depurar_adjuntos_antiguos_chat(ws_img, dias_vigencia=5):
     except Exception:
         pass
 
-def guardar_adjunto_chat_en_sheet(archivo_bytes, nombre_archivo, autor):
+def guardar_adjunto_chat_en_sheet(archivo_bytes, nombre_archivo, autor, depurar=True):
     """Guarda imagen (comprimida) o documento (PDF/Excel/Word/CSV <=450KB) en BD_CHAT_IMAGENES y depura >5 días."""
     import io
     import uuid
@@ -1310,8 +1310,9 @@ def guardar_adjunto_chat_en_sheet(archivo_bytes, nombre_archivo, autor):
     except Exception:
         ws_img = doc.add_worksheet(title="BD_CHAT_IMAGENES", rows=1000, cols=20)
 
-    # Depuración automática de archivos con 5+ días de antigüedad (1 vez por subida)
-    depurar_adjuntos_antiguos_chat(ws_img, dias_vigencia=5)
+    # Depuración automática de archivos con 5+ días de antigüedad (1 vez por lote)
+    if depurar:
+        depurar_adjuntos_antiguos_chat(ws_img, dias_vigencia=5)
 
     primera_fila = ws_img.row_values(1)
     if not primera_fila:
@@ -5621,26 +5622,33 @@ elif vista_actual == "🚚 Rutas":
                             ed_comp = st.data_editor(df_prov[cols_ver], column_config=cfg_comp, hide_index=True, use_container_width=True, key=f"gest_{prov}")
                             notas_comp = st.text_input("📝 Instrucciones para el Operador:", placeholder="Ej. Pagar en efectivo y traer factura...", key=f"notas_gest_{prov}")
 
+                            k_ver_qr_c = f"ver_qr_comp_{prov}"
+                            v_qr_c = st.session_state.get(k_ver_qr_c, 0)
                             c_qr_c, c_btn_c = st.columns([1.5, 1.5], vertical_alignment="bottom")
                             with c_qr_c:
                                 qr_comp_up = st.file_uploader(
-                                    "📷 Adjuntar QR / Foto (Opcional):",
+                                    "📷 Adjuntar QR / Fotos (Opcional - Múltiple):",
                                     type=["png", "jpg", "jpeg", "webp"],
-                                    key=f"qr_comp_ruta_{prov}"
+                                    accept_multiple_files=True,
+                                    key=f"qr_comp_ruta_{prov}_{v_qr_c}"
                                 )
                             with c_btn_c:
                                 btn_gest_ok = st.button(f"➕ Procesar Selección para {prov}", type="primary", use_container_width=True, key=f"btn_gest_{prov}")
 
                             if btn_gest_ok:
-                                if qr_comp_up is not None:
-                                    try:
-                                        tag_qr = guardar_adjunto_chat_en_sheet(qr_comp_up.getvalue(), qr_comp_up.name, usuario_activo)
-                                        notas_comp = f"{notas_comp} {tag_qr}".strip()
-                                    except Exception as e_qr:
-                                        st.warning(f"No se pudo adjuntar el QR: {e_qr}")
                                 seleccionados = ed_comp[(ed_comp['Cotizar'] == True) | (ed_comp['Pagar'] == True) | (ed_comp['Recoger'] == True) | (ed_comp['Directo'] == True)]
                                 
                                 if not seleccionados.empty:
+                                    notas_comp_final = notas_comp
+                                    if qr_comp_up:
+                                        archivos_c = qr_comp_up if isinstance(qr_comp_up, list) else [qr_comp_up]
+                                        for idx_fc, f_c in enumerate(archivos_c):
+                                            try:
+                                                tag_qr = guardar_adjunto_chat_en_sheet(f_c.getvalue(), f_c.name, usuario_activo, depurar=(idx_fc == 0))
+                                                notas_comp_final = f"{notas_comp_final} {tag_qr}".strip()
+                                            except Exception as e_qr:
+                                                st.warning(f"No se pudo adjuntar {f_c.name}: {e_qr}")
+
                                     df_envio = df_prov.loc[seleccionados.index].copy()
                                     df_envio['Proveedor'] = prov
                                     if col_id: df_envio[col_id] = df_envio['Siniestro_Col']
@@ -5652,12 +5660,12 @@ elif vista_actual == "🚚 Rutas":
                                         # 1. COTIZAR
                                         df_cot = df_envio[seleccionados['Cotizar'] == True]
                                         if not df_cot.empty:
-                                            if despachar_a_bd_rutas(df_cot, "cotizacion", f"[COTIZAR] {notas_comp}"): exito = True
+                                            if despachar_a_bd_rutas(df_cot, "cotizacion", f"[COTIZAR] {notas_comp_final}"): exito = True
                                         
                                         # 2. PAGAR
                                         df_pag = df_envio[seleccionados['Pagar'] == True]
                                         if not df_pag.empty:
-                                            if despachar_a_bd_rutas(df_pag, "pago", f"[PAGAR] {notas_comp}"):
+                                            if despachar_a_bd_rutas(df_pag, "pago", f"[PAGAR] {notas_comp_final}"):
                                                 exito = True
                                                 ws_c_upd = doc.worksheet("BD_COMPRAS")
                                                 headers_c_upd = [str(h).strip().upper() for h in ws_c_upd.row_values(1)]
@@ -5669,7 +5677,7 @@ elif vista_actual == "🚚 Rutas":
                                         # 3. RECOGER (Manda a ruta y marca Recibido = SI)
                                         df_rec = df_envio[seleccionados['Recoger'] == True]
                                         if not df_rec.empty:
-                                            if despachar_a_bd_rutas(df_rec, "compra", f"[RECOGER] {notas_comp}"):
+                                            if despachar_a_bd_rutas(df_rec, "compra", f"[RECOGER] {notas_comp_final}"):
                                                 exito = True
                                                 ws_c_upd = doc.worksheet("BD_COMPRAS")
                                                 headers_c_upd = [str(h).strip().upper() for h in ws_c_upd.row_values(1)]
@@ -5690,6 +5698,7 @@ elif vista_actual == "🚚 Rutas":
                                                 if celdas_rec: ws_c_upd.update_cells(celdas_rec, value_input_option='USER_ENTERED')
                                         
                                         if exito:
+                                            st.session_state[k_ver_qr_c] = v_qr_c + 1
                                             st.cache_data.clear()
                                             st.success(f"✅ ¡Operación procesada para {prov}!")
                                             time.sleep(1)
@@ -5808,6 +5817,7 @@ elif vista_actual == "🚚 Rutas":
         if prov_eventual == "":
             st.info("👆 Selecciona un lugar arriba para habilitar la captura.")
         else:
+            v_qr_ev = st.session_state.get("ver_qr_ev_ruta", 0)
             with st.form("form_cotizacion_ruta", clear_on_submit=False):
                 nuevo_prov = ""
                 nueva_suc_cot = ""
@@ -5863,7 +5873,12 @@ elif vista_actual == "🚚 Rutas":
                 )
 
                 notas_eventual = st.text_input("📝 Instrucciones / Notas para el operador:", placeholder="Ej. Recoger fascia para llevar a detallar / Tomar fotos de la pieza dañada...")
-                qr_ev_up = st.file_uploader("📷 Adjuntar QR / Foto para el chofer (Opcional):", type=["png", "jpg", "jpeg", "webp"], key="qr_ev_ruta")
+                qr_ev_up = st.file_uploader(
+                    "📷 Adjuntar QR / Fotos para el chofer (Opcional - puedes subir varias):",
+                    type=["png", "jpg", "jpeg", "webp"],
+                    accept_multiple_files=True,
+                    key=f"qr_ev_ruta_{v_qr_ev}"
+                )
 
                 btn_cot = st.form_submit_button(f"➕ Enviar Vuelta ({mapa_tipos_vuelta[tipo_vuelta_lbl]}) a la Ruta", type="primary")
 
@@ -5932,14 +5947,17 @@ elif vista_actual == "🚚 Rutas":
                         df_ev_out = pd.DataFrame(datos_ev)
                         if col_desc and col_desc not in df_ev_out.columns: df_ev_out[col_desc] = piezas_lista
 
-                        if qr_ev_up is not None:
-                            try:
-                                tag_qr_ev = guardar_adjunto_chat_en_sheet(qr_ev_up.getvalue(), qr_ev_up.name, usuario_activo)
-                                notas_con_pieza = f"{notas_con_pieza} {tag_qr_ev}".strip()
-                            except Exception:
-                                pass
+                        if qr_ev_up:
+                            archivos_ev = qr_ev_up if isinstance(qr_ev_up, list) else [qr_ev_up]
+                            for idx_fev, f_ev in enumerate(archivos_ev):
+                                try:
+                                    tag_qr_ev = guardar_adjunto_chat_en_sheet(f_ev.getvalue(), f_ev.name, usuario_activo, depurar=(idx_fev == 0))
+                                    notas_con_pieza = f"{notas_con_pieza} {tag_qr_ev}".strip()
+                                except Exception as e_qr_ev:
+                                    st.warning(f"No se pudo adjuntar {f_ev.name}: {e_qr_ev}")
 
                         if despachar_a_bd_rutas(df_ev_out, tipo_op_final, notas_con_pieza):
+                            st.session_state["ver_qr_ev_ruta"] = v_qr_ev + 1
                             st.success(f"✅ ¡Vuelta de {tipo_op_final} enviada a ruta para {nombre_final} ({len(piezas_lista)} pieza(s))!")
                             time.sleep(1)
                             st.rerun()

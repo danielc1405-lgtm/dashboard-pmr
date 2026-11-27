@@ -678,4 +678,602 @@ def renderizar_hilo_chat_movil(row, usuario_real, grupos_identidad, stickers_map
         mapa_fotos.update(cargar_fotos_chat_sheets())
         mapa_fotos.update(st.session_state.get("cache_fotos_chat_local", {}))
 
-    def formatear_cuerpo(
+    def formatear_cuerpo(txt_crudo):
+        txt_str = str(txt_crudo or "").strip()
+        m_solo_st = re.fullmatch(r'\[STICKER:([A-Za-z0-9_-]+)\]', txt_str, flags=re.IGNORECASE)
+        if m_solo_st:
+            k_st = m_solo_st.group(1).strip().upper()
+            info_st = stickers_map.get(k_st)
+            if info_st:
+                return f'<img src="{info_st["data_uri"]}" class="chat-sticker-solo" alt="{html.escape(k_st)}" />', True
+            return f'<span style="color:#8696A0; font-style:italic;">[🏷️ Sticker: {html.escape(k_st)}]</span>', False
+
+        txt_esc = html.escape(txt_str).replace('\n', '<br>')
+
+        def _rep_foto(m):
+            id_f = m.group(1).strip().upper()
+            src_f = mapa_fotos.get(id_f, "")
+            if src_f:
+                return f'<div class="img-wrap"><img src="{src_f}" class="chat-img" onclick="abrirZoom(this.src)" /></div>'
+            return f'<span style="color:#8696A0; font-style:italic;">[📷 Imagen {id_f} expirada (>5 días)]</span>'
+
+        def _rep_doc(m):
+            id_d = m.group(1).strip().upper()
+            nom_d = m.group(2).strip()
+            src_d = mapa_fotos.get(id_d, "")
+            ic = "📊" if any(x in nom_d.lower() for x in [".xls", ".csv"]) else ("📝" if ".doc" in nom_d.lower() else "📄")
+            if src_d:
+                return f'<div class="doc-card"><a href="{src_d}" download="{nom_d}" class="doc-link">{ic} <span>{nom_d}</span> <b>⬇️</b></a></div>'
+            return f'<span style="color:#8696A0; font-style:italic;">[{ic} {nom_d} expirado]</span>'
+
+        def _rep_sticker(m):
+            k_st = m.group(1).strip().upper()
+            info_st = stickers_map.get(k_st)
+            if info_st:
+                return f'<div class="img-wrap"><img src="{info_st["data_uri"]}" class="chat-sticker-inline" /></div>'
+            return f'<span style="color:#8696A0;">[🏷️ {html.escape(k_st)}]</span>'
+
+        txt_out = re.sub(r'\[FOTO:([A-Za-z0-9]+)\]', _rep_foto, txt_esc)
+        txt_out = re.sub(r'\[DOC:([A-Za-z0-9]+)\|([^\]]+)\]', _rep_doc, txt_out)
+        txt_out = re.sub(r'\[STICKER:([A-Za-z0-9_-]+)\]', _rep_sticker, txt_out, flags=re.IGNORECASE)
+        return txt_out, False
+
+    def armar_burbuja(autor, fecha, cuerpo_raw, es_mio):
+        cuerpo_html, es_solo_sticker = formatear_cuerpo(cuerpo_raw)
+        align = "flex-end" if es_mio else "flex-start"
+        color_autor = "#53BDEB" if es_mio else "#00A884"
+        header_h = f'<div class="author" style="color:{color_autor};">{html.escape(autor)} <span class="time">• {html.escape(fecha)}</span></div>' if autor else ""
+        if es_solo_sticker:
+            return (
+                f'<div class="msg-row" style="justify-content:{align};">'
+                f'<div class="sticker-wrap" style="align-items:{align};">'
+                f'{header_h}{cuerpo_html}'
+                f'</div></div>'
+            )
+        bg = "#005C4B" if es_mio else "#1F2C34"
+        rad = "12px 2px 12px 12px" if es_mio else "2px 12px 12px 12px"
+        return (
+            f'<div class="msg-row" style="justify-content:{align};">'
+            f'<div class="bubble" style="background-color:{bg}; border-radius:{rad};">'
+            f'{header_h}<div class="txt">{cuerpo_html}</div>'
+            f'</div></div>'
+        )
+
+    burbujas = []
+    emisor_0 = str(row.get('Emisor', 'Usuario')).strip()
+    fecha_0 = str(row.get('Fecha_Creacion', '')).strip()
+    burbujas.append(armar_burbuja(emisor_0, fecha_0, row.get('Instruccion', ''), es_mismo_usuario(usuario_real, emisor_0, grupos_identidad)))
+
+    historial_raw = str(row.get('Respuesta', '')).strip()
+    if historial_raw and historial_raw.lower() not in ["none", "nan"]:
+        for linea in historial_raw.replace('\\n', '\n').split('\n'):
+            ll = linea.strip()
+            if not ll:
+                continue
+            m = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', ll)
+            if m:
+                f_m, a_m, t_m = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+                es_m = es_mismo_usuario(usuario_real, a_m, grupos_identidad)
+            else:
+                f_m, a_m, t_m = "", "", ll
+                es_m = es_mismo_usuario(usuario_real, ll, grupos_identidad)
+            burbujas.append(armar_burbuja(a_m, f_m, t_m, es_m))
+
+    iframe_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+            html, body {{
+                height: 100%; width: 100%;
+                background: transparent;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                overflow: hidden;
+            }}
+            #chat-vp {{
+                height: 100%; width: 100%;
+                overflow-y: auto; overflow-x: hidden;
+                background-color: #0B141A;
+                background-image: radial-gradient(#1F2C34 1px, transparent 1px);
+                background-size: 20px 20px;
+                border: 1px solid #222E35;
+                border-radius: 12px;
+                padding: 12px 10px;
+            }}
+            .msg-row {{ display: flex; margin-bottom: 10px; width: 100%; }}
+            .bubble {{
+                color: #E9EDEF;
+                padding: 8px 12px;
+                max-width: 86%;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.45);
+                word-wrap: break-word;
+            }}
+            .sticker-wrap {{ display: flex; flex-direction: column; max-width: 75%; }}
+            .chat-sticker-solo {{
+                width: 132px; max-width: 100%; height: auto;
+                object-fit: contain;
+                filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55));
+            }}
+            .chat-sticker-inline {{
+                width: 110px; height: auto; object-fit: contain;
+            }}
+            .author {{ font-size: 0.74rem; font-weight: 700; margin-bottom: 3px; }}
+            .time {{ color: #8696A0; font-weight: normal; font-size: 0.68rem; }}
+            .txt {{ font-size: 0.93rem; line-height: 1.4; }}
+            .img-wrap {{ margin-top: 5px; margin-bottom: 3px; }}
+            .chat-img {{
+                max-width: 220px; max-height: 200px;
+                border-radius: 8px;
+                border: 1px solid rgba(255,255,255,0.18);
+                cursor: zoom-in; display: block;
+            }}
+            .doc-card {{
+                margin-top: 5px; background: rgba(0,0,0,0.3);
+                border: 1px solid rgba(255,255,255,0.18);
+                border-radius: 7px; padding: 7px 10px;
+            }}
+            .doc-link {{
+                color: #E9EDEF; text-decoration: none; font-size: 0.85rem;
+                display: flex; align-items: center; gap: 6px;
+            }}
+            #zoom-ov {{
+                display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.94); z-index: 9999;
+                align-items: center; justify-content: center; flex-direction: column;
+            }}
+            #zoom-ov img {{ max-width: 95%; max-height: 80%; border-radius: 8px; }}
+            #zoom-bar {{ margin-top: 10px; display: flex; gap: 12px; }}
+            .zbtn {{
+                background: #00A884; color: #fff; text-decoration: none;
+                padding: 7px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 600;
+            }}
+        </style>
+    </head>
+    <body>
+        <div id="chat-vp">{''.join(burbujas)}</div>
+        <div id="zoom-ov" onclick="cerrarZoom()">
+            <img id="zoom-img" src="" />
+            <div id="zoom-bar">
+                <a id="zoom-dl" class="zbtn" href="" download="foto_chat_pmr.jpg" onclick="event.stopPropagation();">⬇️ Descargar</a>
+                <span class="zbtn" style="background:#374045;">✖ Cerrar</span>
+            </div>
+        </div>
+        <script>
+            const vp = document.getElementById('chat-vp');
+            function bajar() {{ if (vp) {{ vp.scrollTop = vp.scrollHeight; }} }}
+            bajar();
+            window.addEventListener('load', bajar);
+            setTimeout(bajar, 250);
+            function abrirZoom(src) {{
+                document.getElementById('zoom-img').src = src;
+                document.getElementById('zoom-dl').href = src;
+                document.getElementById('zoom-ov').style.display = 'flex';
+            }}
+            function cerrarZoom() {{
+                document.getElementById('zoom-ov').style.display = 'none';
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    components.html(iframe_html, height=430, scrolling=False)
+
+# ==============================================================================
+# === 6. CARGA DE DATOS COMUNES Y CONTROL DE PANTALLAS ===
+# ==============================================================================
+usuarios_reales, grupos_identidad = obtener_mapa_usuarios()
+mapa_info_sin, mapa_piezas_sin, lista_siniestros = cargar_contexto_siniestros()
+stickers_map = cargar_stickers_locales()
+
+if 'pmr_vista_movil' not in st.session_state:
+    st.session_state['pmr_vista_movil'] = 'bandeja'
+
+def enviar_mensaje_movil(row_act, headers_t, texto_msg="", archivo_up=None, sticker_clave=None):
+    tag_extra = ""
+    if sticker_clave:
+        tag_extra = f"[STICKER:{sticker_clave}]"
+    elif archivo_up is not None:
+        tag_extra = guardar_adjunto_chat_en_sheet(archivo_up.getvalue(), archivo_up.name, usuario_activo_real)
+
+    texto_limpio = str(texto_msg or "").strip()
+    cuerpo_msg = f"{tag_extra} {texto_limpio}".strip() if (tag_extra and texto_limpio) else (tag_extra or texto_limpio)
+    if not cuerpo_msg:
+        return False
+
+    ahora_str = datetime.datetime.now(TZ_MX).strftime("%d/%m/%Y %H:%M")
+    hist_prev = str(row_act.get('Respuesta', '')).strip()
+    linea_nueva = f"[{ahora_str}] {usuario_activo_real}: {cuerpo_msg}"
+    hist_final = f"{hist_prev}\n{linea_nueva}".strip() if hist_prev else linea_nueva
+
+    soy_emi = es_mismo_usuario(usuario_activo_real, row_act.get('Emisor', ''), grupos_identidad)
+    prox_status = "Pendiente" if soy_emi else "Resuelto"
+    actualizar_tarea_en_sheet(headers_t, row_act, prox_status, hist_final)
+    leer_tareas_normalizadas.clear()
+    return True
+
+# ==============================================================================
+# === PANTALLA A: BANDEJA DE CONVERSACIONES ===
+# ==============================================================================
+if st.session_state['pmr_vista_movil'] == 'bandeja':
+    c_h1, c_h2, c_h3 = st.columns([2.6, 0.7, 0.9], vertical_alignment="center")
+    with c_h1:
+        st.markdown(f"<div style='font-size:1.35rem; font-weight:800; color:#E9EDEF;'>💬 Chat PMR</div><div style='font-size:0.78rem; color:#8696A0;'>👤 {html.escape(usuario_activo_real)}</div>", unsafe_allow_html=True)
+    with c_h2:
+        if st.button("🔄", key="mob_btn_ref", help="Actualizar", use_container_width=True):
+            leer_tareas_normalizadas.clear()
+            cargar_fotos_chat_sheets.clear()
+            cargar_stickers_locales.clear()
+            st.rerun()
+    with c_h3:
+        if st.button("➕ Nuevo", key="mob_btn_nuevo", type="primary", use_container_width=True):
+            st.session_state['pmr_vista_movil'] = 'nuevo'
+            st.rerun()
+
+    @st.fragment(run_every=30)
+    def render_bandeja_viva():
+        leer_tareas_normalizadas.clear()
+        df_tareas, _ = leer_tareas_normalizadas()
+        if df_tareas.empty:
+            st.info("🎉 No tienes conversaciones activas por ahora.")
+            return
+
+        mask_mios = df_tareas.apply(
+            lambda r: usuario_en_lista(usuario_activo_real, r.get('Receptor', ''), grupos_identidad)
+            or es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad),
+            axis=1
+        )
+        df_mios = df_tareas[mask_mios].copy()
+        chats_activos = df_mios[df_mios['Status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])].copy()
+        chats_fin = df_mios[df_mios['Status'].astype(str).str.strip().str.lower() == 'finalizado'].copy()
+
+        n_nuevos = 0
+        if not chats_activos.empty:
+            evs = chats_activos.apply(extraer_ultimo_evento_chat, axis=1)
+            chats_activos['_dt_ult'] = [e[0] for e in evs]
+            chats_activos['_hora'] = [e[1] for e in evs]
+            chats_activos['_prio'] = chats_activos.apply(lambda r: 0 if requiere_atencion_chat(r, usuario_activo_real, grupos_identidad) else 1, axis=1)
+            n_nuevos = int((chats_activos['_prio'] == 0).sum())
+
+        prev_n = st.session_state.get('_mob_prev_pend', n_nuevos)
+        if n_nuevos > prev_n:
+            st.toast(f"🔔 ¡Tienes {n_nuevos} chat(s) con mensajes nuevos!", icon="💬")
+            reproducir_tono_nuevo_msg()
+        st.session_state['_mob_prev_pend'] = n_nuevos
+
+        lbl_act = f"💬 Activos ({n_nuevos} nuevos)" if n_nuevos > 0 else f"💬 Activos ({len(chats_activos)})"
+        t_act, t_fin = st.tabs([lbl_act, f"📁 Finalizados ({len(chats_fin)})"])
+
+        with t_act:
+            if chats_activos.empty:
+                st.info("🎉 Todo al día. Toca **➕ Nuevo** para abrir una conversación.")
+            else:
+                cb1, cb2 = st.columns([1.6, 1.15], vertical_alignment="center")
+                with cb1:
+                    busq = st.text_input("Buscar:", placeholder="🔍 Siniestro, auto, taller...", label_visibility="collapsed", key="mob_busq").strip().lower()
+                with cb2:
+                    orden = st.selectbox("Orden:", ["🕐 Recientes", "🔴 Sin responder", "📅 Antiguos"], label_visibility="collapsed", key="mob_orden")
+
+                if orden == "🕐 Recientes":
+                    df_ord = chats_activos.sort_values(by=['_dt_ult', 'GS_Row'], ascending=[False, False])
+                elif orden == "📅 Antiguos":
+                    df_ord = chats_activos.sort_values(by=['_dt_ult', 'GS_Row'], ascending=[True, True])
+                else:
+                    df_ord = chats_activos.sort_values(by=['_prio', '_dt_ult', 'GS_Row'], ascending=[True, False, False])
+
+                if busq:
+                    def _match(r):
+                        ref_t = str(r.get('Siniestro / Taller / Piezas', '')).lower()
+                        sid_t = ref_t.split('|')[0].strip().upper().removesuffix('.0')
+                        tall_t = str(mapa_info_sin.get(sid_t, {}).get('taller', '')).lower()
+                        todo = f"{ref_t} {tall_t} {r.get('Emisor','')} {r.get('Receptor','')} {r.get('Instruccion','')} {r.get('Respuesta','')}".lower()
+                        return all(p in todo for p in busq.split())
+                    df_ord = df_ord[df_ord.apply(_match, axis=1)]
+
+                with st.container(border=False, key="pmr_mob_bandeja"):
+                    if df_ord.empty:
+                        st.caption("Sin coincidencias para tu búsqueda.")
+                    for _, fila_c in df_ord.iterrows():
+                        gs_r = int(fila_c['GS_Row'])
+                        ref_c = str(fila_c.get('Siniestro / Taller / Piezas', 'General')).strip()
+                        icono = "🔴" if fila_c.get('_prio', 1) == 0 else "🟢"
+
+                        if ref_c.lower().startswith("general"):
+                            tit = ref_c.replace("General:", "").replace("GENERAL:", "").strip() or "Tema General"
+                            if len(tit) > 34:
+                                tit = tit[:33].rstrip() + "…"
+                            l1 = f"{icono} 📌 {tit}"
+                        else:
+                            partes = [p.strip() for p in ref_c.split("|")]
+                            sid = partes[0].removesuffix('.0')
+                            info_s = mapa_info_sin.get(sid.upper(), {})
+                            fb_auto = partes[1] if (len(partes) > 1 and not partes[1].startswith("⚙️")) else ""
+                            auto_c = acortar_auto_chat(info_s.get("marca", ""), info_s.get("modelo", ""), fb_auto)
+                            tall_c = acortar_taller_chat(info_s.get("taller", ""))
+                            l1 = f"{icono} " + " · ".join([b for b in [sid, auto_c, tall_c] if b])
+
+                        quienes = formatear_participantes_corto(fila_c.get('Emisor', ''), fila_c.get('Receptor', ''), usuario_activo_real, grupos_identidad)
+                        hora_t = str(fila_c.get('_hora', '')).strip()
+                        l2 = f"{quienes} · {hora_t}" if hora_t else quienes
+
+                        if st.button(f"{l1}\n{l2}", key=f"mob_open_{gs_r}", use_container_width=True):
+                            st.session_state['mob_chat_gs_row'] = gs_r
+                            st.session_state['pmr_vista_movil'] = 'chat'
+                            st.rerun(scope="app")
+
+        with t_fin:
+            if chats_fin.empty:
+                st.caption("No hay conversaciones finalizadas.")
+            else:
+                cols_f = [c for c in ['Fecha_Creacion', 'Emisor', 'Receptor', 'Siniestro / Taller / Piezas'] if c in chats_fin.columns]
+                st.dataframe(chats_fin[cols_f], hide_index=True, use_container_width=True)
+
+    render_bandeja_viva()
+
+# ==============================================================================
+# === PANTALLA B: CONVERSACIÓN ACTIVA (PANTALLA COMPLETA) ===
+# ==============================================================================
+elif st.session_state['pmr_vista_movil'] == 'chat':
+    df_tareas_c, headers_t = leer_tareas_normalizadas()
+    gs_activo = st.session_state.get('mob_chat_gs_row')
+    match_row = df_tareas_c[df_tareas_c['GS_Row'] == gs_activo] if (not df_tareas_c.empty and gs_activo is not None) else pd.DataFrame()
+
+    if match_row.empty:
+        st.warning("Esta conversación ya no está disponible.")
+        if st.button("⬅️ Volver a Bandeja", use_container_width=True):
+            st.session_state['pmr_vista_movil'] = 'bandeja'
+            st.rerun()
+        st.stop()
+
+    row_activa = match_row.iloc[0]
+
+    # Barra superior de navegación del chat
+    ct1, ct2, ct3 = st.columns([1.2, 0.8, 1.2], vertical_alignment="center")
+    with ct1:
+        if st.button("⬅️ Chats", key="mob_back_bandeja", use_container_width=True):
+            leer_tareas_normalizadas.clear()
+            st.session_state['pmr_vista_movil'] = 'bandeja'
+            st.rerun()
+    with ct2:
+        if st.button("🔄", key="mob_ref_chat", use_container_width=True):
+            leer_tareas_normalizadas.clear()
+            cargar_fotos_chat_sheets.clear()
+            st.rerun()
+    with ct3:
+        with st.popover("🏁 Finalizar", use_container_width=True):
+            st.caption("¿Cerrar y archivar este chat?")
+            if st.button("✅ Sí, finalizar", key=f"mob_conf_fin_{gs_activo}", type="primary", use_container_width=True):
+                actualizar_tarea_en_sheet(headers_t, row_activa, "Finalizado", str(row_activa.get('Respuesta', '')).strip())
+                leer_tareas_normalizadas.clear()
+                st.session_state['pmr_vista_movil'] = 'bandeja'
+                st.toast("Chat archivado", icon="🏁")
+                st.rerun()
+
+    # Tarjeta de encabezado del siniestro/grupo
+    ref_full = str(row_activa.get("Siniestro / Taller / Piezas", "General")).strip()
+    sid_h = ref_full.split("|")[0].strip().upper().removesuffix('.0')
+    taller_h = mapa_info_sin.get(sid_h, {}).get("taller", "")
+    rec_h = str(row_activa.get("Receptor", "N/A")).strip()
+    lbl_rec = "👥 <b>Grupo:</b>" if "," in rec_h else "🎯 <b>Para:</b>"
+    html_tall = f"<br>🏢 <b>Taller:</b> {html.escape(taller_h)}" if taller_h else ""
+    st.markdown(
+        f'<div style="background:#1F2C34; padding:9px 12px; border-radius:10px; margin-bottom:6px; border-left:4px solid #00A884;">'
+        f'<div style="font-size:0.92rem; font-weight:700; color:#E9EDEF;">🚗 {html.escape(ref_full)}</div>'
+        f'<div style="font-size:0.76rem; color:#9BAAB3; margin-top:2px;">'
+        f'👤 <b>De:</b> {html.escape(str(row_activa.get("Emisor", "")))}  |  {lbl_rec} {html.escape(rec_h)}{html_tall}'
+        f'</div></div>',
+        unsafe_allow_html=True
+    )
+
+    # Hilo en vivo con auto-refresco cada 25s sin interrumpir la escritura
+    @st.fragment(run_every=25)
+    def render_hilo_vivo_movil(gs_id):
+        leer_tareas_normalizadas.clear()
+        df_live, _ = leer_tareas_normalizadas()
+        m_live = df_live[df_live['GS_Row'] == gs_id] if not df_live.empty else pd.DataFrame()
+        if m_live.empty:
+            st.caption("Conversación cerrada o eliminada.")
+            return
+        r_live = m_live.iloc[0]
+        resp_txt = str(r_live.get('Respuesta', '')).strip()
+        k_len = f"_mob_len_{gs_id}"
+        prev_len = st.session_state.get(k_len, len(resp_txt))
+        if len(resp_txt) > prev_len:
+            _, _, ult_a = extraer_ultimo_evento_chat(r_live)
+            if ult_a and not es_mismo_usuario(usuario_activo_real, ult_a, grupos_identidad):
+                st.toast(f"💬 Nuevo mensaje de {ult_a}", icon="🔔")
+                reproducir_tono_nuevo_msg()
+        st.session_state[k_len] = len(resp_txt)
+        renderizar_hilo_chat_movil(r_live, usuario_activo_real, grupos_identidad, stickers_map)
+
+    render_hilo_vivo_movil(gs_activo)
+
+    # Barra de escritura, adjuntos (cámara/galería/docs) y stickers
+    ver_up_k = f"mob_ver_up_{gs_activo}"
+    if ver_up_k not in st.session_state:
+        st.session_state[ver_up_k] = 0
+    k_inp = f"mob_inp_{gs_activo}"
+    k_up = f"mob_up_{gs_activo}_{st.session_state[ver_up_k]}"
+
+    def enviar_mob_cb():
+        txt = st.session_state.get(k_inp, "").strip()
+        arch = st.session_state.get(k_up, None)
+        if not txt and arch is None:
+            return
+        try:
+            df_cur, h_cur = leer_tareas_normalizadas()
+            m_cur = df_cur[df_cur['GS_Row'] == gs_activo]
+            if not m_cur.empty:
+                enviar_mensaje_movil(m_cur.iloc[0], h_cur, texto_msg=txt, archivo_up=arch)
+                st.session_state[k_inp] = ""
+                st.session_state[ver_up_k] = st.session_state.get(ver_up_k, 0) + 1
+        except Exception as e_s:
+            st.toast(f"No se pudo enviar: {e_s}", icon="⚠️")
+
+    with st.container(border=True, key="pmr_mob_composer"):
+        cm1, cm2 = st.columns([3.4, 1.0], vertical_alignment="bottom")
+        with cm1:
+            st.text_input("Mensaje:", key=k_inp, placeholder="Escribe un mensaje...", label_visibility="collapsed")
+        with cm2:
+            st.button("📤", key=f"mob_send_{gs_activo}", type="primary", use_container_width=True, on_click=enviar_mob_cb)
+
+        ca1, ca2 = st.columns([1.4, 1.0], vertical_alignment="center")
+        with ca1:
+            arch_sel = st.file_uploader(
+                "Adjuntar:",
+                type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "doc", "xlsx", "xls", "csv"],
+                key=k_up,
+                label_visibility="collapsed"
+            )
+        with ca2:
+            with st.popover("😀 Stickers", use_container_width=True):
+                if not stickers_map:
+                    st.caption("Aún no hay stickers cargados. Sube imágenes `.webp`, `.png` o `.gif` a la carpeta `stickers/` en GitHub.")
+                else:
+                    claves_st = list(stickers_map.keys())
+                    cols_st = st.columns(3)
+                    for idx_s, k_st in enumerate(claves_st):
+                        info_s = stickers_map[k_st]
+                        with cols_st[idx_s % 3]:
+                            st.image(info_s["path"], use_container_width=True)
+                            if st.button(info_s["etiqueta"][:11], key=f"mob_st_{gs_activo}_{k_st}", use_container_width=True):
+                                df_cur, h_cur = leer_tareas_normalizadas()
+                                m_cur = df_cur[df_cur['GS_Row'] == gs_activo]
+                                if not m_cur.empty:
+                                    enviar_mensaje_movil(m_cur.iloc[0], h_cur, sticker_clave=k_st)
+                                    st.rerun()
+
+    if arch_sel is not None:
+        ext_a = os.path.splitext(arch_sel.name.lower())[1]
+        if ext_a in [".png", ".jpg", ".jpeg", ".webp"]:
+            st.image(arch_sel, caption=f"✅ {arch_sel.name} — Pulsa 📤 para enviar", width=150)
+        else:
+            st.info(f"📎 Listo ({round(len(arch_sel.getvalue())/1024, 1)} KB): **{arch_sel.name}** — Pulsa **📤**")
+
+    # Expander discreto para borrar mensaje enviado por error
+    hist_del = str(row_activa.get('Respuesta', '')).strip()
+    lineas_del = [l.strip() for l in hist_del.replace('\\n', '\n').split('\n') if l.strip() and l.strip().lower() not in ["none", "nan"]]
+    opc_del = [f"0. [Inicial] {row_activa.get('Emisor', '')}: {row_activa.get('Instruccion', '')}"]
+    for i_l, lt in enumerate(lineas_del, start=1):
+        opc_del.append(f"{i_l}. {lt}")
+
+    with st.expander("🗑️ Borrar mensaje enviado por error", expanded=False):
+        sel_del = st.selectbox("Mensaje a eliminar:", options=opc_del, index=len(opc_del)-1, key=f"mob_sel_del_{gs_activo}")
+        if st.button("🗑️ Eliminar Línea", key=f"mob_btn_del_{gs_activo}", use_container_width=True):
+            idx_b = int(sel_del.split(".")[0].strip())
+            row_mod = row_activa.to_dict()
+            if idx_b == 0:
+                if lineas_del:
+                    m_p = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', lineas_del[0])
+                    row_mod['Instruccion'] = m_p.group(3).strip() if m_p else lineas_del[0]
+                    actualizar_tarea_en_sheet(headers_t, row_mod, row_mod.get('Status', 'Pendiente'), "\n".join(lineas_del[1:]))
+                else:
+                    actualizar_tarea_en_sheet(headers_t, row_mod, "Eliminado", "")
+                    st.session_state['pmr_vista_movil'] = 'bandeja'
+            else:
+                pos_l = idx_b - 1
+                if 0 <= pos_l < len(lineas_del):
+                    nuevas_l = [l for i, l in enumerate(lineas_del) if i != pos_l]
+                    actualizar_tarea_en_sheet(headers_t, row_mod, row_mod.get('Status', 'Pendiente'), "\n".join(nuevas_l))
+            leer_tareas_normalizadas.clear()
+            st.rerun()
+
+# ==============================================================================
+# === PANTALLA C: CREAR NUEVO CHAT / GRUPO ===
+# ==============================================================================
+else:
+    cn1, cn2 = st.columns([1.2, 2.8], vertical_alignment="center")
+    with cn1:
+        if st.button("⬅️ Volver", key="mob_back_new", use_container_width=True):
+            st.session_state['pmr_vista_movil'] = 'bandeja'
+            st.rerun()
+    with cn2:
+        st.markdown("<div style='font-size:1.15rem; font-weight:700; color:#E9EDEF;'>➕ Nuevo Chat / Grupo</div>", unsafe_allow_html=True)
+
+    destinatarios = st.multiselect(
+        "Participante(s) — 1 privado, varios para grupo:",
+        options=usuarios_reales,
+        placeholder="Selecciona uno o varios...",
+        key="mob_nc_dest"
+    )
+    sin_sel = st.selectbox(
+        "Tema / Siniestro (Activos):",
+        ["Seleccionar...", "General (Tema Libre)"] + lista_siniestros,
+        key="mob_nc_sin"
+    )
+
+    tema_libre = ""
+    piezas_sel = []
+    if sin_sel == "General (Tema Libre)":
+        tema_libre = st.text_input("Asunto:", placeholder="Ej. Cotización urgente / Duda facturación", key="mob_nc_tema")
+    elif sin_sel != "Seleccionar...":
+        id_puro = sin_sel.split(" | ")[0].strip()
+        pzas_disp = mapa_piezas_sin.get(id_puro, [])
+        if pzas_disp:
+            piezas_sel = st.multiselect("Pieza(s) implicada(s):", pzas_disp, key="mob_nc_pzas")
+
+    msg_ini = st.text_area("Mensaje inicial:", key="mob_nc_msg", height=95)
+    adj_ini = st.file_uploader(
+        "📎 Adjuntar foto o documento (Opcional):",
+        type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "doc", "xlsx", "xls", "csv"],
+        key="mob_nc_adj"
+    )
+
+    if st.button("📤 Iniciar Conversación", type="primary", use_container_width=True, key="mob_nc_send"):
+        if destinatarios and sin_sel != "Seleccionar..." and (msg_ini.strip() or adj_ini is not None):
+            try:
+                id_t = str(uuid.uuid4().hex)[:6].upper()
+                fecha_h = datetime.datetime.now(TZ_MX).strftime("%Y-%m-%d %H:%M")
+                receptor_str = ", ".join(destinatarios)
+                if sin_sel == "General (Tema Libre)":
+                    ref_f = f"General: {tema_libre.strip()}" if tema_libre.strip() else "General"
+                else:
+                    ref_f = f"{sin_sel} | ⚙️ Piezas: {', '.join(piezas_sel)}" if piezas_sel else sin_sel
+
+                tag_i = guardar_adjunto_chat_en_sheet(adj_ini.getvalue(), adj_ini.name, usuario_activo_real) if adj_ini is not None else ""
+                cuerpo_i = f"{tag_i} {msg_ini.strip()}".strip() if (tag_i and msg_ini.strip()) else (tag_i or msg_ini.strip())
+
+                doc = init_connection()
+                ws_t = doc.worksheet("Gestor_Tareas")
+                headers_t = [str(h).strip() for h in ws_t.row_values(1)]
+                if not headers_t:
+                    headers_t = ["ID_Tarea", "Fecha_Creacion", "Emisor", "Receptor", "Siniestro / Taller / Piezas", "Instruccion", "Status", "Respuesta"]
+                h_up = [h.upper().rstrip(':') for h in headers_t]
+                fila_n = [""] * len(headers_t)
+
+                def _pos(posibles, dft):
+                    for p in posibles:
+                        if p in h_up:
+                            return h_up.index(p)
+                    return dft if dft < len(headers_t) else -1
+
+                for idx_c, val_c in [
+                    (_pos(["ID_TAREA"], 0), id_t),
+                    (_pos(["FECHA_CREACION"], 1), fecha_h),
+                    (_pos(["EMISOR"], 2), usuario_activo_real),
+                    (_pos(["RECEPTOR"], 3), receptor_str),
+                    (_pos(["SINIESTRO / TALLER / PIEZAS", "REFERENCIA"], 4), ref_f),
+                    (_pos(["INSTRUCCION"], 5), cuerpo_i),
+                    (_pos(["STATUS", "ESTATUS"], 6), "Pendiente"),
+                    (_pos(["RESPUESTA"], 7), ""),
+                ]:
+                    if idx_c >= 0:
+                        fila_n[idx_c] = val_c
+
+                ws_t.append_row(fila_n, value_input_option='USER_ENTERED')
+                leer_tareas_normalizadas.clear()
+                df_post, _ = leer_tareas_normalizadas()
+                m_new = df_post[df_post['ID_Tarea'] == id_t] if not df_post.empty else pd.DataFrame()
+                if not m_new.empty:
+                    st.session_state['mob_chat_gs_row'] = int(m_new.iloc[-1]['GS_Row'])
+                    st.session_state['pmr_vista_movil'] = 'chat'
+                else:
+                    st.session_state['pmr_vista_movil'] = 'bandeja'
+                st.toast(f"✅ Chat iniciado con {receptor_str}", icon="💬")
+                st.rerun()
+            except Exception as e_nc:
+                st.error(f"❌ Error al crear chat: {e_nc}")
+        else:
+            st.warning("⚠️ Selecciona al menos un participante, el tema/siniestro y escribe un mensaje o adjunta un archivo.")

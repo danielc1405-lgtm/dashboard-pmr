@@ -115,9 +115,61 @@ st.markdown("""
     }
     .st-key-pmr_mob_composer [data-testid="stFileUploaderDropzone"] button {
         width: 100% !important;
-        min-height: 2.75rem !important;
+        min-height: 2.2rem !important;
+        height: 2.2rem !important;
         border-radius: 10px !important;
         margin: 0 !important;
+    }
+    /* Forzar filas horizontales compactas en móvil (vence el apilado automático de Streamlit) */
+    .st-key-mob_top_bar [data-testid="stHorizontalBlock"],
+    .st-key-mob_msg_row [data-testid="stHorizontalBlock"],
+    .st-key-mob_tools_row [data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 6px !important;
+        align-items: center !important;
+        width: 100% !important;
+    }
+    .st-key-mob_top_bar [data-testid="stHorizontalBlock"] > div,
+    .st-key-mob_msg_row [data-testid="stHorizontalBlock"] > div,
+    .st-key-mob_tools_row [data-testid="stHorizontalBlock"] > div {
+        min-width: 0px !important;
+        max-width: none !important;
+        width: auto !important;
+    }
+    .st-key-mob_top_bar [data-testid="stHorizontalBlock"] > div:nth-child(1) { flex: 1.15 1 0% !important; }
+    .st-key-mob_top_bar [data-testid="stHorizontalBlock"] > div:nth-child(2) { flex: 0 0 46px !important; max-width: 46px !important; }
+    .st-key-mob_top_bar [data-testid="stHorizontalBlock"] > div:nth-child(3) { flex: 1.25 1 0% !important; }
+    .st-key-mob_msg_row [data-testid="stHorizontalBlock"] > div:nth-child(1) { flex: 1 1 auto !important; }
+    .st-key-mob_msg_row [data-testid="stHorizontalBlock"] > div:nth-child(2) { flex: 0 0 54px !important; max-width: 54px !important; }
+    .st-key-mob_tools_row [data-testid="stHorizontalBlock"] > div { flex: 1 1 0% !important; }
+
+    .st-key-mob_top_bar button,
+    .st-key-mob_tools_row button {
+        min-height: 2.2rem !important;
+        height: 2.2rem !important;
+        padding: 0px 8px !important;
+        font-size: 0.84rem !important;
+    }
+    .st-key-mob_msg_row button {
+        min-height: 2.4rem !important;
+        height: 2.4rem !important;
+        padding: 0px !important;
+    }
+    @media (max-width: 640px) {
+        .st-key-mob_top_bar [data-testid="stHorizontalBlock"],
+        .st-key-mob_msg_row [data-testid="stHorizontalBlock"],
+        .st-key-mob_tools_row [data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+        }
+        .st-key-mob_top_bar [data-testid="stHorizontalBlock"] > div,
+        .st-key-mob_msg_row [data-testid="stHorizontalBlock"] > div,
+        .st-key-mob_tools_row [data-testid="stHorizontalBlock"] > div {
+            min-width: 0px !important;
+            width: auto !important;
+        }
     }
     </style>
 """, unsafe_allow_html=True)

@@ -1607,39 +1607,6 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 es_mio = es_mismo_usuario(usuario_activo_real, linea_limpia, grupos_identidad) or (usuario_activo_real.lower() in linea_limpia.lower())
             burbujas.append(armar_burbuja_pc(autor_msg, f_msg, txt_msg, es_mio))
 
-    historial_raw = str(row.get('Respuesta', '')).strip()
-    if historial_raw and historial_raw.lower() not in ["none", "nan", ""]:
-        lineas = historial_raw.replace('\\n', '\n').split('\n')
-        for linea in lineas:
-            linea_limpia = linea.strip()
-            if not linea_limpia:
-                continue
-            
-            m = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', linea_limpia)
-            if m:
-                f_msg, autor_msg, txt_msg = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
-                es_mio = es_mismo_usuario(usuario_activo_real, autor_msg, grupos_identidad)
-            else:
-                f_msg, autor_msg, txt_msg = "", "", linea_limpia
-                es_mio = es_mismo_usuario(usuario_activo_real, linea_limpia, grupos_identidad) or (usuario_activo_real.lower() in linea_limpia.lower())
-
-            align_m = "flex-end" if es_mio else "flex-start"
-            bg_m = "#005C4B" if es_mio else "#1F2C34"
-            radius_m = "10px 0px 10px 10px" if es_mio else "0px 10px 10px 10px"
-            color_autor = "#53BDEB" if es_mio else "#00A884"
-
-            header_html = ""
-            if autor_msg:
-                header_html = f'<div class="author" style="color:{color_autor};">{html.escape(autor_msg)} <span class="time">• {html.escape(f_msg)}</span></div>'
-
-            burbujas.append(
-                f'<div class="msg-row" style="justify-content:{align_m};">'
-                f'<div class="bubble" style="background-color:{bg_m}; border-radius:{radius_m};">'
-                f'{header_html}'
-                f'<div class="txt">{formatear_texto_con_adjuntos(txt_msg)}</div>'
-                f'</div></div>'
-            )
-
     es_indep_js = "true" if st.query_params.get("vista") == "tareas" else "false"
     iframe_html = f"""
     <!DOCTYPE html>

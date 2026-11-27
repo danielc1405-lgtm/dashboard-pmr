@@ -456,6 +456,9 @@ def abrir_popup_monitor():
 
         tz_mx_cal = datetime.timezone(datetime.timedelta(hours=-6))
         hoy_cal_date = datetime.datetime.now(tz_mx_cal).date()
+        if st.session_state.get('_ultimo_dia_rep_pop') != hoy_cal_date:
+            st.session_state['_ultimo_dia_rep_pop'] = hoy_cal_date
+            st.session_state.pop('cal_fin_rep_pop', None)
 
         with st.container(border=True):
             st.markdown("**1. Lanzador de Reportes Ejecutivos**")
@@ -476,7 +479,7 @@ def abrir_popup_monitor():
             with c_ini_rep:
                 fecha_ini_rep = st.date_input("📅 Fecha Inicio:", value=datetime.date(2026, 9, 1), format="DD/MM/YYYY", key="cal_ini_rep_pop")
             with c_fin_rep:
-                fecha_fin_rep = st.date_input("📅 Fecha Fin:", value=datetime.date(2026, 10, 31), format="DD/MM/YYYY", key="cal_fin_rep_pop")
+                fecha_fin_rep = st.date_input("📅 Fecha Fin:", value=hoy_cal_date, format="DD/MM/YYYY", key="cal_fin_rep_pop")
             with c_btn_rep:
                 if st.button("📊 Ejecutar Reporte", type="primary", use_container_width=True, key="btn_ejecutar_rep_pop"):
                     st.session_state['reporte_activo_popup'] = tipo_rep_sel

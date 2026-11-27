@@ -1113,6 +1113,137 @@ def es_mismo_usuario(u1, u2, grupos_identidad=None):
             return True
     return False
 
+def usuario_en_lista(usuario, campo_usuarios, grupos_identidad=None):
+    """Soporta 1 usuario o varios separados por coma (Chat Grupal)."""
+    partes = [p.strip() for p in re.split(r'[,;]', str(campo_usuarios or '')) if p.strip()]
+    return any(es_mismo_usuario(usuario, p, grupos_identidad) for p in partes)
+
+def extraer_ultimo_evento_chat(row):
+    """Devuelve (datetime_ultima_actividad, hora_corta, ultimo_autor) del hilo."""
+    tz_mx_ch = datetime.timezone(datetime.timedelta(hours=-6))
+    hoy_d_ch = datetime.datetime.now(tz_mx_ch).date()
+
+    def _parse_dt_ch(txt):
+        s = str(txt or "").strip()
+        if not s:
+            return None
+        for fmt in ("%d/%m/%Y %H:%M", "%Y-%m-%d %H:%M", "%d/%m/%y %H:%M", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                return datetime.datetime.strptime(s, fmt)
+            except Exception:
+                continue
+        return None
+
+    hist_raw = str(row.get('Respuesta', '')).strip()
+    dt_ult = None
+    autor_ult = ""
+
+    if hist_raw and hist_raw.lower() not in ["none", "nan"]:
+        lineas = [l.strip() for l in hist_raw.replace('\\n', '\n').split('\n') if l.strip()]
+        for linea in reversed(lineas):
+            m = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', linea)
+            if m:
+                dt_p = _parse_dt_ch(m.group(1))
+                autor_ult = m.group(2).strip()
+                if dt_p:
+                    dt_ult = dt_p
+                break
+
+    if dt_ult is None:
+        dt_ult = _parse_dt_ch(row.get('Fecha_Creacion', ''))
+    if not autor_ult:
+        autor_ult = str(row.get('Emisor', '')).strip()
+
+    if dt_ult is None:
+        gs_r = int(row.get('GS_Row', 0) or 0)
+        dt_ult = datetime.datetime(2000, 1, 1) + datetime.timedelta(seconds=gs_r)
+        hora_corta = ""
+    else:
+        hora_corta = dt_ult.strftime("%H:%M") if dt_ult.date() == hoy_d_ch else dt_ult.strftime("%d/%m %H:%M")
+
+    return dt_ult, hora_corta, autor_ult
+
+def requiere_atencion_chat(row, usuario, grupos_identidad=None):
+    """True si el chat está activo y el último mensaje fue enviado por otra persona."""
+    st_v = str(row.get('Status', '')).strip().lower()
+    if st_v not in ['pendiente', 'resuelto']:
+        return False
+    soy_emi = es_mismo_usuario(usuario, row.get('Emisor', ''), grupos_identidad)
+    soy_rec = usuario_en_lista(usuario, row.get('Receptor', ''), grupos_identidad)
+    if not (soy_emi or soy_rec):
+        return False
+    _, _, ult_autor = extraer_ultimo_evento_chat(row)
+    if ult_autor:
+        return not es_mismo_usuario(usuario, ult_autor, grupos_identidad)
+    return (soy_rec and st_v == 'pendiente') or (soy_emi and st_v == 'resuelto')
+
+def acortar_auto_chat(marca_raw, modelo_raw, fallback_ref=""):
+    marcas_com = {
+        "NISSAN", "TOYOTA", "CHEVROLET", "FORD", "VOLKSWAGEN", "VW", "HONDA", "HYUNDAI",
+        "KIA", "MAZDA", "CHERY", "CHIREY", "MG", "BYD", "JAC", "GEELY", "SUZUKI", "MITSUBISHI",
+        "DODGE", "JEEP", "RAM", "CHRYSLER", "GMC", "CADILLAC", "BUICK", "BMW", "AUDI", "MERCEDES",
+        "MERCEDES-BENZ", "VOLVO", "SEAT", "CUPRA", "PEUGEOT", "RENAULT", "FIAT", "SUBARU",
+        "INFINITI", "ACURA", "LEXUS", "LINCOLN", "TESLA", "OMODA", "JAECOO", "CHANGAN", "BAIC", "JETOUR"
+    }
+    trims_noise = {
+        "AUT", "STD", "TM", "TA", "CVT", "4P", "5P", "SEDAN", "HB", "HATCHBACK", "PICKUP",
+        "4X4", "4X2", "L4", "V6", "V8", "TURBO", "ADVANCE", "SENSE", "EXCLUSIVE", "XLE",
+        "LE", "SE", "LIMITED", "QUANTUM", "PRO", "PLUS", "BASE", "GL", "GLS", "LT", "LTZ", "T"
+    }
+    siglas_up = {"BMW", "VW", "JAC", "BYD", "MG", "RAM", "GMC", "KIA", "CR-V", "HR-V", "CX-5", "CX-30"}
+    marca = str(marca_raw or "").strip().upper()
+    modelo = str(modelo_raw or "").strip().upper()
+    texto = modelo if modelo else str(fallback_ref or "").strip().upper()
+    texto = re.sub(r'\b(19|20)\d{2}\b', '', texto)
+    texto = re.sub(r'\(.*?\)', '', texto)
+    texto = re.sub(r'\b\d\.\d\b', '', texto)
+    palabras = [w for w in texto.split() if w and w not in trims_noise]
+    if not palabras:
+        return ""
+    if (marca and palabras[0] == marca) or (palabras[0] in marcas_com):
+        resto = palabras[1:]
+        if resto:
+            if len(resto[0]) >= 4:
+                palabras = resto[:2] if (len(resto) >= 2 and resto[1].isdigit()) else resto[:1]
+            else:
+                palabras = palabras[:2]
+        else:
+            palabras = palabras[:1]
+    else:
+        palabras = palabras[:2] if (len(palabras) >= 2 and palabras[1].isdigit()) else palabras[:1]
+    return " ".join(w if (w in siglas_up or len(w) <= 2 or any(c.isdigit() for c in w)) else w.title() for w in palabras)
+
+def acortar_taller_chat(taller_raw, max_len=18):
+    siglas_t = {"GG", "GNP", "AMP", "PAMI", "CDR", "BMW", "VW", "SLP", "MTY", "NL", "PMR"}
+    t = str(taller_raw or "").strip().upper()
+    if not t or t in ["NAN", "NONE"]:
+        return ""
+    t = re.sub(r'\bS\.?A\.?\s*DE\s*C\.?V\.?\b', '', t).strip()
+    t = re.sub(r'\s+', ' ', t)
+    if len(t) > max_len:
+        t = re.sub(r'^(RECONSTRUCTORA\s+AUTOMOTRIZ|SERVICIOS?\s+AUTOMOTRICES?|TALLER\s+DE\s+HOJALATERIA\s+Y\s+PINTURA|AUTOMOTRIZ|TALLER)\s+', '', t).strip()
+    bonito = " ".join(w if w in siglas_t else w.title() for w in t.split())
+    return bonito if len(bonito) <= max_len else bonito[:max_len-1].rstrip() + "…"
+
+def formatear_participantes_corto(emisor, receptor, usuario_actual, grupos_identidad=None):
+    todos = [str(emisor or '').strip()] + [p.strip() for p in re.split(r'[,;]', str(receptor or '')) if p.strip()]
+    otros = []
+    vistos = set()
+    for p in todos:
+        if not p or es_mismo_usuario(usuario_actual, p, grupos_identidad):
+            continue
+        prim = p.split()[0]
+        if prim.lower() not in vistos:
+            vistos.add(prim.lower())
+            otros.append(prim)
+    if not otros:
+        return "👤 Yo"
+    if len(otros) == 1:
+        return f"👤 {otros[0]}"
+    if len(otros) == 2:
+        return f"👥 {otros[0]}, {otros[1]}"
+    return f"👥 {otros[0]}, {otros[1]} +{len(otros) - 2}"
+
 @st.cache_data(ttl=180)
 def leer_tareas_normalizadas():
     """Lee Gestor_Tareas con caché de 20 seg para evitar bloqueos por exceso de consultas (Error 429)."""
@@ -1716,14 +1847,7 @@ def contar_tareas_pendientes(usuario):
         df_t, _ = leer_tareas_normalizadas()
         if df_t.empty:
             return 0
-        total_alertas = 0
-        for _, r in df_t.iterrows():
-            st_val = str(r.get('Status', '')).strip().lower()
-            if es_mismo_usuario(usuario, r.get('Receptor', ''), grupos_id) and st_val == 'pendiente':
-                total_alertas += 1
-            elif es_mismo_usuario(usuario, r.get('Emisor', ''), grupos_id) and st_val == 'resuelto':
-                total_alertas += 1
-        return total_alertas
+        return sum(1 for _, r in df_t.iterrows() if requiere_atencion_chat(r, usuario, grupos_id))
     except Exception:
         return 0
 
@@ -1784,6 +1908,22 @@ def renderizar_widget_tareas_flotante():
             margin: 0px !important;
             padding: 0.2rem 0.4rem !important;
         }
+        /* Tarjetas de 2 líneas limpias para cada conversación en la lista */
+        .st-key-pmr_lista_temas_scroll div.stButton > button {
+            height: auto !important;
+            min-height: 3.1rem !important;
+            padding: 6px 10px !important;
+            justify-content: flex-start !important;
+            text-align: left !important;
+            white-space: normal !important;
+        }
+        .st-key-pmr_lista_temas_scroll div.stButton > button p {
+            white-space: pre-line !important;
+            line-height: 1.28 !important;
+            font-size: 0.81rem !important;
+            text-align: left !important;
+            width: 100% !important;
+        }
         </style>
     """, unsafe_allow_html=True)
 
@@ -1840,6 +1980,7 @@ def renderizar_widget_tareas_flotante():
         df_tareas, headers_tareas = leer_tareas_normalizadas()
 
         mapa_taller_sin = {}
+        mapa_info_sin = {}
         try:
             if 'cargar_base_viva' in globals():
                 df_uni_local = cargar_base_viva().copy()
@@ -1855,13 +1996,18 @@ def renderizar_widget_tareas_flotante():
             col_desc_loc = next((c for c in df_uni_local.columns if "DESCRIPCI" in str(c).upper() or "REFACCI" in str(c).upper()), None)
             col_est_loc = next((c for c in df_uni_local.columns if "ESTATUS" in str(c).upper() and "ENV" not in str(c).upper() and "PAGO" not in str(c).upper()), None)
 
-            if not df_uni_local.empty and col_sin_loc and col_tall_loc:
+            if not df_uni_local.empty and col_sin_loc:
                 for _, r_t in df_uni_local.drop_duplicates(subset=[col_sin_loc]).iterrows():
                     s_k = str(r_t.get(col_sin_loc, '')).strip().upper()
                     if s_k.endswith('.0'): s_k = s_k[:-2]
-                    t_v = str(r_t.get(col_tall_loc, '')).strip()
-                    if s_k and t_v and t_v.lower() != "nan":
+                    if not s_k or s_k == "NAN":
+                        continue
+                    t_v = str(r_t.get(col_tall_loc, '')).strip() if col_tall_loc else ""
+                    m_v = str(r_t.get(col_marca_loc, '')).strip() if col_marca_loc else ""
+                    mod_v = str(r_t.get(col_mod_loc, '')).strip() if col_mod_loc else ""
+                    if t_v and t_v.lower() != "nan":
                         mapa_taller_sin[s_k] = t_v
+                    mapa_info_sin[s_k] = {"taller": t_v, "marca": m_v, "modelo": mod_v}
 
             estatus_inactivos = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PERDIDA TOTAL", "PAGO DE DAÑOS", "PAGO DE DANOS"]
             if not df_uni_local.empty and col_est_loc:
@@ -1888,7 +2034,7 @@ def renderizar_widget_tareas_flotante():
 
         if not df_tareas.empty:
             mask_mios = df_tareas.apply(
-                lambda r: es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad) or es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad),
+                lambda r: usuario_en_lista(usuario_activo_real, r.get('Receptor', ''), grupos_identidad) or es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad),
                 axis=1
             )
             df_mios = df_tareas[mask_mios].copy()
@@ -1896,18 +2042,15 @@ def renderizar_widget_tareas_flotante():
                 chats_activos = df_mios[df_mios['Status'].astype(str).str.strip().str.lower().isin(['pendiente', 'resuelto'])].copy()
                 chats_finalizados = df_mios[df_mios['Status'].astype(str).str.strip().str.lower() == 'finalizado'].copy()
 
-                def requiere_mi_accion(r):
-                    st_v = str(r.get('Status', '')).strip().lower()
-                    soy_rec = es_mismo_usuario(usuario_activo_real, r.get('Receptor', ''), grupos_identidad)
-                    soy_emi = es_mismo_usuario(usuario_activo_real, r.get('Emisor', ''), grupos_identidad)
-                    if (soy_rec and st_v == 'pendiente') or (soy_emi and st_v == 'resuelto'):
-                        return 0
-                    return 1
-
                 if not chats_activos.empty:
-                    chats_activos['_prio'] = chats_activos.apply(requiere_mi_accion, axis=1)
+                    eventos_ch = chats_activos.apply(extraer_ultimo_evento_chat, axis=1)
+                    chats_activos['_dt_ult'] = [ev[0] for ev in eventos_ch]
+                    chats_activos['_hora_corta'] = [ev[1] for ev in eventos_ch]
+                    chats_activos['_prio'] = chats_activos.apply(
+                        lambda r: 0 if requiere_atencion_chat(r, usuario_activo_real, grupos_identidad) else 1,
+                        axis=1
+                    )
                     n_atencion = int((chats_activos['_prio'] == 0).sum())
-                    chats_activos = chats_activos.sort_values(by=['_prio', 'GS_Row'], ascending=[True, False])
 
         lbl_chats = f"💬 Chats ({n_atencion} nuevos)" if n_atencion > 0 else f"💬 Chats Activos ({len(chats_activos)})"
         tabs_tareas = st.tabs([lbl_chats, "➕ Nuevo Chat / Tarea", f"📁 Finalizados ({len(chats_finalizados)})"])
@@ -1929,14 +2072,30 @@ def renderizar_widget_tareas_flotante():
                     c_tit.markdown(f"##### 📋 Temas ({len(chats_activos)})")
                     c_ref_btn.button("🔄", key="btn_ref_wa_list", help="Actualizar mensajes", on_click=refrescar_lista_cb)
 
-                    busqueda_chat = st.text_input(
-                        "🔍 Buscar chat:",
-                        placeholder="🔍 Siniestro, auto, taller o persona...",
-                        label_visibility="collapsed",
-                        key="inp_buscar_chat_wa"
-                    ).strip().lower()
+                    c_busq, c_ord = st.columns([1.65, 1.15], vertical_alignment="center")
+                    with c_busq:
+                        busqueda_chat = st.text_input(
+                            "🔍 Buscar chat:",
+                            placeholder="🔍 Siniestro, auto, taller...",
+                            label_visibility="collapsed",
+                            key="inp_buscar_chat_wa"
+                        ).strip().lower()
+                    with c_ord:
+                        orden_sel = st.selectbox(
+                            "Orden:",
+                            ["🕐 Recientes", "🔴 Sin responder", "📅 Antiguos"],
+                            label_visibility="collapsed",
+                            key="sel_orden_chat_wa"
+                        )
 
-                    chats_filtrados = chats_activos.copy()
+                    if orden_sel == "🕐 Recientes":
+                        chats_ordenados = chats_activos.sort_values(by=['_dt_ult', 'GS_Row'], ascending=[False, False])
+                    elif orden_sel == "📅 Antiguos":
+                        chats_ordenados = chats_activos.sort_values(by=['_dt_ult', 'GS_Row'], ascending=[True, True])
+                    else:
+                        chats_ordenados = chats_activos.sort_values(by=['_prio', '_dt_ult', 'GS_Row'], ascending=[True, False, False])
+
+                    chats_filtrados = chats_ordenados.copy()
                     if busqueda_chat:
                         def coincide_busqueda_chat(r):
                             ref_txt = str(r.get('Siniestro / Taller / Piezas', '')).lower()
@@ -1945,9 +2104,9 @@ def renderizar_widget_tareas_flotante():
                             taller_txt = str(mapa_taller_sin.get(id_s, '')).lower()
                             todo = f"{ref_txt} {taller_txt} {str(r.get('Emisor', '')).lower()} {str(r.get('Receptor', '')).lower()} {str(r.get('Instruccion', '')).lower()} {str(r.get('Respuesta', '')).lower()}"
                             return all(palabra in todo for palabra in busqueda_chat.split())
-                        chats_filtrados = chats_activos[chats_activos.apply(coincide_busqueda_chat, axis=1)].copy()
+                        chats_filtrados = chats_ordenados[chats_ordenados.apply(coincide_busqueda_chat, axis=1)].copy()
 
-                    opciones_ids_todas = chats_activos['GS_Row'].tolist()
+                    opciones_ids_todas = chats_ordenados['GS_Row'].tolist()
                     opciones_ids = chats_filtrados['GS_Row'].tolist()
 
                     if 'chat_activo_gs_row' not in st.session_state or st.session_state['chat_activo_gs_row'] not in opciones_ids_todas:
@@ -1959,18 +2118,37 @@ def renderizar_widget_tareas_flotante():
                         if not opciones_ids:
                             st.caption("Sin coincidencias para tu búsqueda.")
                         for gs_r in opciones_ids:
-                            fila_c = chats_activos[chats_activos['GS_Row'] == gs_r].iloc[0]
+                            fila_c = chats_ordenados[chats_ordenados['GS_Row'] == gs_r].iloc[0]
                             ref_c = str(fila_c.get('Siniestro / Taller / Piezas', 'General')).strip()
-                            ref_corta = ref_c.split(" | ⚙️")[0].strip()
-                            if len(ref_corta) > 24:
-                                ref_corta = ref_corta[:24] + "..."
-                            soy_rec = es_mismo_usuario(usuario_activo_real, fila_c.get('Receptor', ''), grupos_identidad)
-                            contraparte = fila_c.get('Emisor', '') if soy_rec else fila_c.get('Receptor', '')
                             icono = "🔴" if fila_c.get('_prio', 1) == 0 else "🟢"
+
+                            if ref_c.lower().startswith("general"):
+                                titulo_l1 = ref_c.replace("General:", "").replace("GENERAL:", "").strip() or "Tema General"
+                                if len(titulo_l1) > 32:
+                                    titulo_l1 = titulo_l1[:31].rstrip() + "…"
+                                linea_1 = f"{icono} 📌 {titulo_l1}"
+                            else:
+                                partes_r = [p.strip() for p in ref_c.split("|")]
+                                id_s_c = partes_r[0].removesuffix('.0')
+                                info_s = mapa_info_sin.get(id_s_c.upper(), {})
+                                fallback_auto = partes_r[1] if (len(partes_r) > 1 and not partes_r[1].startswith("⚙️")) else ""
+                                auto_c = acortar_auto_chat(info_s.get("marca", ""), info_s.get("modelo", ""), fallback_auto)
+                                tall_c = acortar_taller_chat(info_s.get("taller", ""))
+                                bloques_l1 = [b for b in [id_s_c, auto_c, tall_c] if b]
+                                linea_1 = f"{icono} " + " · ".join(bloques_l1)
+
+                            quienes_txt = formatear_participantes_corto(
+                                fila_c.get('Emisor', ''),
+                                fila_c.get('Receptor', ''),
+                                usuario_activo_real,
+                                grupos_identidad
+                            )
+                            hora_txt = str(fila_c.get('_hora_corta', '')).strip()
+                            linea_2 = f"{quienes_txt} · {hora_txt}" if hora_txt else quienes_txt
                             es_seleccionado = (st.session_state['chat_activo_gs_row'] == gs_r)
-                            
+
                             st.button(
-                                f"{icono} {ref_corta} ({contraparte})",
+                                f"{linea_1}\n{linea_2}",
                                 key=f"sel_chat_btn_{gs_r}",
                                 type="primary" if es_seleccionado else "secondary",
                                 use_container_width=True,
@@ -1980,7 +2158,7 @@ def renderizar_widget_tareas_flotante():
 
                 with col_ventana:
                     chat_sel_row = st.session_state['chat_activo_gs_row']
-                    row_activa = chats_activos[chats_activos['GS_Row'] == chat_sel_row].iloc[0]
+                    row_activa = chats_ordenados[chats_ordenados['GS_Row'] == chat_sel_row].iloc[0]
                     soy_emisor_chat = es_mismo_usuario(usuario_activo_real, row_activa.get('Emisor', ''), grupos_identidad)
                     st_chat = str(row_activa.get('Status', '')).strip().lower()
 
@@ -1989,12 +2167,15 @@ def renderizar_widget_tareas_flotante():
                     if id_sin_chat.endswith('.0'): id_sin_chat = id_sin_chat[:-2]
                     taller_chat = mapa_taller_sin.get(id_sin_chat, "")
                     html_taller_chat = f'  |  🏢 <b>Taller:</b> <span style="color:#E9EDEF; font-weight:600;">{taller_chat}</span>' if taller_chat else ""
+                    rec_raw_h = str(row_activa.get("Receptor", "N/A")).strip()
+                    es_grupo_h = ("," in rec_raw_h)
+                    lbl_rec_h = "👥 <b>Grupo:</b>" if es_grupo_h else "🎯 <b>Para:</b>"
 
                     st.markdown(
                         f'<div style="background-color:#1F2C34; padding:8px 12px; border-radius:8px; margin-bottom:4px; border-left:4px solid #00A884;">'
                         f'<div style="font-size:0.9rem; font-weight:700; color:#E9EDEF;">🚗 {ref_completa_chat}</div>'
                         f'<div style="font-size:0.75rem; color:#8696A0;">'
-                        f'👤 <b>Emisor:</b> {row_activa.get("Emisor", "N/A")}  |  🎯 <b>Para:</b> {row_activa.get("Receptor", "N/A")}  |  📌 <b>Estatus:</b> {st_chat.upper()}{html_taller_chat}'
+                        f'👤 <b>Emisor:</b> {row_activa.get("Emisor", "N/A")}  |  {lbl_rec_h} {rec_raw_h}  |  📌 <b>Estatus:</b> {st_chat.upper()}{html_taller_chat}'
                         f'</div></div>',
                         unsafe_allow_html=True
                     )
@@ -2148,7 +2329,12 @@ def renderizar_widget_tareas_flotante():
 
             col_nueva_1, col_nueva_2 = st.columns(2)
             with col_nueva_1:
-                usuario_destino = st.selectbox("Participante (Asignar a):", ["Seleccionar..."] + usuarios_reales, key=f"nc_dest_{v_nc}")
+                usuarios_destino = st.multiselect(
+                    "Participante(s) — 1 privado, varios para grupo:",
+                    options=usuarios_reales,
+                    placeholder="Selecciona uno o varios...",
+                    key=f"nc_dest_{v_nc}"
+                )
             with col_nueva_2:
                 siniestro_seleccionado = st.selectbox("Tema / Siniestro (Solo Activos):", ["Seleccionar...", "General (Tema Libre)"] + lista_siniestros, key=f"nc_sin_{v_nc}")
             
@@ -2169,7 +2355,8 @@ def renderizar_widget_tareas_flotante():
             )
             
             if st.button("📤 Iniciar Conversación", type="primary", key=f"btn_iniciar_conv_{v_nc}"):
-                if usuario_destino != "Seleccionar..." and siniestro_seleccionado != "Seleccionar..." and (instruccion_nueva.strip() or adj_inicial_up is not None):
+                if usuarios_destino and siniestro_seleccionado != "Seleccionar..." and (instruccion_nueva.strip() or adj_inicial_up is not None):
+                    receptor_final = ", ".join(usuarios_destino)
                     import uuid
                     tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
                     id_tarea = str(uuid.uuid4().hex)[:6].upper()
@@ -2215,7 +2402,7 @@ def renderizar_widget_tareas_flotante():
                         if i_id >= 0: nueva_fila[i_id] = id_tarea
                         if i_fe >= 0: nueva_fila[i_fe] = fecha_hoy
                         if i_em >= 0: nueva_fila[i_em] = usuario_activo_real
-                        if i_re >= 0: nueva_fila[i_re] = usuario_destino
+                        if i_re >= 0: nueva_fila[i_re] = receptor_final
                         if i_rf >= 0: nueva_fila[i_rf] = ref_final
                         if i_in >= 0: nueva_fila[i_in] = msg_ini_guardar
                         if i_st >= 0: nueva_fila[i_st] = "Pendiente"
@@ -2224,7 +2411,7 @@ def renderizar_widget_tareas_flotante():
                         ws_tareas.append_row(nueva_fila, value_input_option='USER_ENTERED')
                         leer_tareas_normalizadas.clear()
                         st.session_state['ver_nuevo_chat_form'] = v_nc + 1
-                        st.toast(f"✅ Conversación iniciada con {usuario_destino}", icon="✅")
+                        st.toast(f"✅ Conversación iniciada con {receptor_final}", icon="✅")
                         time.sleep(0.4)
                         st.rerun()
                     except Exception as e:

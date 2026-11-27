@@ -1211,6 +1211,8 @@ def acortar_auto_chat(marca_raw, modelo_raw, fallback_ref=""):
             palabras = palabras[:1]
     else:
         palabras = palabras[:2] if (len(palabras) >= 2 and palabras[1].isdigit()) else palabras[:1]
+        if marca and len(palabras) == 1 and len(palabras[0]) <= 3:
+            palabras = [marca] + palabras
     return " ".join(w if (w in siglas_up or len(w) <= 2 or any(c.isdigit() for c in w)) else w.title() for w in palabras)
 
 def acortar_taller_chat(taller_raw, max_len=18):
@@ -1908,23 +1910,31 @@ def renderizar_widget_tareas_flotante():
             margin: 0px !important;
             padding: 0.2rem 0.4rem !important;
         }
-        /* Tarjetas de 2 líneas limpias para cada conversación en la lista */
-        .st-key-pmr_lista_temas_scroll div.stButton > button {
+        /* Tarjetas de 2 líneas limpias y alineadas 100% a la izquierda */
+        .st-key-pmr_lista_temas_scroll button {
             height: auto !important;
             min-height: 3.1rem !important;
-            padding: 6px 10px !important;
+            padding: 7px 12px !important;
+            display: flex !important;
             justify-content: flex-start !important;
+            align-items: flex-start !important;
             text-align: left !important;
             white-space: normal !important;
         }
-        .st-key-pmr_lista_temas_scroll div.stButton > button p {
+        .st-key-pmr_lista_temas_scroll button > div,
+        .st-key-pmr_lista_temas_scroll button [data-testid="stMarkdownContainer"] {
+            width: 100% !important;
+            text-align: left !important;
+            margin-left: 0px !important;
+        }
+        .st-key-pmr_lista_temas_scroll button p {
             white-space: pre-line !important;
-            line-height: 1.28 !important;
+            line-height: 1.3 !important;
             font-size: 0.81rem !important;
             text-align: left !important;
             width: 100% !important;
+            margin: 0px !important;
         }
-        </style>
     """, unsafe_allow_html=True)
 
     # --- BOTÓN FIJO EN ESQUINA SUPERIOR DERECHA (ESTADO MINIMIZADO) ---

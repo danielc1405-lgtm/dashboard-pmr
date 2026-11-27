@@ -2629,6 +2629,46 @@ if st.query_params.get("vista") == "tareas":
             position: relative !important;
             z-index: 10 !important;
         }
+        /* Forzar botones en una sola fila compacta en móvil */
+    .st-key-mob_top_bar div[data-testid="stHorizontalBlock"],
+    .st-key-mob_msg_row div[data-testid="stHorizontalBlock"],
+    .st-key-mob_tools_row div[data-testid="stHorizontalBlock"] {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 6px !important;
+        align-items: center !important;
+    }
+    .st-key-mob_top_bar div[data-testid="stColumn"],
+    .st-key-mob_msg_row div[data-testid="stColumn"],
+    .st-key-mob_tools_row div[data-testid="stColumn"] {
+        min-width: 0px !important;
+        width: auto !important;
+    }
+    .st-key-mob_top_bar div[data-testid="stColumn"]:nth-child(1) { flex: 1.15 1 0% !important; }
+    .st-key-mob_top_bar div[data-testid="stColumn"]:nth-child(2) { flex: 0 0 46px !important; }
+    .st-key-mob_top_bar div[data-testid="stColumn"]:nth-child(3) { flex: 1.25 1 0% !important; }
+    .st-key-mob_top_bar div.stButton > button,
+    .st-key-mob_top_bar [data-testid="stPopover"] > button {
+        min-height: 2.2rem !important;
+        height: 2.2rem !important;
+        padding: 0px 8px !important;
+        font-size: 0.84rem !important;
+    }
+    .st-key-mob_msg_row div[data-testid="stColumn"]:nth-child(1) { flex: 1 1 auto !important; }
+    .st-key-mob_msg_row div[data-testid="stColumn"]:nth-child(2) { flex: 0 0 54px !important; }
+    .st-key-mob_msg_row div.stButton > button {
+        min-height: 2.4rem !important;
+        height: 2.4rem !important;
+        padding: 0px !important;
+    }
+    .st-key-mob_tools_row div[data-testid="stColumn"] { flex: 1 1 0% !important; }
+    .st-key-mob_tools_row [data-testid="stPopover"] > button,
+    .st-key-mob_tools_row [data-testid="stFileUploaderDropzone"],
+    .st-key-mob_tools_row [data-testid="stFileUploaderDropzone"] button {
+        min-height: 2.2rem !important;
+        height: 2.2rem !important;
+        font-size: 0.84rem !important;
+    }
         </style>
     """, unsafe_allow_html=True)
     st.stop()

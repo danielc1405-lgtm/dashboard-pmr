@@ -1030,26 +1030,27 @@ elif st.session_state['pmr_vista_movil'] == 'chat':
     row_activa = match_row.iloc[0]
 
     # Barra superior de navegación del chat
-    ct1, ct2, ct3 = st.columns([1.2, 0.8, 1.2], vertical_alignment="center")
-    with ct1:
-        if st.button("⬅️ Chats", key="mob_back_bandeja", use_container_width=True):
-            leer_tareas_normalizadas.clear()
-            st.session_state['pmr_vista_movil'] = 'bandeja'
-            st.rerun()
-    with ct2:
-        if st.button("🔄", key="mob_ref_chat", use_container_width=True):
-            leer_tareas_normalizadas.clear()
-            cargar_fotos_chat_sheets.clear()
-            st.rerun()
-    with ct3:
-        with st.popover("🏁 Finalizar", use_container_width=True):
-            st.caption("¿Cerrar y archivar este chat?")
-            if st.button("✅ Sí, finalizar", key=f"mob_conf_fin_{gs_activo}", type="primary", use_container_width=True):
-                actualizar_tarea_en_sheet(headers_t, row_activa, "Finalizado", str(row_activa.get('Respuesta', '')).strip())
+    with st.container(border=False, key="mob_top_bar"):
+        ct1, ct2, ct3 = st.columns([1.2, 0.6, 1.2], vertical_alignment="center")
+        with ct1:
+            if st.button("⬅️ Chats", key="mob_back_bandeja", use_container_width=True):
                 leer_tareas_normalizadas.clear()
                 st.session_state['pmr_vista_movil'] = 'bandeja'
-                st.toast("Chat archivado", icon="🏁")
                 st.rerun()
+        with ct2:
+            if st.button("🔄", key="mob_ref_chat", use_container_width=True):
+                leer_tareas_normalizadas.clear()
+                cargar_fotos_chat_sheets.clear()
+                st.rerun()
+        with ct3:
+            with st.popover("🏁 Finalizar", use_container_width=True):
+                st.caption("¿Cerrar y archivar este chat?")
+                if st.button("✅ Sí, finalizar", key=f"mob_conf_fin_{gs_activo}", type="primary", use_container_width=True):
+                    actualizar_tarea_en_sheet(headers_t, row_activa, "Finalizado", str(row_activa.get('Respuesta', '')).strip())
+                    leer_tareas_normalizadas.clear()
+                    st.session_state['pmr_vista_movil'] = 'bandeja'
+                    st.toast("Chat archivado", icon="🏁")
+                    st.rerun()
 
     # Tarjeta de encabezado del siniestro/grupo
     ref_full = str(row_activa.get("Siniestro / Taller / Piezas", "General")).strip()
@@ -1113,37 +1114,39 @@ elif st.session_state['pmr_vista_movil'] == 'chat':
             st.toast(f"No se pudo enviar: {e_s}", icon="⚠️")
 
     with st.container(border=True, key="pmr_mob_composer"):
-        cm1, cm2 = st.columns([3.4, 1.0], vertical_alignment="bottom")
-        with cm1:
-            st.text_input("Mensaje:", key=k_inp, placeholder="Escribe un mensaje...", label_visibility="collapsed")
-        with cm2:
-            st.button("📤", key=f"mob_send_{gs_activo}", type="primary", use_container_width=True, on_click=enviar_mob_cb)
+        with st.container(border=False, key="mob_msg_row"):
+            cm1, cm2 = st.columns([3.4, 1.0], vertical_alignment="bottom")
+            with cm1:
+                st.text_input("Mensaje:", key=k_inp, placeholder="Escribe un mensaje...", label_visibility="collapsed")
+            with cm2:
+                st.button("📤", key=f"mob_send_{gs_activo}", type="primary", use_container_width=True, on_click=enviar_mob_cb)
 
-        ca1, ca2 = st.columns([1.4, 1.0], vertical_alignment="center")
-        with ca1:
-            arch_sel = st.file_uploader(
-                "Adjuntar:",
-                type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "doc", "xlsx", "xls", "csv"],
-                key=k_up,
-                label_visibility="collapsed"
-            )
-        with ca2:
-            with st.popover("😀 Stickers", use_container_width=True):
-                if not stickers_map:
-                    st.caption("Aún no hay stickers cargados. Sube imágenes `.webp`, `.png` o `.gif` a la carpeta `stickers/` en GitHub.")
-                else:
-                    claves_st = list(stickers_map.keys())
-                    cols_st = st.columns(3)
-                    for idx_s, k_st in enumerate(claves_st):
-                        info_s = stickers_map[k_st]
-                        with cols_st[idx_s % 3]:
-                            st.image(info_s["path"], use_container_width=True)
-                            if st.button(info_s["etiqueta"][:11], key=f"mob_st_{gs_activo}_{k_st}", use_container_width=True):
-                                df_cur, h_cur = leer_tareas_normalizadas()
-                                m_cur = df_cur[df_cur['GS_Row'] == gs_activo]
-                                if not m_cur.empty:
-                                    enviar_mensaje_movil(m_cur.iloc[0], h_cur, sticker_clave=k_st)
-                                    st.rerun()
+        with st.container(border=False, key="mob_tools_row"):
+            ca1, ca2 = st.columns([1.2, 1.0], vertical_alignment="center")
+            with ca1:
+                arch_sel = st.file_uploader(
+                    "Adjuntar:",
+                    type=["png", "jpg", "jpeg", "webp", "pdf", "docx", "doc", "xlsx", "xls", "csv"],
+                    key=k_up,
+                    label_visibility="collapsed"
+                )
+            with ca2:
+                with st.popover("😀 Stickers", use_container_width=True):
+                    if not stickers_map:
+                        st.caption("Aún no hay stickers cargados. Sube imágenes `.webp`, `.png` o `.gif` a la carpeta `stickers/` en GitHub.")
+                    else:
+                        claves_st = list(stickers_map.keys())
+                        cols_st = st.columns(3)
+                        for idx_s, k_st in enumerate(claves_st):
+                            info_s = stickers_map[k_st]
+                            with cols_st[idx_s % 3]:
+                                st.image(info_s["path"], use_container_width=True)
+                                if st.button(info_s["etiqueta"][:11], key=f"mob_st_{gs_activo}_{k_st}", use_container_width=True):
+                                    df_cur, h_cur = leer_tareas_normalizadas()
+                                    m_cur = df_cur[df_cur['GS_Row'] == gs_activo]
+                                    if not m_cur.empty:
+                                        enviar_mensaje_movil(m_cur.iloc[0], h_cur, sticker_clave=k_st)
+                                        st.rerun()
 
     if arch_sel is not None:
         ext_a = os.path.splitext(arch_sel.name.lower())[1]

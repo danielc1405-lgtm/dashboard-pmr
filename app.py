@@ -1465,8 +1465,44 @@ def guardar_adjunto_chat_en_sheet(archivo_bytes, nombre_archivo, autor, depurar=
     nom_seguro = re.sub(r'[\[\]\|]', '', str(nombre_archivo or f"archivo{ext}")).strip()
     return (f"[FOTO:{id_adj}]" if es_imagen else f"[DOC:{id_adj}|{nom_seguro}]")
 
+@st.cache_data(ttl=600)
+def cargar_stickers_locales():
+    """Carga los stickers (.webp, .png, .gif, .jpg) desde la carpeta stickers/ del repo."""
+    stickers = {}
+    carpeta_st = "stickers"
+    if not os.path.isdir(carpeta_st):
+        return stickers
+    mimes_st = {
+        ".webp": "image/webp",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg"
+    }
+    for fname in sorted(os.listdir(carpeta_st)):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in mimes_st:
+            continue
+        ruta = os.path.join(carpeta_st, fname)
+        if not os.path.isfile(ruta):
+            continue
+        stem = os.path.splitext(fname)[0].strip()
+        clave = re.sub(r'[^A-Za-z0-9_-]', '_', stem).upper()
+        try:
+            with open(ruta, "rb") as f_s:
+                b64_s = base64.b64encode(f_s.read()).decode("utf-8")
+            stickers[clave] = {
+                "clave": clave,
+                "etiqueta": stem.replace("_", " ").replace("-", " ").title(),
+                "path": ruta,
+                "data_uri": f"data:{mimes_st[ext]};base64,{b64_s}"
+            }
+        except Exception:
+            continue
+    return stickers
+
 def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
-    """Dibuja una ventana estilo WhatsApp con soporte de imágenes, documentos (PDF/Excel/Word/CSV), zoom, Ctrl+V y arrastre."""
+    """Dibuja una ventana estilo WhatsApp con soporte de imágenes, documentos, stickers, zoom, Ctrl+V y arrastre."""
     import html
     import re
     import streamlit.components.v1 as components
@@ -1477,8 +1513,19 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
         mapa_fotos_chat.update(cargar_fotos_chat_sheets())
         mapa_fotos_chat.update(st.session_state.get("cache_fotos_chat_local", {}))
 
+    stickers_map = cargar_stickers_locales() if "[STICKER:" in texto_completo_chat.upper() else {}
+
     def formatear_texto_con_adjuntos(txt_crudo):
-        txt_esc = html.escape(str(txt_crudo).strip()).replace('\n', '<br>')
+        txt_str = str(txt_crudo or "").strip()
+        m_solo_st = re.fullmatch(r'\[STICKER:([A-Za-z0-9_-]+)\]', txt_str, flags=re.IGNORECASE)
+        if m_solo_st:
+            k_st = m_solo_st.group(1).strip().upper()
+            info_st = stickers_map.get(k_st)
+            if info_st:
+                return f'<img src="{info_st["data_uri"]}" class="chat-sticker-solo" alt="{html.escape(k_st)}" />', True
+            return f'<span style="color:#8696A0; font-style:italic;">[🏷️ Sticker: {html.escape(k_st)}]</span>', False
+
+        txt_esc = html.escape(txt_str).replace('\n', '<br>')
 
         def _reemplazar_foto(m):
             id_f = m.group(1).strip().upper()
@@ -1489,7 +1536,7 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                     f'<img src="{src_f}" class="chat-img" onclick="abrirZoom(this.src)" title="Clic para ampliar imagen" />'
                     f'</div>'
                 )
-            return f'<span style="color:#8696A0; font-style:italic;">[📷 Imagen {id_f} expirada (>5 días)]</span>'
+            return f'<span style="color:#8696A0; font-style:italic;">[📷 Imagen {id_f} expirada (&gt;5 días)]</span>'
 
         def _reemplazar_doc(m):
             id_d = m.group(1).strip().upper()
@@ -1503,29 +1550,62 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                     f'{icono_d} <span>{nom_d}</span> <b>⬇️</b>'
                     f'</a></div>'
                 )
-            return f'<span style="color:#8696A0; font-style:italic;">[{icono_d} {nom_d} expirado (>5 días)]</span>'
+            return f'<span style="color:#8696A0; font-style:italic;">[{icono_d} {nom_d} expirado (&gt;5 días)]</span>'
+
+        def _reemplazar_sticker(m):
+            k_st = m.group(1).strip().upper()
+            info_st = stickers_map.get(k_st)
+            if info_st:
+                return f'<div class="img-wrap"><img src="{info_st["data_uri"]}" class="chat-sticker-inline" /></div>'
+            return f'<span style="color:#8696A0;">[🏷️ {html.escape(k_st)}]</span>'
 
         txt_out = re.sub(r'\[FOTO:([A-Za-z0-9]+)\]', _reemplazar_foto, txt_esc)
         txt_out = re.sub(r'\[DOC:([A-Za-z0-9]+)\|([^\]]+)\]', _reemplazar_doc, txt_out)
-        return txt_out
+        txt_out = re.sub(r'\[STICKER:([A-Za-z0-9_-]+)\]', _reemplazar_sticker, txt_out, flags=re.IGNORECASE)
+        return txt_out, False
+
+    def armar_burbuja_pc(autor, fecha, cuerpo_raw, es_mio):
+        cuerpo_html, es_solo_sticker = formatear_texto_con_adjuntos(cuerpo_raw)
+        align = "flex-end" if es_mio else "flex-start"
+        color_autor = "#53BDEB" if es_mio else "#00A884"
+        header_html = f'<div class="author" style="color:{color_autor};">{html.escape(autor)} <span class="time">• {html.escape(fecha)}</span></div>' if autor else ""
+        if es_solo_sticker:
+            return (
+                f'<div class="msg-row" style="justify-content:{align};">'
+                f'<div class="sticker-wrap" style="align-items:{align};">'
+                f'{header_html}{cuerpo_html}'
+                f'</div></div>'
+            )
+        bg = "#005C4B" if es_mio else "#1F2C34"
+        radius = "10px 0px 10px 10px" if es_mio else "0px 10px 10px 10px"
+        return (
+            f'<div class="msg-row" style="justify-content:{align};">'
+            f'<div class="bubble" style="background-color:{bg}; border-radius:{radius};">'
+            f'{header_html}<div class="txt">{cuerpo_html}</div>'
+            f'</div></div>'
+        )
 
     emisor_orig = str(row.get('Emisor', 'Usuario')).strip()
     fecha_orig = str(row.get('Fecha_Creacion', '')).strip()
-    instruccion_orig = formatear_texto_con_adjuntos(row.get('Instruccion', ''))
     es_mio_orig = es_mismo_usuario(usuario_activo_real, emisor_orig, grupos_identidad)
 
-    burbujas = []
-    align_0 = "flex-end" if es_mio_orig else "flex-start"
-    bg_0 = "#005C4B" if es_mio_orig else "#1F2C34"
-    radius_0 = "10px 0px 10px 10px" if es_mio_orig else "0px 10px 10px 10px"
+    burbujas = [armar_burbuja_pc(emisor_orig, fecha_orig, row.get('Instruccion', ''), es_mio_orig)]
 
-    burbujas.append(
-        f'<div class="msg-row" style="justify-content:{align_0};">'
-        f'<div class="bubble" style="background-color:{bg_0}; border-radius:{radius_0};">'
-        f'<div class="author" style="color:#53BDEB;">{html.escape(emisor_orig)} <span class="time">• {html.escape(fecha_orig)}</span></div>'
-        f'<div class="txt">{instruccion_orig}</div>'
-        f'</div></div>'
-    )
+    historial_raw = str(row.get('Respuesta', '')).strip()
+    if historial_raw and historial_raw.lower() not in ["none", "nan", ""]:
+        lineas = historial_raw.replace('\\n', '\n').split('\n')
+        for linea in lineas:
+            linea_limpia = linea.strip()
+            if not linea_limpia:
+                continue
+            m = re.match(r'^\[(.*?)\]\s*([^:]+):\s*(.*)$', linea_limpia)
+            if m:
+                f_msg, autor_msg, txt_msg = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
+                es_mio = es_mismo_usuario(usuario_activo_real, autor_msg, grupos_identidad)
+            else:
+                f_msg, autor_msg, txt_msg = "", "", linea_limpia
+                es_mio = es_mismo_usuario(usuario_activo_real, linea_limpia, grupos_identidad) or (usuario_activo_real.lower() in linea_limpia.lower())
+            burbujas.append(armar_burbuja_pc(autor_msg, f_msg, txt_msg, es_mio))
 
     historial_raw = str(row.get('Respuesta', '')).strip()
     if historial_raw and historial_raw.lower() not in ["none", "nan", ""]:
@@ -1598,6 +1678,15 @@ def renderizar_hilo_chat(row, usuario_activo_real, grupos_identidad):
                 max-width: 80%;
                 box-shadow: 0 1px 2px rgba(0,0,0,0.5);
                 word-wrap: break-word;
+            }}
+            .sticker-wrap {{ display: flex; flex-direction: column; max-width: 75%; }}
+            .chat-sticker-solo {{
+                width: 128px; max-width: 100%; height: auto;
+                object-fit: contain;
+                filter: drop-shadow(0 2px 6px rgba(0,0,0,0.55));
+            }}
+            .chat-sticker-inline {{
+                width: 105px; height: auto; object-fit: contain;
             }}
             .author {{ font-size: 0.74rem; font-weight: 700; margin-bottom: 3px; }}
             .time {{ color: #8696A0; font-weight: normal; font-size: 0.68rem; }}
@@ -2232,8 +2321,19 @@ def renderizar_widget_tareas_flotante():
                         actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, "Finalizado", str(row_act.get('Respuesta', '')).strip())
                         leer_tareas_normalizadas.clear()
 
+                    def enviar_sticker_pc_cb(row_act, soy_emi, clave_st):
+                        tz_mx_t = datetime.timezone(datetime.timedelta(hours=-6))
+                        ahora_str = datetime.datetime.now(tz_mx_t).strftime("%d/%m/%Y %H:%M")
+                        hist_prev = str(row_act.get('Respuesta', '')).strip()
+                        linea_nueva = f"[{ahora_str}] {usuario_activo_real}: [STICKER:{clave_st}]"
+                        hist_final = f"{hist_prev}\n{linea_nueva}".strip() if hist_prev else linea_nueva
+                        prox_status = "Pendiente" if soy_emi else "Resuelto"
+                        ws_t = doc.worksheet("Gestor_Tareas")
+                        actualizar_tarea_en_sheet(ws_t, headers_tareas, row_act, prox_status, hist_final)
+                        leer_tareas_normalizadas.clear()
+
                     with st.container(border=True, key="pmr_chat_input_box"):
-                        c_up_btn, c_inp, c_send, c_fin = st.columns([0.85, 2.35, 0.9, 0.9], vertical_alignment="bottom")
+                        c_up_btn, c_st_btn, c_inp, c_send, c_fin = st.columns([0.75, 0.55, 2.15, 0.85, 0.85], vertical_alignment="bottom")
                         with c_up_btn:
                             archivo_chat_sel = st.file_uploader(
                                 "Adjuntar:",
@@ -2241,6 +2341,23 @@ def renderizar_widget_tareas_flotante():
                                 key=key_uploader_actual,
                                 label_visibility="collapsed"
                             )
+                        with c_st_btn:
+                            with st.popover("😀", use_container_width=True):
+                                st_pc = cargar_stickers_locales()
+                                if not st_pc:
+                                    st.caption("Sin stickers en stickers/")
+                                else:
+                                    cols_st_pc = st.columns(3)
+                                    for idx_sp, (k_sp, info_sp) in enumerate(st_pc.items()):
+                                        with cols_st_pc[idx_sp % 3]:
+                                            st.image(info_sp["path"], use_container_width=True)
+                                            st.button(
+                                                info_sp["etiqueta"][:10],
+                                                key=f"pc_st_{chat_sel_row}_{k_sp}",
+                                                use_container_width=True,
+                                                on_click=enviar_sticker_pc_cb,
+                                                args=(row_activa, soy_emisor_chat, k_sp)
+                                            )
                         with c_inp:
                             st.text_input(
                                 "Mensaje:",

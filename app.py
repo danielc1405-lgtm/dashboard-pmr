@@ -568,12 +568,16 @@ def abrir_popup_monitor():
                                 val = df_c.iat[r_i, c_i]
                                 anchos_max[c_i] = max(anchos_max.get(c_i, 10), len(str(val)) + 3)
                                 if c_i in cols_mon:
-                                    try:
-                                        v_num = float(str(val).replace('$', '').replace(',', '').strip() or 0.0)
-                                        ws.write_number(curr_row, c_i, v_num, f_mzb if es_par else f_mon)
-                                        totales[c_i] = totales.get(c_i, 0.0) + v_num
-                                    except Exception:
-                                        ws.write(curr_row, c_i, str(val), f_zeb if es_par else f_cel)
+                                    val_s = str(val).replace('$', '').replace(',', '').strip()
+                                    if not val_s or val_s.lower() in ['nan', 'none']:
+                                        ws.write(curr_row, c_i, "", f_zeb if es_par else f_cel)
+                                    else:
+                                        try:
+                                            v_num = float(val_s)
+                                            ws.write_number(curr_row, c_i, v_num, f_mzb if es_par else f_mon)
+                                            totales[c_i] = totales.get(c_i, 0.0) + v_num
+                                        except Exception:
+                                            ws.write(curr_row, c_i, str(val), f_zeb if es_par else f_cel)
                                 else:
                                     ws.write(curr_row, c_i, val if isinstance(val, (int, float)) else str(val), f_zeb if es_par else f_cel)
                             curr_row += 1
@@ -621,9 +625,16 @@ def abrir_popup_monitor():
                     for h_t, w_t in cols_w:
                         es_dinero = any(k in h_t.upper() for k in ["PRECIO", "COSTO", "MONTO", "ADEUDADO", "AUTORIZADO"])
                         if es_dinero:
-                            v_f = float(str(r_b.get(h_t, 0)).replace('$', '').replace(',', '').strip() or 0.0)
-                            tot_pdf[h_t] = tot_pdf.get(h_t, 0.0) + v_f
-                            pdf.cell(w_t, 5, f"${v_f:,.2f}", border=1, align='R')
+                            val_s = str(r_b.get(h_t, '')).replace('$', '').replace(',', '').strip()
+                            if not val_s or val_s.lower() in ['nan', 'none']:
+                                pdf.cell(w_t, 5, "", border=1, align='R')
+                            else:
+                                try:
+                                    v_f = float(val_s)
+                                    tot_pdf[h_t] = tot_pdf.get(h_t, 0.0) + v_f
+                                    pdf.cell(w_t, 5, f"${v_f:,.2f}", border=1, align='R')
+                                except Exception:
+                                    pdf.cell(w_t, 5, "", border=1, align='R')
                         else:
                             pdf.cell(w_t, 5, limpiar_txt_pdf(str(r_b.get(h_t, ''))[:34]), border=1)
                     pdf.ln()
@@ -651,35 +662,76 @@ def abrir_popup_monitor():
                 c_id, c_cdr = get_c_pop(df_rep_u, ["SINIESTRO", "PEDIDO"]), get_c_pop(df_rep_u, ["TALLER", "CDR"])
                 c_marca, c_modelo = get_c_pop(df_rep_u, ["MARCA"]), get_c_pop(df_rep_u, ["MODELO"])
                 c_ano, c_pieza = get_c_pop(df_rep_u, ["AÑO", "ANO"]), get_c_pop(df_rep_u, ["DESCRIPCI", "REFACCI"])
+                c_precio_v = get_c_pop(df_rep_u, ["PRECIO", "COSTO"])
                 c_guia, c_rastreo = get_c_pop(df_rep_u, ["GUIA"], excluidos=["RET", "DEV"]), get_c_pop(df_rep_u, ["ESTATUS ENV", "RASTREO"])
                 c_venc, c_est = get_c_pop(df_rep_u, ["VENCIMIENTO", "PROMESA"]), get_c_pop(df_rep_u, ["ESTATUS", "STATUS"], excluidos=["ENV", "PAGO"])
                 c_aseg, c_obs = get_c_pop(df_rep_u, ["ASEGURADORA"]), get_c_pop(df_rep_u, ["COMENTARIO", "OBSERVACION"])
+
+                def limpiar_dinero_op(val):
+                    s = str(val).replace('$', '').replace(',', '').replace('\\', '').strip()
+                    if not s or s.lower() in ['nan', 'none', '-']:
+                        return None
+                    try:
+                        return float(s)
+                    except Exception:
+                        return None
 
                 estatus_excluir = ["CANCELADO", "RECIBIDO", "FACTURADO", "REEMBOLSADO", "PÉRDIDA TOTAL", "PAGO DE DAÑOS", "PERDIDA TOTAL"]
                 df_rep = df_rep_u[~df_rep_u[c_est].astype(str).str.upper().isin(estatus_excluir)].copy()
 
                 dict_prov_rep = {}
+                dict_costo_rep = {}
                 if not df_rep_c.empty:
-                    cc_sin, cc_pz, cc_pr = get_c_pop(df_rep_c, ["SINIESTRO", "PEDIDO"]), get_c_pop(df_rep_c, ["DESCRIPCI", "PIEZA"]), get_c_pop(df_rep_c, ["PROVEEDOR"])
-                    if cc_sin and cc_pz and cc_pr:
+                    cc_sin = get_c_pop(df_rep_c, ["SINIESTRO", "PEDIDO"])
+                    cc_pz = get_c_pop(df_rep_c, ["DESCRIPCI", "PIEZA"])
+                    cc_pr = get_c_pop(df_rep_c, ["PROVEEDOR"])
+                    cc_cos = get_c_pop(df_rep_c, ["COSTO COMPRA", "COSTO", "PRECIO"])
+                    if cc_sin and cc_pz:
                         for _, rc in df_rep_c.iterrows():
                             sv = str(rc.get(cc_sin, '')).strip().upper().removesuffix('.0')
                             pv = ' '.join(str(rc.get(cc_pz, '')).strip().upper().split())
-                            dict_prov_rep[f"{sv}_{pv}"] = str(rc.get(cc_pr, '')).strip()
+                            llave_rc = f"{sv}_{pv}"
+                            if cc_pr:
+                                pr_val = str(rc.get(cc_pr, '')).strip()
+                                if pr_val and pr_val.lower() not in ['nan', 'none']:
+                                    dict_prov_rep[llave_rc] = pr_val
+                            if cc_cos:
+                                cos_num = limpiar_dinero_op(rc.get(cc_cos, ''))
+                                if cos_num is not None and cos_num > 0:
+                                    dict_costo_rep[llave_rc] = cos_num
 
-                df_rep['PROVEEDOR'] = df_rep.apply(lambda r: dict_prov_rep.get(f"{str(r.get(c_id,'')).strip().upper().removesuffix('.0')}_{' '.join(str(r.get(c_pieza,'')).strip().upper().split())}", ""), axis=1)
+                df_rep['_llave_op'] = df_rep.apply(lambda r: f"{str(r.get(c_id,'')).strip().upper().removesuffix('.0')}_{' '.join(str(r.get(c_pieza,'')).strip().upper().split())}", axis=1)
+                df_rep['PRECIO VENTA'] = df_rep[c_precio_v].apply(limpiar_dinero_op) if c_precio_v else None
+                df_rep['PROVEEDOR'] = df_rep['_llave_op'].map(dict_prov_rep).fillna("")
+                df_rep['PRECIO COMPRA'] = df_rep['_llave_op'].map(dict_costo_rep)
                 df_rep['COMPAÑÍA'] = df_rep[c_aseg].astype(str).str.upper().apply(lambda x: "GNP" if "GNP" in x else "MULTI") if c_aseg else "MULTI"
                 if aseg_rep_sel != "TODAS":
                     df_rep = df_rep[df_rep['COMPAÑÍA'] == aseg_rep_sel].copy()
 
                 df_rep.rename(columns={c_id: 'SINIESTRO/PEDIDO', c_cdr: 'CDR', c_marca: 'MARCA', c_modelo: 'MODELO', c_ano: 'AÑO', c_pieza: 'PIEZA', c_guia: 'GUÍA', c_rastreo: 'ESTATUS GUÍA', c_venc: 'FECHA VENCIMIENTO', c_est: 'ESTATUS', c_obs: 'OBSERVACIONES'}, inplace=True)
-                cols_op = ['COMPAÑÍA', 'ESTATUS', 'SINIESTRO/PEDIDO', 'CDR', 'MARCA', 'MODELO', 'AÑO', 'PIEZA', 'PROVEEDOR', 'GUÍA', 'ESTATUS GUÍA', 'FECHA VENCIMIENTO', 'OBSERVACIONES']
+                cols_op = ['COMPAÑÍA', 'ESTATUS', 'SINIESTRO/PEDIDO', 'CDR', 'MARCA', 'MODELO', 'AÑO', 'PIEZA', 'PRECIO VENTA', 'PROVEEDOR', 'PRECIO COMPRA', 'GUÍA', 'ESTATUS GUÍA', 'FECHA VENCIMIENTO', 'OBSERVACIONES']
                 for col in cols_op:
                     if col not in df_rep.columns: df_rep[col] = ""
                 df_rep = df_rep[cols_op].sort_values(by=['COMPAÑÍA', 'ESTATUS'])
-                st.dataframe(df_rep, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    df_rep,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "PRECIO VENTA": st.column_config.NumberColumn("PRECIO VENTA", format="$ %.2f"),
+                        "PRECIO COMPRA": st.column_config.NumberColumn("PRECIO COMPRA", format="$ %.2f")
+                    }
+                )
 
-                b_pdf = crear_pdf_tablas_apiladas("REPORTE OPERATIVO", f"Emisión: {hoy_cal_date.strftime('%d/%m/%Y')} | Partidas: {len(df_rep)}", [("PEDIDOS ACTIVOS EN PROCESO", df_rep, [('COMPAÑÍA', 16), ('ESTATUS', 28), ('SINIESTRO/PEDIDO', 25), ('CDR', 48), ('MODELO', 32), ('PIEZA', 55), ('PROVEEDOR', 35), ('FECHA VENCIMIENTO', 22)])])
+                b_pdf = crear_pdf_tablas_apiladas(
+                    "REPORTE OPERATIVO",
+                    f"Emisión: {hoy_cal_date.strftime('%d/%m/%Y')} | Partidas: {len(df_rep)}",
+                    [("PEDIDOS ACTIVOS EN PROCESO", df_rep, [
+                        ('COMPAÑÍA', 14), ('ESTATUS', 24), ('SINIESTRO/PEDIDO', 23), ('CDR', 38),
+                        ('MODELO', 26), ('PIEZA', 44), ('PRECIO VENTA', 22), ('PROVEEDOR', 34),
+                        ('PRECIO COMPRA', 22), ('FECHA VENCIMIENTO', 22)
+                    ])]
+                )
                 b_xlsx = generar_excel_corporativo_pmr({"Reporte_Operativo": [("1. PEDIDOS EN PROCESO", df_rep)]}, "Reporte Operativo")
                 c1, c2 = st.columns(2)
                 c1.download_button("🖨️ Descargar Reporte Operativo (PDF)", data=b_pdf, file_name=f"Reporte_Operativo_PMR_{hoy_cal_date.strftime('%d%m%Y')}.pdf", mime="application/pdf", type="primary", use_container_width=True)

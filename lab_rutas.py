@@ -196,8 +196,13 @@ def cargar_rutas_nube():
                             r_dict[id_ruta]["piezas"].append({"desc": pieza_actual, "np": ""})
                         if sin_actual and sin_actual not in ['S/D', ''] and sin_actual not in r_dict[id_ruta]["siniestros"]:
                             r_dict[id_ruta]["siniestros"].append(sin_actual)
+                        nota_fila = str(row.get(col_notas, '')) if col_notas else ""
+                        for tag_extra in re.findall(r'\[FOTO:[A-Za-z0-9]+\]', nota_fila, flags=re.IGNORECASE):
+                            if tag_extra.upper() not in r_dict[id_ruta]["notas"].upper():
+                                r_dict[id_ruta]["notas"] = f"{r_dict[id_ruta]['notas']} {tag_extra}".strip()
                 return list(r_dict.values())
             
+            cargar_fotos_nube.clear()
             st.session_state['ruta_hoy'] = armar_diccionario_rutas(df_pendientes)
             st.session_state['ruta_completadas_hoy'] = armar_diccionario_rutas(df_completadas)
             return True
@@ -262,23 +267,27 @@ else:
             opciones_orden = [f"{idx + 1} - {r['lugar']}" for idx, r in enumerate(st.session_state['ruta_hoy'])]
             st.selectbox("Mover al lugar:", options=opciones_orden, index=i, key=f"pos_{parada['id']}", on_change=cambiar_posicion_nombre, args=(i, f"pos_{parada['id']}"))
             
-            # Extraer etiquetas [FOTO:ID] de las notas para mostrar QR / imágenes
+            # Extraer etiquetas [FOTO:ID] únicas de las notas para mostrar QR / imágenes
             notas_raw = str(parada.get('notas', '')).strip()
-            ids_fotos = re.findall(r'\[FOTO:([A-Za-z0-9]+)\]', notas_raw, flags=re.IGNORECASE)
+            ids_fotos = list(dict.fromkeys([f.upper() for f in re.findall(r'\[FOTO:([A-Za-z0-9]+)\]', notas_raw, flags=re.IGNORECASE)]))
             notas_limpias = re.sub(r'\[FOTO:[A-Za-z0-9]+\]', '', notas_raw, flags=re.IGNORECASE).strip()
 
             if notas_limpias:
                 st.markdown(f'<div class="nota-operador">⚠️ {notas_limpias}</div>', unsafe_allow_html=True)
 
             # Mostrar QR / Fotos adjuntas directamente en la tarjeta
-            for fid in ids_fotos:
-                src_b64 = mapa_fotos_ruta.get(fid.upper(), "")
+            total_f = len(ids_fotos)
+            for idx_f, fid in enumerate(ids_fotos, start=1):
+                src_b64 = mapa_fotos_ruta.get(fid, "")
                 if src_b64:
                     try:
                         b64_puro = src_b64.split(",", 1)[1] if "," in src_b64 else src_b64
-                        st.image(base64.b64decode(b64_puro), caption=f"📷 Código / Foto ({fid.upper()})", use_container_width=True)
+                        etq_f = f"📷 Foto {idx_f} de {total_f} ({fid})" if total_f > 1 else f"📷 Código / Foto ({fid})"
+                        st.image(base64.b64decode(b64_puro), caption=etq_f, use_container_width=True)
                     except Exception:
-                        pass
+                        st.caption(f"⚠️ No se pudo mostrar la imagen ({fid}).")
+                else:
+                    st.caption(f"⚠️ Imagen ({fid}) no disponible o expirada (>5 días).")
 
             veh_txt = parada.get("vehiculo", "S/D")
             vin_txt = parada.get("serie", "S/D")

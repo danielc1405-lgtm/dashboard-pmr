@@ -189,7 +189,30 @@ def guardar_pdf_siniestro_multi(context, frame_derecho, num_siniestro, carpeta_d
             """)
         except Exception:
             pass
-        time.sleep(0.5)
+
+        # Igualar métricas de Chrome Windows (sin fondos grises y fecha en 1 sola línea)
+        try:
+            popup.add_style_tag(content="""
+                @media print {
+                    body, table, td, th, div, span {
+                        background-color: transparent !important;
+                        letter-spacing: -0.2px !important;
+                    }
+                }
+            """)
+            popup.evaluate("""
+                () => {
+                    document.querySelectorAll('td').forEach(td => {
+                        const txt = (td.textContent || '').trim();
+                        if (/^Fecha\s*:?$/i.test(txt) || /^\d{1,2}\s+[A-Z]{3}\s+\d{4}$/i.test(txt)) {
+                            td.style.whiteSpace = 'nowrap';
+                        }
+                    });
+                }
+            """)
+        except Exception:
+            pass
+        time.sleep(0.4)
 
         pdf_bytes = None
         try:
@@ -197,8 +220,9 @@ def guardar_pdf_siniestro_multi(context, frame_derecho, num_siniestro, carpeta_d
             res_pdf = cdp.send("Page.printToPDF", {
                 "landscape": False,
                 "displayHeaderFooter": False,
-                "printBackground": True,
-                "preferCSSPageSize": True,
+                "printBackground": False,
+                "preferCSSPageSize": False,
+                "scale": 0.84,
                 "paperWidth": 8.5,
                 "paperHeight": 11.0,
                 "marginTop": 0.4,
@@ -214,7 +238,8 @@ def guardar_pdf_siniestro_multi(context, frame_derecho, num_siniestro, carpeta_d
         except Exception:
             pdf_bytes = popup.pdf(
                 format="Letter",
-                print_background=True,
+                print_background=False,
+                scale=0.84,
                 margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
             )
 

@@ -195,11 +195,10 @@ def guardar_pdf_siniestro_multi(context, frame_derecho, num_siniestro, carpeta_d
                 @media print {
                     body, table, td, th, div, span {
                         background-color: transparent !important;
-                        letter-spacing: -0.2px !important;
                     }
                 }
             """)
-            popup.evaluate("""
+            popup.evaluate(r"""
                 () => {
                     document.querySelectorAll('td').forEach(td => {
                         const txt = (td.textContent || '').trim();
@@ -221,7 +220,7 @@ def guardar_pdf_siniestro_multi(context, frame_derecho, num_siniestro, carpeta_d
                 "displayHeaderFooter": False,
                 "printBackground": False,
                 "preferCSSPageSize": False,
-                "scale": 0.84,
+                "scale": 0.95,
                 "paperWidth": 8.5,
                 "paperHeight": 11.0,
                 "marginTop": 0.4,
@@ -238,7 +237,7 @@ def guardar_pdf_siniestro_multi(context, frame_derecho, num_siniestro, carpeta_d
             pdf_bytes = popup.pdf(
                 format="Letter",
                 print_background=False,
-                scale=0.84,
+                scale=0.95,
                 margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
             )
 

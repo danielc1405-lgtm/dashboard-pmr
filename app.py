@@ -449,6 +449,73 @@ def abrir_popup_monitor():
     # =========================================================================
     # PESTAÑA 2: CENTRO DE REPORTERÍA (CON CALENDARIO DE INICIO Y FIN)
     # =========================================================================
+    # --- DESCARGADOR DE PDFs MULTIASISTENCIA ---
+        import io as _io_m
+        import glob as _glob_m
+        import zipfile as _zip_m
+
+        carpeta_pdfs_m = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Siniestros Multi")
+        if not os.path.isdir(carpeta_pdfs_m):
+            carpeta_pdfs_m = "Siniestros Multi"
+
+        pdfs_multi_disp = sorted(
+            _glob_m.glob(os.path.join(carpeta_pdfs_m, "*.pdf")),
+            key=lambda p: os.path.getmtime(p),
+            reverse=True
+        ) if os.path.isdir(carpeta_pdfs_m) else []
+
+        with st.container(border=True):
+            st.markdown(f"**📂 Respaldo Oficial de Siniestros Multiasistencia ({len(pdfs_multi_disp)} PDFs disponibles)**")
+            if pdfs_multi_disp:
+                buf_zip_m = _io_m.BytesIO()
+                with _zip_m.ZipFile(buf_zip_m, "w", _zip_m.ZIP_DEFLATED) as zf_m:
+                    for ruta_p in pdfs_multi_disp:
+                        zf_m.write(ruta_p, arcname=os.path.basename(ruta_p))
+
+                tz_m_zip = datetime.timezone(datetime.timedelta(hours=-6))
+                nom_zip_m = f"Siniestros_Multi_{datetime.datetime.now(tz_m_zip).strftime('%Y%m%d_%H%M')}.zip"
+
+                cm_z, cm_sel, cm_ind, cm_clr = st.columns([1.4, 1.4, 0.9, 0.7], vertical_alignment="bottom")
+                with cm_z:
+                    st.download_button(
+                        label=f"📦 Descargar Todos ({len(pdfs_multi_disp)} .ZIP)",
+                        data=buf_zip_m.getvalue(),
+                        file_name=nom_zip_m,
+                        mime="application/zip",
+                        type="primary",
+                        use_container_width=True,
+                        key="btn_dl_zip_multi_pop"
+                    )
+                with cm_sel:
+                    mapa_pdfs_m = {os.path.basename(p): p for p in pdfs_multi_disp}
+                    pdf_ind_sel = st.selectbox(
+                        "Ver / Bajar individual:",
+                        list(mapa_pdfs_m.keys()),
+                        key="sel_pdf_ind_multi_pop",
+                        label_visibility="collapsed"
+                    )
+                with cm_ind:
+                    with open(mapa_pdfs_m[pdf_ind_sel], "rb") as f_ind:
+                        bytes_ind_m = f_ind.read()
+                    st.download_button(
+                        label="📄 Bajar PDF",
+                        data=bytes_ind_m,
+                        file_name=pdf_ind_sel,
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key=f"btn_dl_ind_multi_{pdf_ind_sel}"
+                    )
+                with cm_clr:
+                    if st.button("🗑️ Limpiar", use_container_width=True, help="Borrar PDFs temporales de la nube", key="btn_clr_pdfs_multi_pop"):
+                        for ruta_p in pdfs_multi_disp:
+                            try:
+                                os.remove(ruta_p)
+                            except Exception:
+                                pass
+                        st.toast("🗑️ Carpeta temporal limpiada.", icon="🗑️")
+                        st.rerun()
+            else:
+                st.caption("ℹ️ Ejecuta el bot de Multiasistencia para generar y habilitar la descarga de los PDFs oficiales aquí.")
     with tab_reporte:
         import io
         if 'reporte_activo_popup' not in st.session_state:

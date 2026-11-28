@@ -176,16 +176,15 @@ def guardar_pdf_siniestro_multi(context, frame_derecho, num_siniestro, carpeta_d
 
         # Esperar a que terminen de cargar el logo y la marca de agua "Listado Informativo"
         try:
-            popup.evaluate("""
-                () => Promise.all(
-                    Array.from(document.images).map(img =>
-                        img.complete ? Promise.resolve() : new Promise(res => {
-                            img.onload = res;
-                            img.onerror = res;
-                            setTimeout(res, 4000);
-                        })
-                    )
-                )
+            popup.evaluate(r"""
+                () => {
+                    document.querySelectorAll('td').forEach(td => {
+                        const txt = (td.textContent || '').trim();
+                        if (/^Fecha\s*:?$/i.test(txt) || /^\d{1,2}\s+[A-Z]{3}\s+\d{4}$/i.test(txt)) {
+                            td.style.whiteSpace = 'nowrap';
+                        }
+                    });
+                }
             """)
         except Exception:
             pass

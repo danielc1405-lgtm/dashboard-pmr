@@ -5940,7 +5940,11 @@ elif vista_actual == "🚚 Rutas":
                         "Enviar Hoy": st.column_config.CheckboxColumn("🚚 Enviar Hoy", default=False),
                         col_id: st.column_config.TextColumn("Pedido / Siniestro", disabled=True),
                         'Vehiculo_Info': st.column_config.TextColumn("Vehículo", disabled=True),
-                        col_desc: st.column_config.TextColumn("Descripción", disabled=Truedirs_ent_t = obtener_sucursales_taller_ruta(taller)
+                        col_desc: st.column_config.TextColumn("Descripción", disabled=True)
+                    }
+                    ed_ent = st.data_editor(df_taller[cols_ver], column_config=cfg, hide_index=True, use_container_width=True, key=f"ent_{taller}")
+
+                    dirs_ent_t = obtener_sucursales_taller_ruta(taller)
                     dir_ent_elegida = dirs_ent_t[0][1] if len(dirs_ent_t) == 1 else ""
                     if len(dirs_ent_t) > 1:
                         mapa_de = dict(dirs_ent_t)
@@ -5952,7 +5956,7 @@ elif vista_actual == "🚚 Rutas":
                         dir_ent_elegida = mapa_de.get(sel_de, "")
 
                     notas_ent = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Dejar con el jefe de taller", key=f"notas_ent_{taller}")
-                    
+
                     if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_ent_{taller}"):
                         seleccionados = ed_ent[ed_ent['Enviar Hoy'] == True]
                         if len(dirs_ent_t) > 1 and not dir_ent_elegida:

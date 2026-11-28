@@ -5399,6 +5399,30 @@ elif vista_actual == "📝 Remisiones":
                     if p in c_up and not any(exc in c_up for exc in excluidos): return cols[i]
             return None
 
+        def obtener_direcciones_taller_rem(taller_nombre):
+            """Devuelve lista de (etiqueta_visible, direccion_pura) si el taller tiene 1 o más sucursales."""
+            if df_catalogo.empty:
+                return []
+            c_t = buscar_col_local(df_catalogo, ["TALLER", "CDR"], ["TALLER"])
+            c_d = buscar_col_local(df_catalogo, ["DIRECCION", "DIRECCIÓN"], ["DIRECCI"])
+            c_c = buscar_col_local(df_catalogo, ["CIUDAD", "MUNICIPIO", "PLAZA"], ["CIUDAD", "MUNICIPIO"])
+            c_s = buscar_col_local(df_catalogo, ["SEGURO", "ASEGURADORA"], ["SEGURO", "ASEGURADORA"])
+            if not c_t or not c_d:
+                return []
+            m = df_catalogo[df_catalogo[c_t].astype(str).str.strip().str.upper() == str(taller_nombre).strip().upper()]
+            opciones, vistos = [], set()
+            for _, r_cat in m.iterrows():
+                d_v = str(r_cat.get(c_d, '')).strip()
+                if not d_v or d_v.lower() in ['nan', 'none'] or d_v.upper() in vistos:
+                    continue
+                vistos.add(d_v.upper())
+                ciu_v = str(r_cat.get(c_c, '')).strip() if c_c else ""
+                seg_v = str(r_cat.get(c_s, '')).strip() if c_s else ""
+                pref = " · ".join([x for x in [ciu_v, seg_v] if x and x.lower() not in ['nan', 'none']])
+                etq = f"{pref} — {d_v}" if pref else d_v
+                opciones.append((etq, d_v))
+            return opciones
+
         # --- CORRECCIÓN LÓGICA: Leemos df_completo para traer TODAS las aseguradoras ---
         col_estatus_univ = buscar_col_local(df_completo, ["ESTATUS", "STATUS"], ["ESTATUS", "STATUS"])
         col_remision_univ = buscar_col_local(df_completo, ["REMISION", "REMISIÓN", "FOLIO REMISION"], ["REMISION", "REMISIÓN"])
@@ -5481,15 +5505,40 @@ elif vista_actual == "📝 Remisiones":
                                         
                                         with st.form(f"form_rem_{aseguradora}_{taller}_{siniestro_v}"):
                                             st.markdown(f"**🚗 Siniestro: {siniestro_v} | {vehiculo_str}**")
+                                            dirs_taller_rem = obtener_direcciones_taller_rem(taller)
+                                            dir_elegida_rem = dirs_taller_rem[0][1] if len(dirs_taller_rem) == 1 else ""
+                                            if len(dirs_taller_rem) > 1:
+                                                mapa_dirs_rem = dict(dirs_taller_rem)
+                                                sel_dir_rem = st.selectbox(
+                                                    f"📍 Sucursal / Dirección para {taller} (Obligatorio verificar):",
+                                                    ["-- Seleccionar sucursal --"] + list(mapa_dirs_rem.keys()),
+                                                    key=f"sel_dir_rem_{aseguradora}_{taller}_{siniestro_v}"
+                                                )
+                                                dir_elegida_rem = mapa_dirs_rem.get(sel_dir_rem, "")
                                             piezas_a_remisionar = []
                                             for idx_pieza, row_p in df_sin_rem.reset_index().iterrows():
                                                 desc_val = str(row_p.get(col_desc_r, ''))
                                                 if st.checkbox(desc_val, value=True, key=f"chk_{aseguradora}_{siniestro_v}_{idx_pieza}_{desc_val}"):
                                                     piezas_a_remisionar.append(desc_val)
+
+                                            nota_rem_input = st.text_area(
+                                                "📝 Notas / Observaciones en Remisión (Opcional):",
+                                                placeholder="Ej. Entregar con Jefe de Taller, incluye grapas, revisar pieza al recibir...",
+                                                height=68,
+                                                key=f"nota_rem_{aseguradora}_{taller}_{siniestro_v}"
+                                            )
                                                     
                                             if st.form_submit_button("📄 Generar Remisión PDF"):
-                                                if piezas_a_remisionar:
-                                                    st.session_state['trigger_remision_manual'] = {'siniestro': siniestro_v, 'taller': taller, 'descripciones': piezas_a_remisionar}
+                                                if len(dirs_taller_rem) > 1 and not dir_elegida_rem:
+                                                    st.warning("⚠️ Este taller tiene varias sucursales. Selecciona la dirección correcta antes de generar la remisión.")
+                                                elif piezas_a_remisionar:
+                                                    st.session_state['trigger_remision_manual'] = {
+                                                        'siniestro': siniestro_v,
+                                                        'taller': taller,
+                                                        'descripciones': piezas_a_remisionar,
+                                                        'direccion_elegida': dir_elegida_rem,
+                                                        'nota_remision': nota_rem_input.strip()
+                                                    }
                                                     st.rerun()
                                                 else: st.warning("Debes seleccionar al menos una pieza para generar la remisión.")
             else:
@@ -5531,8 +5580,23 @@ elif vista_actual == "📝 Remisiones":
                             with st.expander(f"📄 Folio: {folio_limpio} | {len(df_folio)} pieza(s)", expanded=True):
                                 cols_mostrar_reimp = [c for c in [col_id_reimp, col_taller_reimp, col_desc_reimp, col_cant_reimp, col_marca_reimp, col_modelo_reimp] if c in df_folio.columns]
                                 st.dataframe(df_folio[cols_mostrar_reimp], hide_index=True, use_container_width=True)
-                                
+
+                                taller_reimp_prev = str(df_folio.iloc[0].get(col_taller_reimp, '')).strip()
+                                dirs_reimp = obtener_direcciones_taller_rem(taller_reimp_prev)
+                                dir_reimp_elegida = dirs_reimp[0][1] if len(dirs_reimp) == 1 else ""
+                                if len(dirs_reimp) > 1:
+                                    mapa_dirs_reimp = dict(dirs_reimp)
+                                    sel_dir_reimp = st.selectbox(
+                                        f"📍 Sucursal / Dirección para reimprimir ({taller_reimp_prev}):",
+                                        ["-- Seleccionar sucursal --"] + list(mapa_dirs_reimp.keys()),
+                                        key=f"sel_dir_reimp_{siniestro_a_reimprimir}_{folio_limpio}"
+                                    )
+                                    dir_reimp_elegida = mapa_dirs_reimp.get(sel_dir_reimp, "")
+
                                 if st.button(f"🖨️ Generar PDF para {folio_limpio}", key=f"btn_reimp_{siniestro_a_reimprimir}_{folio_limpio}"):
+                                    if len(dirs_reimp) > 1 and not dir_reimp_elegida:
+                                        st.warning("⚠️ Este taller tiene varias sucursales. Selecciona la dirección correcta antes de reimprimir.")
+                                        st.stop()
                                     with st.spinner("Construyendo documento histórico..."):
                                         fila_0 = df_folio.iloc[0]
                                         taller_v = str(fila_0.get(col_taller_reimp, '')).strip()
@@ -5549,13 +5613,14 @@ elif vista_actual == "📝 Remisiones":
                                             
                                         firma_digital = f"Reimpresión solicitada por: {st.session_state.get('usuario_actual', 'Sistema')}"
                                         
-                                        dir_v = ""
-                                        col_cat_taller = buscar_col_local(df_catalogo, ["TALLER", "CDR"], ["TALLER"])
-                                        if not df_catalogo.empty and col_cat_taller:
-                                            match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == taller_v.upper()]
-                                            if not match_taller.empty:
-                                                col_dir = buscar_col_local(df_catalogo, ["DIRECCION", "DIRECCIÓN"], ["DIRECCI"])
-                                                if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
+                                        dir_v = dir_reimp_elegida
+                                        if not dir_v:
+                                            col_cat_taller = buscar_col_local(df_catalogo, ["TALLER", "CDR"], ["TALLER"])
+                                            if not df_catalogo.empty and col_cat_taller:
+                                                match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == taller_v.upper()]
+                                                if not match_taller.empty:
+                                                    col_dir = buscar_col_local(df_catalogo, ["DIRECCION", "DIRECCIÓN"], ["DIRECCI"])
+                                                    if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
                                         
                                         def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
 
@@ -5775,6 +5840,52 @@ elif vista_actual == "🚚 Rutas":
 
     doc = init_connection()
 
+    def obtener_sucursales_taller_ruta(taller_nombre):
+        if df_catalogo.empty:
+            return []
+        c_t = next((c for c in df_catalogo.columns if 'TALLER' in str(c).upper()), None)
+        c_d = next((c for c in df_catalogo.columns if 'DIRECC' in str(c).upper()), None)
+        c_c = next((c for c in df_catalogo.columns if 'CIUDAD' in str(c).upper() or 'MUNICIPIO' in str(c).upper()), None)
+        c_s = next((c for c in df_catalogo.columns if 'SEGURO' in str(c).upper() or 'ASEGURADORA' in str(c).upper()), None)
+        if not c_t or not c_d:
+            return []
+        m = df_catalogo[df_catalogo[c_t].astype(str).str.strip().str.upper() == str(taller_nombre).strip().upper()]
+        opciones, vistos = [], set()
+        for _, r_cat in m.iterrows():
+            d_v = str(r_cat.get(c_d, '')).strip()
+            if not d_v or d_v.lower() in ['nan', 'none'] or d_v.upper() in vistos:
+                continue
+            vistos.add(d_v.upper())
+            ciu_v = str(r_cat.get(c_c, '')).strip() if c_c else ""
+            seg_v = str(r_cat.get(c_s, '')).strip() if c_s else ""
+            pref = " · ".join([x for x in [ciu_v, seg_v] if x and x.lower() not in ['nan', 'none']])
+            opciones.append((f"{pref} — {d_v}" if pref else d_v, d_v))
+        return opciones
+
+    def obtener_sucursales_prov_ruta(prov_nombre):
+        """Agrupa todas las sucursales de un mismo proveedor (ej. RADEC - GPE, RADEC - CENTRO) con su dirección."""
+        if df_proveedores.empty:
+            return []
+        c_p = next((c for c in df_proveedores.columns if 'PROVEEDOR' in str(c).upper() or 'NOMBRE' in str(c).upper()), None)
+        c_s = next((c for c in df_proveedores.columns if 'SUCURSAL' in str(c).upper()), None)
+        c_d = next((c for c in df_proveedores.columns if 'DIRECC' in str(c).upper()), None)
+        if not c_p or not c_d:
+            return []
+        base_p = str(prov_nombre).split(" - ")[0].strip().upper()
+        m = df_proveedores[df_proveedores[c_p].astype(str).str.strip().str.upper() == base_p]
+        opciones, vistos = [], set()
+        for _, rp in m.iterrows():
+            p_n = str(rp.get(c_p, '')).strip().upper()
+            s_n = str(rp.get(c_s, '')).strip().upper() if c_s else ""
+            d_v = str(rp.get(c_d, '')).strip()
+            nom_full = f"{p_n} - {s_n}" if (s_n and s_n not in ['NAN', 'NONE']) else p_n
+            llave_v = f"{nom_full}|{d_v.upper()}"
+            if not d_v or d_v.lower() in ['nan', 'none'] or llave_v in vistos:
+                continue
+            vistos.add(llave_v)
+            opciones.append((f"{nom_full} — {d_v}", nom_full, d_v))
+        return opciones
+
     # --- FILTROS RÁPIDOS DE RUTAS ---
     fr1, fr2, fr3 = st.columns([1.3, 1.2, 1.3])
     with fr1:
@@ -5829,7 +5940,31 @@ elif vista_actual == "🚚 Rutas":
                         "Enviar Hoy": st.column_config.CheckboxColumn("🚚 Enviar Hoy", default=False),
                         col_id: st.column_config.TextColumn("Pedido / Siniestro", disabled=True),
                         'Vehiculo_Info': st.column_config.TextColumn("Vehículo", disabled=True),
-                        col_desc: st.column_config.TextColumn("Descripción", disabled=True)
+                        col_desc: st.column_config.TextColumn("Descripción", disabled=Truedirs_ent_t = obtener_sucursales_taller_ruta(taller)
+                    dir_ent_elegida = dirs_ent_t[0][1] if len(dirs_ent_t) == 1 else ""
+                    if len(dirs_ent_t) > 1:
+                        mapa_de = dict(dirs_ent_t)
+                        sel_de = st.selectbox(
+                            f"📍 Sucursal / Dirección para {taller} (Obligatorio confirmar):",
+                            ["-- Seleccionar sucursal --"] + list(mapa_de.keys()),
+                            key=f"sel_dir_ent_{taller}"
+                        )
+                        dir_ent_elegida = mapa_de.get(sel_de, "")
+
+                    notas_ent = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Dejar con el jefe de taller", key=f"notas_ent_{taller}")
+                    
+                    if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_ent_{taller}"):
+                        seleccionados = ed_ent[ed_ent['Enviar Hoy'] == True]
+                        if len(dirs_ent_t) > 1 and not dir_ent_elegida:
+                            st.warning("⚠️ Este taller tiene varias sucursales. Selecciona la dirección correcta antes de despachar.")
+                        elif not seleccionados.empty:
+                            df_envio = df_taller.loc[seleccionados.index].copy()
+                            if dir_ent_elegida:
+                                df_envio['Direccion_Manual'] = dir_ent_elegida
+                            if despachar_a_bd_rutas(df_envio, "entrega", notas_ent):
+                                st.success("¡Destino agregado a la ruta del operador!")
+                                st.rerun()
+                        else: st.warning("Selecciona al menos una pieza.")
                     }
                     ed_ent = st.data_editor(df_taller[cols_ver], column_config=cfg, hide_index=True, use_container_width=True, key=f"ent_{taller}")
                     
@@ -5866,12 +6001,27 @@ elif vista_actual == "🚚 Rutas":
                     }
                     ed_rec = st.data_editor(df_taller[cols_ver], column_config=cfg_rec, hide_index=True, use_container_width=True, key=f"rec_{taller}")
                         
+                    dirs_rec_t = obtener_sucursales_taller_ruta(taller)
+                    dir_rec_elegida = dirs_rec_t[0][1] if len(dirs_rec_t) == 1 else ""
+                    if len(dirs_rec_t) > 1:
+                        mapa_dr = dict(dirs_rec_t)
+                        sel_dr = st.selectbox(
+                            f"📍 Sucursal / Dirección para {taller} (Obligatorio confirmar):",
+                            ["-- Seleccionar sucursal --"] + list(mapa_dr.keys()),
+                            key=f"sel_dir_rec_{taller}"
+                        )
+                        dir_rec_elegida = mapa_dr.get(sel_dr, "")
+
                     notas_rec = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Pedir acuse de recibo físico", key=f"notas_rec_{taller}")
                         
                     if st.button(f"➕ Enviar Selección a Ruta", key=f"btn_rec_{taller}"):
                         seleccionados = ed_rec[ed_rec['Enviar Hoy'] == True]
-                        if not seleccionados.empty:
+                        if len(dirs_rec_t) > 1 and not dir_rec_elegida:
+                            st.warning("⚠️ Este taller tiene varias sucursales. Selecciona la dirección correcta antes de despachar.")
+                        elif not seleccionados.empty:
                             df_envio = df_taller.loc[seleccionados.index].copy()
+                            if dir_rec_elegida:
+                                df_envio['Direccion_Manual'] = dir_rec_elegida
                             if despachar_a_bd_rutas(df_envio, "recoleccion", notas_rec):
                                 st.success("¡Recolección asignada al operador!")
                                 st.rerun()
@@ -5996,6 +6146,25 @@ elif vista_actual == "🚚 Rutas":
                                 "Estatus_Real": st.column_config.TextColumn("Estatus", disabled=True)
                             }
                             ed_comp = st.data_editor(df_prov[cols_ver], column_config=cfg_comp, hide_index=True, use_container_width=True, key=f"gest_{prov}")
+
+                            sucs_prov_c = obtener_sucursales_prov_ruta(prov)
+                            prov_despacho_final = prov
+                            dir_prov_despacho = ""
+                            if len(sucs_prov_c) > 1:
+                                mapa_sp = {etq: (nom_f, d_f) for etq, nom_f, d_f in sucs_prov_c}
+                                lista_etq_sp = list(mapa_sp.keys())
+                                idx_def_sp = next((i for i, (_, nom_f, _) in enumerate(sucs_prov_c) if nom_f == str(prov).strip().upper()), 0)
+                                sel_sp = st.selectbox(
+                                    f"📍 Confirmar Sucursal / Dirección de {str(prov).split(' - ')[0].strip()}:",
+                                    lista_etq_sp,
+                                    index=idx_def_sp,
+                                    key=f"sel_suc_prov_{prov}"
+                                )
+                                prov_despacho_final, dir_prov_despacho = mapa_sp[sel_sp]
+                            elif len(sucs_prov_c) == 1:
+                                st.caption(f"📍 **Dirección:** {sucs_prov_c[0][2]}")
+                                dir_prov_despacho = sucs_prov_c[0][2]
+
                             notas_comp = st.text_input("📝 Instrucciones para el Operador:", placeholder="Ej. Pagar en efectivo y traer factura...", key=f"notas_gest_{prov}")
 
                             k_ver_qr_c = f"ver_qr_comp_{prov}"
@@ -6026,7 +6195,9 @@ elif vista_actual == "🚚 Rutas":
                                                 st.warning(f"No se pudo adjuntar {f_c.name}: {e_qr}")
 
                                     df_envio = df_prov.loc[seleccionados.index].copy()
-                                    df_envio['Proveedor'] = prov
+                                    df_envio['Proveedor'] = prov_despacho_final
+                                    if dir_prov_despacho:
+                                        df_envio['Direccion_Manual'] = dir_prov_despacho
                                     if col_id: df_envio[col_id] = df_envio['Siniestro_Col']
                                     if col_desc: df_envio[col_desc] = df_envio['Pieza_Col']
                                     if col_vin: df_envio[col_vin] = df_envio['VIN_Real']
@@ -7695,10 +7866,19 @@ if permiso_edicion:
     fecha_hoy_sistema = datetime.datetime.now(tz_mx).strftime('%d/%b/%y')
 
     if trigger_rem:
+        dir_trig = str(trigger_rem.get('direccion_elegida', '')).strip()
+        nota_trig = str(trigger_rem.get('nota_remision', '')).strip()
         for desc in trigger_rem['descripciones']:
             k = generar_llave(trigger_rem['siniestro'], desc)
             orig = originales.get(k, {'remision_bool': False})
-            cambios_a_guardar.setdefault(k, {}).update({'estatus': 'EN TRANSITO', 'imprimir_remision': True, 'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'), 'fecha_envio': fecha_hoy_sistema})
+            cambios_a_guardar.setdefault(k, {}).update({
+                'estatus': 'EN TRANSITO',
+                'imprimir_remision': True,
+                'usuario_rem': st.session_state.get('usuario_actual', 'Sistema'),
+                'fecha_envio': fecha_hoy_sistema,
+                'direccion_elegida': dir_trig,
+                'nota_remision': nota_trig
+            })
             if not orig['remision_bool']: cambios_a_guardar[k]['generar_nuevo_folio'] = True
 
     if hay_ediciones_activas:
@@ -8294,24 +8474,34 @@ if permiso_edicion:
                             modelo_v = keys[agrupadores.index(col_modelo_univ)] if col_modelo_univ in agrupadores else ""
                             
                             folio_str_print = "S/N"
+                            dir_elegida_pdf = ""
+                            nota_rem_pdf = ""
                             for _, row_rem in df_g.iterrows():
                                 key_rem = generar_llave(row_rem.get(col_id_univ, ''), row_rem.get(col_desc_univ, ''))
-                                if key_rem in cambios_a_guardar and 'remision_num' in cambios_a_guardar[key_rem]:
-                                    folio_str_print = cambios_a_guardar[key_rem]['remision_num']; break
+                                if key_rem in cambios_a_guardar:
+                                    if folio_str_print == "S/N" and 'remision_num' in cambios_a_guardar[key_rem]:
+                                        folio_str_print = cambios_a_guardar[key_rem]['remision_num']
+                                    if not dir_elegida_pdf and cambios_a_guardar[key_rem].get('direccion_elegida'):
+                                        dir_elegida_pdf = str(cambios_a_guardar[key_rem]['direccion_elegida']).strip()
+                                    if not nota_rem_pdf and cambios_a_guardar[key_rem].get('nota_remision'):
+                                        nota_rem_pdf = str(cambios_a_guardar[key_rem]['nota_remision']).strip()
+                                    if folio_str_print != "S/N" and dir_elegida_pdf and nota_rem_pdf:
+                                        break
                             
                             fecha_actual = datetime.datetime.now(tz_mx)
                             fecha_header = fecha_actual.strftime('%d/%b/%Y').upper()
                             firma_digital = f"Generado por: {usuario_print}"
                             
-                            dir_v = ""
-                            col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
-                            if not df_catalogo.empty and col_cat_taller:
-                                match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == str(taller_v).strip().upper()]
-                                if not match_taller.empty:
-                                    col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
-                                    if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
+                            dir_v = dir_elegida_pdf
+                            if not dir_v:
+                                col_cat_taller = next((c for c in df_catalogo.columns if "TALLER" in str(c).upper()), None)
+                                if not df_catalogo.empty and col_cat_taller:
+                                    match_taller = df_catalogo[df_catalogo[col_cat_taller].astype(str).str.strip().str.upper() == str(taller_v).strip().upper()]
+                                    if not match_taller.empty:
+                                        col_dir = next((c for c in df_catalogo.columns if "DIRECCI" in str(c).upper()), None)
+                                        if col_dir: dir_v = str(match_taller.iloc[0].get(col_dir, '')).strip()
+                                    else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
                                 else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
-                            else: avisos_unicos.add(f"⚠️ AVISO: El CDR '{taller_v}' no está registrado.")
 
                             def limpiar_texto(txt): return str(txt).encode('latin-1', 'replace').decode('latin-1')
 
@@ -8350,7 +8540,17 @@ if permiso_edicion:
                                     if not cant_v.strip() or cant_v == 'nan': cant_v = '1'
                                     pdf.set_xy(x_offset, y_item); pdf.cell(15, 5, limpiar_texto(cant_v), border=1, align='C'); pdf.cell(120, 5, limpiar_texto(str(row_rem.get(col_desc_univ, '')))[:80], border=1)
                                     y_item += 5
-                                    
+
+                                if nota_rem_pdf:
+                                    y_nota = max(y_item + 6, 154) if y_item <= 168 else y_item + 3
+                                    pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
+                                    pdf.set_xy(x_offset, y_nota); pdf.cell(135, 5, " NOTAS / OBSERVACIONES", border=1, fill=True)
+                                    pdf.set_font("Arial", '', 7)
+                                    pdf.set_left_margin(x_offset)
+                                    pdf.set_xy(x_offset, y_nota + 5)
+                                    pdf.multi_cell(135, 4.2, limpiar_texto(nota_rem_pdf)[:420], border=1)
+                                    pdf.set_left_margin(10)
+
                                 pdf.set_xy(x_offset, 192); pdf.set_font("Arial", 'I', 6); pdf.set_text_color(120, 120, 120); pdf.cell(135, 4, limpiar_texto(firma_digital), align='R')
 
                             dibujar_bloque_remision(10)

@@ -3,6 +3,7 @@ import re
 import time
 import datetime
 import sys
+import base64
 from playwright.sync_api import sync_playwright
 import gspread
 from google.oauth2.service_account import Credentials
@@ -111,6 +112,126 @@ def obtener_mapa_columnas_lista(encabezados):
             
     return mapa
 
+def obtener_carpeta_pdfs_multi():
+    """Ubica automáticamente la carpeta 'Siniestros Multi' en tu OneDrive local."""
+    candidatos = [
+        r"C:\Users\dell\OneDrive\PMR\Automatizacion PMR\Siniestros Multi",
+        os.path.join(os.path.expanduser("~"), "OneDrive", "PMR", "Automatizacion PMR", "Siniestros Multi"),
+        os.path.join(os.environ.get("OneDrive", ""), "PMR", "Automatizacion PMR", "Siniestros Multi"),
+        os.path.join(os.environ.get("OneDriveConsumer", ""), "PMR", "Automatizacion PMR", "Siniestros Multi"),
+    ]
+    for ruta in candidatos:
+        if ruta and os.path.isdir(os.path.dirname(ruta)):
+            os.makedirs(ruta, exist_ok=True)
+            return ruta
+    fallback = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Siniestros Multi")
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
+
+def guardar_pdf_siniestro_multi(context, frame_derecho, num_siniestro, carpeta_destino, forzar=False):
+    """Intercepta el formulario oficial print_part_pend_action.do y guarda el PDF idéntico a Chrome."""
+    os.makedirs(carpeta_destino, exist_ok=True)
+    nombre_seguro = re.sub(r'[\\/:*?"<>|]', '_', str(num_siniestro).strip())
+    ruta_pdf = os.path.join(carpeta_destino, f"{nombre_seguro}.pdf")
+
+    if os.path.exists(ruta_pdf) and os.path.getsize(ruta_pdf) > 2000 and not forzar:
+        return "EXISTE", ruta_pdf
+
+    popup = None
+    try:
+        with context.expect_page(timeout=15000) as popup_info:
+            disparado = frame_derecho.evaluate(r"""
+                () => {
+                    const f = document.forms['frmMain'] || document.querySelector('form[action*="print"]');
+                    if (!f) return false;
+                    const origTarget = f.getAttribute('target') || '';
+                    const origSubmit = f.submit;
+                    let submitted = false;
+                    f.submit = function() {
+                        submitted = true;
+                        this.target = '_blank';
+                        HTMLFormElement.prototype.submit.call(this);
+                        this.target = origTarget;
+                    };
+                    try {
+                        if (typeof printAction === 'function') {
+                            printAction();
+                        }
+                    } catch (e) {}
+                    if (!submitted) {
+                        f.target = '_blank';
+                        HTMLFormElement.prototype.submit.call(f);
+                        f.target = origTarget;
+                    }
+                    f.submit = origSubmit;
+                    return true;
+                }
+            """)
+            if not disparado:
+                return "ERROR", "No se encontró el formulario frmMain"
+
+        popup = popup_info.value
+        popup.on("dialog", lambda dialog: dialog.accept())
+        popup.wait_for_load_state("networkidle", timeout=20000)
+
+        # Esperar a que terminen de cargar el logo y la marca de agua "Listado Informativo"
+        try:
+            popup.evaluate("""
+                () => Promise.all(
+                    Array.from(document.images).map(img =>
+                        img.complete ? Promise.resolve() : new Promise(res => {
+                            img.onload = res;
+                            img.onerror = res;
+                            setTimeout(res, 4000);
+                        })
+                    )
+                )
+            """)
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+        pdf_bytes = None
+        try:
+            cdp = context.new_cdp_session(popup)
+            res_pdf = cdp.send("Page.printToPDF", {
+                "landscape": False,
+                "displayHeaderFooter": False,
+                "printBackground": True,
+                "preferCSSPageSize": True,
+                "paperWidth": 8.5,
+                "paperHeight": 11.0,
+                "marginTop": 0.4,
+                "marginBottom": 0.4,
+                "marginLeft": 0.4,
+                "marginRight": 0.4
+            })
+            pdf_bytes = base64.b64decode(res_pdf["data"])
+            try:
+                cdp.detach()
+            except Exception:
+                pass
+        except Exception:
+            pdf_bytes = popup.pdf(
+                format="Letter",
+                print_background=True,
+                margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
+            )
+
+        if pdf_bytes:
+            with open(ruta_pdf, "wb") as f_out:
+                f_out.write(pdf_bytes)
+            return "GUARDADO", ruta_pdf
+        return "ERROR", "PDF vacío"
+    except Exception as e:
+        return "ERROR", str(e)
+    finally:
+        if popup:
+            try:
+                popup.close()
+            except Exception:
+                pass
+
 def extraer_datos_multi():
     if "--visual" in sys.argv:
         modo_headless = False
@@ -127,6 +248,9 @@ def extraer_datos_multi():
 
     usuario_activo_portal, password_activo_portal = cargar_credenciales_dinamicas()
     print(f"🔑 Credenciales cargadas desde BD_CONFIG_BOTS para usuario: {usuario_activo_portal}")
+    carpeta_pdfs_multi = obtener_carpeta_pdfs_multi()
+    forzar_pdfs = "--refrescar-pdfs" in sys.argv
+    print(f"📂 Carpeta de respaldo PDFs: {carpeta_pdfs_multi}")
 
     partidas_extraidas = []
     ya_procesados = set() 
@@ -139,6 +263,7 @@ def extraer_datos_multi():
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=modo_headless)
             context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            context.add_init_script("window.print = function() {};")
             page = context.new_page()
             page.on("dialog", lambda dialog: dialog.accept())
 
@@ -272,12 +397,26 @@ def extraer_datos_multi():
                             })
                             partidas_siniestro += 1
                         
+                        estado_pdf, info_pdf = guardar_pdf_siniestro_multi(
+                            context,
+                            frame_derecho,
+                            num_siniestro,
+                            carpeta_pdfs_multi,
+                            forzar=forzar_pdfs
+                        )
+                        if estado_pdf == "GUARDADO":
+                            tag_pdf = " | 📄 PDF guardado"
+                        elif estado_pdf == "EXISTE":
+                            tag_pdf = " | 📄 PDF ya respaldado"
+                        else:
+                            tag_pdf = f" | ⚠️ PDF omitido ({info_pdf})"
+
                         ya_procesados.add(num_siniestro) 
                         
                         if partidas_siniestro == 0:
-                            print(f"[{idx+1}/{total_s}] | Siniestro {num_siniestro} procesado. ⚠️ [!] No devolvió partidas.")
+                            print(f"[{idx+1}/{total_s}] | Siniestro {num_siniestro} procesado. ⚠️ [!] No devolvió partidas.{tag_pdf}")
                         else:
-                            print(f"[{idx+1}/{total_s}] | Siniestro {num_siniestro} procesado.")
+                            print(f"[{idx+1}/{total_s}] | Siniestro {num_siniestro} procesado.{tag_pdf}")
 
                         try:
                             btn_regresar = frame_derecho.locator("input[value='Regresar'], button:has-text('Regresar')")

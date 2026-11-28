@@ -5969,19 +5969,7 @@ elif vista_actual == "🚚 Rutas":
                                 st.success("¡Destino agregado a la ruta del operador!")
                                 st.rerun()
                         else: st.warning("Selecciona al menos una pieza.")
-                    }
-                    ed_ent = st.data_editor(df_taller[cols_ver], column_config=cfg, hide_index=True, use_container_width=True, key=f"ent_{taller}")
                     
-                    notas_ent = st.text_input("📝 Instrucciones / Notas:", placeholder="Ej. Dejar con el jefe de taller", key=f"notas_ent_{taller}")
-                    
-                    if st.button(f"➕ Enviar Selección a {taller}", key=f"btn_ent_{taller}"):
-                        seleccionados = ed_ent[ed_ent['Enviar Hoy'] == True]
-                        if not seleccionados.empty:
-                            df_envio = df_taller.loc[seleccionados.index].copy()
-                            if despachar_a_bd_rutas(df_envio, "entrega", notas_ent):
-                                st.success("¡Destino agregado a la ruta del operador!")
-                                st.rerun()
-                        else: st.warning("Selecciona al menos una pieza.")
         else:
             st.success("No hay piezas de Nuevo León pendientes de envío local a CDR.")
 
@@ -8546,7 +8534,7 @@ if permiso_edicion:
                                     y_item += 5
 
                                 if nota_rem_pdf:
-                                    y_nota = max(y_item + 6, 154) if y_item <= 168 else y_item + 3
+                                    y_nota = y_item + 4
                                     pdf.set_fill_color(220, 220, 220); pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 7)
                                     pdf.set_xy(x_offset, y_nota); pdf.cell(135, 5, " NOTAS / OBSERVACIONES", border=1, fill=True)
                                     pdf.set_font("Arial", '', 7)
